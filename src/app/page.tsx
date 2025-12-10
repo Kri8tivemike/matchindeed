@@ -1,65 +1,148 @@
+"use client";
 import Image from "next/image";
+import { ChevronDown } from "lucide-react";
+import { useState, FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import AgeSelect from "@/components/AgeSelect";
+import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
 
 export default function Home() {
+  const router = useRouter();
+  const [seeking, setSeeking] = useState<string>("");
+  const [ageMin, setAgeMin] = useState<number | null>(35);
+  const [ageMax, setAgeMax] = useState<number | null>(45);
+  const [city, setCity] = useState<string>(
+    process.env.NEXT_PUBLIC_DEFAULT_CITY ?? "London, United Kingdom"
+  );
+  const [errors, setErrors] = useState<{ seeking?: string; age?: string; city?: string }>({});
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    
+    // Reset errors
+    setErrors({});
+
+    // Validate form
+    const newErrors: { seeking?: string; age?: string; city?: string } = {};
+    
+    if (!seeking) {
+      newErrors.seeking = "Please select who you're interested in";
+    }
+    
+    if (!ageMin || !ageMax) {
+      newErrors.age = "Please select both minimum and maximum age";
+    } else if (ageMin > ageMax) {
+      newErrors.age = "Minimum age cannot be greater than maximum age";
+    }
+    
+    if (!city || city.trim() === "") {
+      newErrors.city = "Please enter a location";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    // Store search preferences in sessionStorage to use during registration
+    sessionStorage.setItem("searchPreferences", JSON.stringify({
+      seeking,
+      ageMin,
+      ageMax,
+      city
+    }));
+
+    // Redirect to registration page
+    router.push("/register");
+  };
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="min-h-screen w-full bg-gradient-to-br from-[#1e2a78] via-[#2a44a3] to-[#4463cf]">
+      <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6 text-white/90">
+        <nav className="hidden gap-8 md:flex">
+          <a className="border-b-2 border-white/80 pb-1" href="#">Home</a>
+          <a className="hover:opacity-100 opacity-80" href="#">How It Works</a>
+          <a className="hover:opacity-100 opacity-80" href="#">Pricing</a>
+          <a className="hover:opacity-100 opacity-80" href="#">FAQ</a>
+          <a className="hover:opacity-100 opacity-80" href="#">About Us</a>
+          <a className="hover:opacity-100 opacity-80" href="#">Contact</a>
+        </nav>
+        <div className="flex items-center gap-3 text-xs md:text-sm text-white/80">
+          <a 
+            href="/login" 
+            className="rounded-full border border-white/30 px-4 py-1 bg-white/5 hover:bg-white/10 transition-colors"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
+            Login
           </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          <a 
+            href="/register" 
+            className="rounded-full border border-white/20 px-4 py-1 bg-white/10 hover:bg-white/20 transition-colors"
           >
-            Documentation
+            Sign Up
           </a>
         </div>
-      </main>
+      </header>
+      <div className="mx-auto flex max-w-7xl items-center justify-center px-6 py-12 md:py-24">
+        <div className="w-full max-w-sm rounded-[28px] bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-sm">
+          <div className="flex items-center justify-center px-8 pt-8">
+            <Image src="/matchindeed.svg" alt="Matchindeed" width={150} height={40} priority />
+          </div>
+
+          <form onSubmit={handleSubmit} className="px-8 pb-10 pt-6">
+            <div className="mb-6">
+              <label className="sr-only" htmlFor="seeking">Who are you interested in?</label>
+              <div className="relative">
+                <select
+                  id="seeking"
+                  value={seeking}
+                  onChange={(e) => setSeeking(e.target.value)}
+                  className={`w-full appearance-none border-b bg-transparent py-3 pr-8 text-gray-700 placeholder-gray-400 focus:outline-none ${
+                    errors.seeking ? "border-red-400 focus:border-red-500" : "border-gray-300 focus:border-[#1f419a]"
+                  }`}
+                  required
+                >
+                  <option value="" disabled>Who are you interested in?</option>
+                  <option value="man-woman">I'm a man seeking a woman</option>
+                  <option value="woman-man">I'm a woman seeking a man</option>
+                  <option value="man-man">I'm a man seeking a man</option>
+                  <option value="woman-woman">I'm a woman seeking a woman</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+              </div>
+              {errors.seeking && (
+                <p className="mt-1 text-xs text-red-500">{errors.seeking}</p>
+              )}
+            </div>
+
+            <div className="mb-6">
+              <div className="mb-2 text-gray-800">Between Ages:</div>
+              <div className="flex items-center gap-3">
+                <AgeSelect value={ageMin} onChange={setAgeMin} min={18} max={100} placeholder="Min" />
+                <span className="text-gray-600">and</span>
+                <AgeSelect value={ageMax} onChange={setAgeMax} min={18} max={100} placeholder="Max" />
+              </div>
+              {errors.age && (
+                <p className="mt-1 text-xs text-red-500">{errors.age}</p>
+              )}
+            </div>
+
+            <div className="mb-8">
+              <GooglePlacesAutocomplete value={city} onChange={(v) => setCity(v)} placeholder="Enter your city" />
+              {errors.city && (
+                <p className="mt-1 text-xs text-red-500">{errors.city}</p>
+              )}
+            </div>
+
+            <div className="flex justify-center">
+              <button
+                type="submit"
+                className="inline-flex h-12 items-center justify-center rounded-full bg-[#1f419a] px-6 text-white shadow-md transition-colors hover:bg-[#17357b] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                View singles
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

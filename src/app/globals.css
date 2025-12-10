@@ -76,6 +76,22 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
+
+  /* App brand palette (from Project scope/Color Theme.MD) */
+  --brand-primary: #FF5A7A;
+  --brand-primary-700: #E84B67;
+  --brand-secondary: #2F80ED;
+  --accent: #FFD166;
+  --surface: #FFFFFF;
+  --surface-2: #F6F8FB;
+  --muted: #F2F4F8;
+  --text-primary: #0F1724;
+  --text-secondary: #6B7280;
+  --border: #E6E9EE;
+  --success: #16A34A;
+  --error: #EF4444;
+  --info: #0EA5E9;
+  --shadow: rgba(16,24,40,0.06);
 }
 
 .dark {
@@ -119,4 +135,59 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+.range-brand {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--muted);
+  accent-color: var(--brand-primary);
+}
+.range-brand::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--border);
+}
+.range-brand::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  width: 18px;
+  border-radius: 9999px;
+  background: var(--brand-primary);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 4px color(from var(--brand-primary) srgb r g b / 0.25);
+  margin-top: -5px;
+}
+.range-brand::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--border);
+}
+.range-brand::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+  border-radius: 9999px;
+  background: var(--brand-primary);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 4px color(from var(--brand-primary) srgb r g b / 0.25);
+}
+
+.modal-scroll {
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+}
+.modal-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+.modal-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 10px;
+}
+.modal-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 9999px;
+  border: 3px solid transparent;
 }
