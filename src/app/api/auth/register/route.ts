@@ -1,15 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { verifyTurnstileToken } from "@/lib/turnstile";
+import { checkSignupFraud } from "@/lib/ipqualityscore";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, firstName, lastName } = await request.json();
+    const { email, password, firstName, lastName, turnstileToken } = await request.json();
 
     if (!email || !password) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
+    }
+
+    // Verify Cloudflare Turnstile token (bot protection)
+    const turnstileResult = await verifyTurnstileToken(turnstileToken || "");
+    if (!turnstileResult.success) {
+      return NextResponse.json(
+        { error: "Bot verification failed. Please refresh and try again." },
+        { status: 403 }
+      );
+    }
+
+    // IPQualityScore fraud check (disposable emails, VPNs, bots)
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+    const fraudResult = await checkSignupFraud(clientIp, email);
+    if (!fraudResult.allowed) {
+      return NextResponse.json(
+        { error: fraudResult.reason || "Registration blocked due to suspicious activity." },
+        { status: 403 }
+      );
     }
 
     // Create Supabase admin client for user creation
@@ -20,22 +44,43 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Create user in Supabase Auth
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true, // Auto-confirm email for now
+    // Create a regular client to trigger the verification email
+    const supabaseClient = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
     });
 
-    if (authError) {
-      return NextResponse.json({ error: authError.message }, { status: 400 });
+    // Register user and automatically send verification email
+    const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001'}/verify-email`,
+        data: {
+          first_name: firstName || null,
+          last_name: lastName || null,
+        },
+      },
+    });
+
+    if (signUpError) {
+      const msg = signUpError.message;
+      const isRateLimit =
+        msg?.toLowerCase().includes("rate limit") ||
+        msg?.toLowerCase().includes("email rate limit exceeded");
+      const userMessage = isRateLimit
+        ? "Verification email limit reached. Please try again in about an hour, or contact support."
+        : msg;
+      return NextResponse.json({ error: userMessage }, { status: 400 });
     }
 
-    if (!authData.user) {
+    if (!signUpData.user) {
       return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
     }
 
-    const userId = authData.user.id;
+    const userId = signUpData.user.id;
 
     // Create account record
     const { error: accountError } = await supabaseAdmin.from("accounts").upsert({
@@ -77,19 +122,35 @@ export async function POST(request: NextRequest) {
       console.error("Progress creation error:", progressError);
     }
 
-    // Initialize wallet
-    await supabaseAdmin.from("wallets").upsert({
-      user_id: userId,
-      balance_cents: 0,
-    });
+    // Initialize wallet only if it doesn't exist
+    const { data: existingWallet } = await supabaseAdmin
+      .from("wallets")
+      .select("user_id")
+      .eq("user_id", userId)
+      .single();
 
-    // Initialize credits
-    await supabaseAdmin.from("credits").upsert({
-      user_id: userId,
-      total: 0,
-      used: 0,
-      rollover: 0,
-    });
+    if (!existingWallet) {
+      await supabaseAdmin.from("wallets").insert({
+        user_id: userId,
+        balance_cents: 0,
+      });
+    }
+
+    // Initialize credits only if they don't exist
+    const { data: existingCredits } = await supabaseAdmin
+      .from("credits")
+      .select("user_id")
+      .eq("user_id", userId)
+      .single();
+
+    if (!existingCredits) {
+      await supabaseAdmin.from("credits").insert({
+        user_id: userId,
+        total: 0,
+        used: 0,
+        rollover: 0,
+      });
+    }
 
     // Return success with user data
     return NextResponse.json({

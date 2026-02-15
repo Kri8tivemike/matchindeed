@@ -1,0 +1,16 @@
+# MatchIndeed Robots.txt
+# https://www.matchindeed.com
+
+User-agent: *
+Allow: /
+Disallow: /dashboard/
+Disallow: /admin/
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /reset-password
+Disallow: /forgot-password
+Disallow: /verify-email
+
+# Sitemap
+Sitemap: https://www.matchindeed.com/sitemap.xml

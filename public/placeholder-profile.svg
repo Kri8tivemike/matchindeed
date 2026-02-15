@@ -1,0 +1,26 @@
+<svg width="400" height="500" viewBox="0 0 400 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Soft gradient background -->
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="400" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#eef2ff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+    <linearGradient id="iconGrad" x1="160" y1="120" x2="240" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#93a3d1"/>
+      <stop offset="100%" stop-color="#7b8ec4"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="500" fill="url(#bgGrad)"/>
+  <!-- Person silhouette head -->
+  <circle cx="200" cy="175" r="55" fill="url(#iconGrad)" opacity="0.6"/>
+  <!-- Person silhouette body -->
+  <ellipse cx="200" cy="340" rx="85" ry="70" fill="url(#iconGrad)" opacity="0.5"/>
+  <!-- Camera icon outline -->
+  <g transform="translate(170, 400)" opacity="0.4">
+    <rect x="0" y="8" width="60" height="40" rx="8" stroke="#6b7ec2" stroke-width="2.5" fill="none"/>
+    <circle cx="30" cy="28" r="10" stroke="#6b7ec2" stroke-width="2.5" fill="none"/>
+    <path d="M18 8 L24 0 L36 0 L42 8" stroke="#6b7ec2" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- Label -->
+  <text x="200" y="472" text-anchor="middle" fill="#6b7ec2" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="500" letter-spacing="0.5">No Photo Available</text>
+</svg>

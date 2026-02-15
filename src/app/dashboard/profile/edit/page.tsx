@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Sparkles, EyeOff, Mail, Compass, Heart, Search as SearchIcon, MessageCircle, ArrowLeft, ChevronRight, Camera, Upload, X, Check } from "lucide-react";
+import { Sparkles, EyeOff, Mail, Compass, Heart, Search as SearchIcon, MessageCircle, ArrowLeft, ChevronRight, Camera, Upload, X, Check, Save, Loader2, ArrowUp, ArrowDown, Star } from "lucide-react";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
+import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
+import { saveFormDraft, loadFormDraft, clearFormDraft, hasFormDraft, getDraftTimestamp } from "@/lib/form-autosave";
 
 type ProfileData = {
   birthday: string;
@@ -35,6 +37,7 @@ type ProfileData = {
 
 export default function EditProfilePage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<ProfileData>({
@@ -66,15 +69,137 @@ export default function EditProfilePage() {
   const [heightInches, setHeightInches] = useState(76); // 6'4" default
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | null>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const totalSteps = 23;
+  const FORM_DRAFT_KEY = "profile_edit";
+
+  // Load draft data first (before database)
+  useEffect(() => {
+    const loadDraft = () => {
+      const draft = loadFormDraft<ProfileData & { heightInches?: number; currentStep?: number }>(FORM_DRAFT_KEY);
+      if (draft) {
+        // Restore form data from draft
+        setFormData({
+          birthday: draft.birthday || "02/28/2003",
+          firstName: draft.firstName || "",
+          gender: draft.gender || "",
+          location: draft.location || "Manchester, United Kingdom",
+          aboutYourself: draft.aboutYourself || "",
+          height: draft.height || "6'4\" • 193 cm",
+          ethnicity: draft.ethnicity || ["I'd rather not say"],
+          religion: draft.religion || "Protestant",
+          education: draft.education || "High school",
+          languages: draft.languages || [],
+          relationshipStatus: draft.relationshipStatus || "Single",
+          hasChildren: draft.hasChildren || "Doesn't have kids but wants them",
+          wantsChildren: draft.wantsChildren || "Not sure",
+          smoking: draft.smoking || "Smoke Smoke",
+          relocationPlan: draft.relocationPlan || "Not ready for relocation plan",
+          readyToMarry: draft.readyToMarry || "Get married yes, settle down no",
+          relationshipType: draft.relationshipType || "Hangout",
+          careerStability: draft.careerStability || "Job Security",
+          longTermGoals: draft.longTermGoals || "Career & Professional Growth",
+          emotionalConnection: draft.emotionalConnection || "Intellectual Emotional Connection",
+          loveLanguages: draft.loveLanguages || ["Words of Affirmation"],
+          personality: draft.personality || "",
+          photos: draft.photos || [],
+        });
+        
+        if (draft.heightInches) {
+          setHeightInches(draft.heightInches);
+        }
+        
+        if (draft.currentStep) {
+          setCurrentStep(draft.currentStep);
+        }
+
+        // Show notification that draft was loaded
+        const draftTime = getDraftTimestamp(FORM_DRAFT_KEY);
+        if (draftTime) {
+          const timeAgo = new Date(draftTime);
+          const hoursAgo = Math.floor((Date.now() - timeAgo.getTime()) / (1000 * 60 * 60));
+          console.log(`Draft loaded from ${hoursAgo} hour(s) ago`);
+        }
+      }
+    };
+
+    loadDraft();
+  }, []);
+
+  // Auto-save form data whenever it changes (debounced)
+  useEffect(() => {
+    // Don't save if data hasn't loaded yet
+    if (!dataLoaded) return;
+
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set saving status
+    setSaveStatus("saving");
+
+    // Debounce save by 1 second
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+        // Save form data along with current step and height
+        const draftData = {
+          ...formData,
+          heightInches,
+          currentStep,
+        };
+        saveFormDraft(FORM_DRAFT_KEY, draftData);
+        setSaveStatus("saved");
+        
+        // Clear saved status after 2 seconds
+        setTimeout(() => {
+          setSaveStatus(null);
+        }, 2000);
+      } catch (error) {
+        console.error("Error auto-saving form:", error);
+        setSaveStatus(null);
+      }
+    }, 1000);
+
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [formData, heightInches, currentStep, dataLoaded]);
 
   // Load existing profile data
   useEffect(() => {
     const loadProfileData = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        // Get session first, then try to refresh if needed
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        let user = session?.user;
+        
+        // If session exists but might be stale, refresh it
+        if (session) {
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          if (refreshData.session?.user) {
+            user = refreshData.session.user;
+          }
+        }
+        
+        if (!user) {
+          // Try getUser as final fallback
+          const { data: { user: directUser } } = await supabase.auth.getUser();
+          user = directUser;
+        }
+        
+        // If still no user, redirect to login
+        if (!user) {
+          console.log("No authenticated user found, redirecting to login...");
+          router.push("/login?next=/dashboard/profile/edit");
+          return;
+        }
 
         const { data: profile } = await supabase
           .from("user_profiles")
@@ -82,7 +207,9 @@ export default function EditProfilePage() {
           .eq("user_id", user.id)
           .single();
 
-        if (profile) {
+        // If profile exists and is completed, load from database (overwrites draft)
+        // If no profile or profile not completed, draft data (already loaded) takes precedence
+        if (profile && profile.profile_completed) {
           // Format date of birth
           let birthday = "02/28/2003";
           if (profile.date_of_birth) {
@@ -143,9 +270,13 @@ export default function EditProfilePage() {
           } else if (profile.profile_photo_url) {
             setPhotoPreviews([profile.profile_photo_url]);
           }
+        } else {
+          // No profile exists - draft data (if any) was already loaded, just mark as loaded
+          console.log("No profile found - using draft data if available");
         }
       } catch (error) {
         console.error("Error loading profile:", error);
+        // Even on error, mark as loaded so draft can be used
       } finally {
         setDataLoaded(true);
       }
@@ -157,15 +288,15 @@ export default function EditProfilePage() {
   const handleNext = () => {
     // Validate current step before proceeding
     if (currentStep === 3 && !formData.gender) {
-      alert("Please select your gender");
+      toast.warning("Please select your gender");
       return;
     }
     if (currentStep === 2 && !formData.firstName.trim()) {
-      alert("Please enter your first name");
+      toast.warning("Please enter your first name");
       return;
     }
     if (currentStep === 1 && !formData.birthday) {
-      alert("Please enter your birthday");
+      toast.warning("Please enter your birthday");
       return;
     }
 
@@ -186,32 +317,49 @@ export default function EditProfilePage() {
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      // Get user - try getUser first as it's more reliable
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      // First try to refresh the session to ensure it's valid
+      let finalUser = null;
       
-      // If getUser fails, try getSession as fallback
-      let finalUser = user;
+      // Try getSession first (more reliable for checking if session exists)
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      if (userError || !user) {
-        console.warn("getUser failed, trying getSession:", userError);
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (session?.user) {
+        finalUser = session.user;
         
-        if (sessionError || !session || !session.user) {
-          console.error("Both getUser and getSession failed:", sessionError);
-          // Only redirect if we're absolutely sure there's no valid session
-          alert("Your session has expired. Please log in again.");
+        // Check if session needs refresh (expires within 5 minutes)
+        if (session.expires_at) {
+          const expiresAt = session.expires_at * 1000;
+          const fiveMinutes = 5 * 60 * 1000;
+          
+          if (expiresAt - Date.now() < fiveMinutes) {
+            console.log("Session expiring soon, refreshing...");
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            
+            if (!refreshError && refreshData.session?.user) {
+              finalUser = refreshData.session.user;
+              console.log("Session refreshed successfully");
+            }
+          }
+        }
+      } else {
+        // No session, try getUser as fallback (might have token in storage)
+        console.warn("No session found, trying getUser...");
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        
+        if (user) {
+          finalUser = user;
+        } else {
+          console.error("No session or user found:", sessionError || userError);
+          toast.error("Your session has expired. Please log in again.");
           router.push("/login");
           return;
         }
-        
-        // Use user from session
-        finalUser = session.user;
       }
       
       // Final validation
       if (!finalUser || !finalUser.id) {
         console.error("No valid user found");
-        alert("Authentication error. Please log in again.");
+        toast.error("Authentication error. Please log in again.");
         router.push("/login");
         return;
       }
@@ -224,26 +372,93 @@ export default function EditProfilePage() {
       const heightMatch = formData.height.match(/(\d+)\s*cm/);
       const heightCm = heightMatch ? parseInt(heightMatch[1]) : null;
 
-      // Upload photos to storage
-      const photoUrls: string[] = [];
-      for (let i = 0; i < formData.photos.length; i++) {
-        const file = formData.photos[i];
-        const fileExt = file.name.split(".").pop();
-        const fileName = `${finalUser.id}/${Date.now()}_${i}.${fileExt}`;
-        // Don't include bucket name in path - storage.from() already handles that
-        const filePath = fileName;
+      // Build final photo list: preserve existing URLs + upload new File objects
+      // photoPreviews contains the ordered list of all photos (URLs for existing, blob URLs for new)
+      const finalPhotoUrls: string[] = [];
+      const uploadErrors: string[] = [];
 
-        const { error: uploadError } = await supabase.storage
-          .from("profile-images")
-          .upload(filePath, file, { upsert: true });
+      // Create a map from blob URL → File for newly added photos
+      const blobToFile = new Map<string, File>();
+      for (const file of formData.photos) {
+        // Each new file has a corresponding blob:// preview URL
+        const blobUrl = URL.createObjectURL(file);
+        blobToFile.set(blobUrl, file);
+        // We can't match by blob URL easily since createObjectURL returns different values
+        // Instead, track new files by their position
+      }
 
-        if (!uploadError) {
-          const { data: { publicUrl } } = supabase.storage
-            .from("profile-images")
-            .getPublicUrl(filePath);
-          photoUrls.push(publicUrl);
+      // Determine which previews are existing URLs vs new files
+      // Existing photos start with http(s):// ; new files have blob:// URLs
+      const newFileQueue = [...formData.photos]; // new files in upload order
+
+      for (const preview of photoPreviews) {
+        if (preview.startsWith("http://") || preview.startsWith("https://")) {
+          // Existing photo URL — keep it as-is in the correct order
+          finalPhotoUrls.push(preview);
         } else {
-          console.error("Photo upload error:", uploadError);
+          // This is a blob URL for a newly uploaded file — upload next file from queue
+          const file = newFileQueue.shift();
+          if (!file) continue;
+
+          // Validate file size (5MB limit)
+          const maxSize = 5 * 1024 * 1024;
+          if (file.size > maxSize) {
+            uploadErrors.push(`Photo "${file.name}" is too large. Maximum size is 5MB.`);
+            continue;
+          }
+
+          // Validate file type
+          const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+          if (!allowedTypes.includes(file.type)) {
+            uploadErrors.push(`Photo "${file.name}" has an invalid file type. Please use JPEG, PNG, WebP, or GIF.`);
+            continue;
+          }
+
+          const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg";
+          const timestamp = Date.now();
+          const idx = finalPhotoUrls.length;
+          const filePath = `${finalUser.id}/${timestamp}_${idx}.${fileExt}`;
+
+          try {
+            const { error: uploadError } = await supabase.storage
+              .from("profile-images")
+              .upload(filePath, file, {
+                upsert: true,
+                contentType: file.type,
+                cacheControl: "3600",
+              });
+
+            if (uploadError) {
+              console.error("Photo upload error:", uploadError);
+              uploadErrors.push(`Failed to upload "${file.name}": ${uploadError.message || "Unknown error"}`);
+              continue;
+            }
+
+            const { data: { publicUrl } } = supabase.storage
+              .from("profile-images")
+              .getPublicUrl(filePath);
+
+            if (publicUrl) {
+              finalPhotoUrls.push(publicUrl);
+            } else {
+              uploadErrors.push(`Failed to get URL for "${file.name}"`);
+            }
+          } catch (error: any) {
+            console.error("Photo upload exception:", error);
+            uploadErrors.push(`Error uploading "${file.name}": ${error.message || "Unknown error"}`);
+          }
+        }
+      }
+
+      // Show errors to user if any uploads failed
+      if (uploadErrors.length > 0) {
+        const errorMessage = uploadErrors.join("\n");
+        console.error("Photo upload errors:", errorMessage);
+
+        if (finalPhotoUrls.length === 0 && photoPreviews.length > 0) {
+          throw new Error(`Failed to upload photos:\n${errorMessage}`);
+        } else if (uploadErrors.length > 0 && finalPhotoUrls.length > 0) {
+          toast.warning(`Some photos failed to upload. Continuing with ${finalPhotoUrls.length} photo(s).`);
         }
       }
 
@@ -323,7 +538,7 @@ export default function EditProfilePage() {
         emotional_connection: formData.emotionalConnection || null,
         love_languages: formData.loveLanguages.length > 0 ? formData.loveLanguages : null,
         personality_type: formData.personality || null,
-        photos: photoUrls.length > 0 ? photoUrls : null,
+        photos: finalPhotoUrls.length > 0 ? finalPhotoUrls : null,
         profile_completed: true,
       };
 
@@ -347,6 +562,10 @@ export default function EditProfilePage() {
       if (progressError) {
         console.error("Progress update error:", progressError);
       }
+
+      // Clear draft since form was successfully submitted
+      clearFormDraft(FORM_DRAFT_KEY);
+      setSaveStatus(null);
 
       // Always redirect to preferences after successful profile submission
       // Check if preferences are completed
@@ -379,15 +598,39 @@ export default function EditProfilePage() {
       }
     } catch (error: any) {
       console.error("Error saving profile:", error);
-      const errorMessage = error?.message || error?.details || "Failed to save profile. Please try again.";
+      
+      // Extract detailed error message
+      let errorMessage = "Failed to save profile. Please try again.";
+      
+      if (error?.message) {
+        errorMessage = error.message;
+      } else if (error?.details) {
+        errorMessage = error.details;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      // Log full error details for debugging
+      console.error("Full error details:", JSON.stringify({
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        code: error?.code,
+        status: error?.status,
+        error: error
+      }, null, 2));
       
       // Don't redirect to login on save errors - just show the error
       // Only redirect if it's an authentication error
-      if (error?.message?.includes("session") || error?.message?.includes("auth") || error?.message?.includes("unauthorized")) {
-        alert("Your session has expired. Please log in again.");
+      if (error?.message?.includes("session") || 
+          error?.message?.includes("auth") || 
+          error?.message?.includes("unauthorized") ||
+          error?.code === "PGRST301" ||
+          error?.status === 401) {
+        toast.error("Your session has expired. Please log in again.");
         router.push("/login");
       } else {
-        alert(`Error: ${errorMessage}`);
+        toast.error(errorMessage);
       }
     } finally {
       setLoading(false);
@@ -396,16 +639,55 @@ export default function EditProfilePage() {
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (files.length + formData.photos.length > 5) {
-      alert("You can only upload up to 5 photos");
+    
+    if (files.length === 0) {
       return;
     }
-    const newPhotos = [...formData.photos, ...files];
-    setFormData({ ...formData, photos: newPhotos });
+    
+    // Check total photo count
+    if (files.length + formData.photos.length > 5) {
+      toast.warning("You can only upload up to 5 photos total. Please remove some photos first.");
+      e.target.value = ''; // Reset input
+      return;
+    }
+    
+    // Validate file types and sizes
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const validFiles: File[] = [];
+    const errors: string[] = [];
+    
+    files.forEach((file, index) => {
+      if (!allowedTypes.includes(file.type)) {
+        errors.push(`${file.name}: Invalid file type. Please use JPEG, PNG, WebP, or GIF.`);
+        return;
+      }
+      
+      if (file.size > maxSize) {
+        errors.push(`${file.name}: File too large. Maximum size is 5MB.`);
+        return;
+      }
+      
+      validFiles.push(file);
+    });
+    
+    // Show errors if any
+    if (errors.length > 0) {
+      toast.error(errors.length === 1 ? errors[0] : `Some files were rejected: ${errors.join("; ")}`);
+    }
+    
+    // Only add valid files
+    if (validFiles.length > 0) {
+      const newPhotos = [...formData.photos, ...validFiles];
+      setFormData({ ...formData, photos: newPhotos });
 
-    // Create previews
-    const newPreviews = files.map((file) => URL.createObjectURL(file));
-    setPhotoPreviews([...photoPreviews, ...newPreviews]);
+      // Create previews for valid files
+      const newPreviews = validFiles.map((file) => URL.createObjectURL(file));
+      setPhotoPreviews([...photoPreviews, ...newPreviews]);
+    }
+    
+    // Reset input to allow selecting the same file again if needed
+    e.target.value = '';
   };
 
   const removePhoto = (index: number) => {
@@ -413,6 +695,50 @@ export default function EditProfilePage() {
     const newPreviews = photoPreviews.filter((_, i) => i !== index);
     setFormData({ ...formData, photos: newPhotos });
     setPhotoPreviews(newPreviews);
+  };
+
+  /** Move a photo up (towards index 0) in the display order */
+  const movePhotoUp = (index: number) => {
+    if (index <= 0) return;
+    const newPreviews = [...photoPreviews];
+    [newPreviews[index - 1], newPreviews[index]] = [newPreviews[index], newPreviews[index - 1]];
+    setPhotoPreviews(newPreviews);
+
+    const newPhotos = [...formData.photos];
+    if (newPhotos.length > index) {
+      [newPhotos[index - 1], newPhotos[index]] = [newPhotos[index], newPhotos[index - 1]];
+      setFormData({ ...formData, photos: newPhotos });
+    }
+  };
+
+  /** Move a photo down (towards the end) in the display order */
+  const movePhotoDown = (index: number) => {
+    if (index >= photoPreviews.length - 1) return;
+    const newPreviews = [...photoPreviews];
+    [newPreviews[index], newPreviews[index + 1]] = [newPreviews[index + 1], newPreviews[index]];
+    setPhotoPreviews(newPreviews);
+
+    const newPhotos = [...formData.photos];
+    if (newPhotos.length > index + 1) {
+      [newPhotos[index], newPhotos[index + 1]] = [newPhotos[index + 1], newPhotos[index]];
+      setFormData({ ...formData, photos: newPhotos });
+    }
+  };
+
+  /** Set a specific photo as primary (move to index 0) */
+  const setAsPrimary = (index: number) => {
+    if (index === 0) return;
+    const newPreviews = [...photoPreviews];
+    const [moved] = newPreviews.splice(index, 1);
+    newPreviews.unshift(moved);
+    setPhotoPreviews(newPreviews);
+
+    const newPhotos = [...formData.photos];
+    if (newPhotos.length > index) {
+      const [movedFile] = newPhotos.splice(index, 1);
+      newPhotos.unshift(movedFile);
+      setFormData({ ...formData, photos: newPhotos });
+    }
   };
 
   const nigerianEthnicities = [
@@ -1195,16 +1521,68 @@ export default function EditProfilePage() {
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
               {photoPreviews.map((preview, index) => (
                 <div key={index} className="relative group">
-                  <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
+                  <div className={`overflow-hidden rounded-xl border-2 bg-gray-50 transition-colors ${
+                    index === 0 ? "border-yellow-400 ring-2 ring-yellow-400/30" : "border-gray-200"
+                  }`}>
                     <Image src={preview} alt={`Photo ${index + 1}`} width={200} height={200} className="h-32 w-full object-cover" />
                   </div>
+
+                  {/* Primary badge */}
+                  {index === 0 && (
+                    <div className="absolute top-1.5 left-1.5 flex items-center gap-1 rounded-full bg-yellow-400 px-2 py-0.5 shadow">
+                      <Star className="h-3 w-3 text-yellow-900 fill-yellow-900" />
+                      <span className="text-[10px] font-bold text-yellow-900">Primary</span>
+                    </div>
+                  )}
+
+                  {/* Remove button */}
                   <button
                     type="button"
                     onClick={() => removePhoto(index)}
-                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white opacity-0 transition-opacity group-hover:opacity-100 z-10"
                   >
                     <X className="h-4 w-4" />
                   </button>
+
+                  {/* Reorder controls — visible on hover */}
+                  {photoPreviews.length > 1 && (
+                    <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                      {/* Move up / left */}
+                      {index > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => movePhotoUp(index)}
+                          className="flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black/90 transition-colors"
+                          title="Move left"
+                        >
+                          <ArrowUp className="h-3 w-3 -rotate-90" />
+                        </button>
+                      )}
+                      {/* Set as primary */}
+                      {index !== 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setAsPrimary(index)}
+                          className="flex h-6 items-center gap-0.5 rounded-full bg-yellow-500 px-2 text-yellow-950 hover:bg-yellow-400 transition-colors"
+                          title="Set as primary photo"
+                        >
+                          <Star className="h-3 w-3 fill-current" />
+                          <span className="text-[9px] font-bold">Primary</span>
+                        </button>
+                      )}
+                      {/* Move down / right */}
+                      {index < photoPreviews.length - 1 && (
+                        <button
+                          type="button"
+                          onClick={() => movePhotoDown(index)}
+                          className="flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black/90 transition-colors"
+                          title="Move right"
+                        >
+                          <ArrowDown className="h-3 w-3 -rotate-90" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               {Array.from({ length: 5 - photoPreviews.length }).map((_, index) => (
@@ -1243,6 +1621,30 @@ export default function EditProfilePage() {
               }}></div>
             </div>
           </div>
+          
+          {/* Auto-save Status Indicator */}
+          {saveStatus && (
+            <div className="absolute top-4 sm:top-6 left-4 sm:left-6">
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm ${
+                saveStatus === "saving" 
+                  ? "bg-blue-500/80 text-white" 
+                  : "bg-green-500/80 text-white"
+              }`}>
+                {saveStatus === "saving" ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3 w-3" />
+                    <span>Saved</span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          
           {/* Close Button */}
           <div className="absolute top-4 sm:top-6 right-4 sm:right-6">
             <Link

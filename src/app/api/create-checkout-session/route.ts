@@ -37,8 +37,112 @@ const baseTierPricing: Record<string, { name: string; amounts: { ngn: number; us
 
 export async function POST(request: NextRequest) {
   try {
-    const { priceId, tier, userId, currency = "usd", amount } = await request.json();
+    // Read request body once
+    const body = await request.json();
+    const { priceId, tier, userId, currency = "usd", amount, amountCents, type, credits } = body;
 
+    // Handle wallet top-up (one-time payment)
+    if (type === "wallet_topup") {
+      if (!userId || !amountCents || !currency) {
+        return NextResponse.json(
+          { error: "Missing required parameters for wallet top-up" },
+          { status: 400 }
+        );
+      }
+
+      const normalizedCurrency = currency.toLowerCase();
+      
+      if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
+        return NextResponse.json(
+          { error: "Invalid currency. Supported: NGN, USD, GBP" },
+          { status: 400 }
+        );
+      }
+
+      // Create a one-time payment for wallet top-up
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: normalizedCurrency,
+              product_data: {
+                name: "Wallet Top-up",
+                description: `Add ${currency.toUpperCase()} ${(amountCents / 100).toFixed(2)} to your wallet`,
+              },
+              unit_amount: amountCents,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        locale: "en",
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?canceled=true`,
+        client_reference_id: userId,
+        metadata: {
+          userId,
+          type: "wallet_topup",
+          amountCents: amountCents.toString(),
+          currency: normalizedCurrency,
+        },
+      });
+
+      return NextResponse.json({ sessionId: session.id, url: session.url });
+    }
+
+    // Handle credit purchase (one-time payment)
+    if (type === "credit_purchase") {
+      if (!userId || !amountCents || !currency || !credits) {
+        return NextResponse.json(
+          { error: "Missing required parameters for credit purchase" },
+          { status: 400 }
+        );
+      }
+
+      const normalizedCurrency = currency.toLowerCase();
+      
+      if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
+        return NextResponse.json(
+          { error: "Invalid currency. Supported: NGN, USD, GBP" },
+          { status: 400 }
+        );
+      }
+
+      // Create a one-time payment for credit purchase
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: normalizedCurrency,
+              product_data: {
+                name: "Credits Purchase",
+                description: `Purchase ${credits} credit${credits !== 1 ? "s" : ""} for video dating`,
+              },
+              unit_amount: amountCents,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        locale: "en",
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?canceled=true`,
+        client_reference_id: userId,
+        metadata: {
+          userId,
+          type: "credit_purchase",
+          amountCents: amountCents.toString(),
+          currency: normalizedCurrency,
+          credits: credits.toString(),
+        },
+      });
+
+      return NextResponse.json({ sessionId: session.id, url: session.url });
+    }
+
+    // Handle subscription (existing logic)
     if (!tier || !userId) {
       return NextResponse.json(
         { error: "Missing required parameters" },
@@ -142,7 +246,10 @@ export async function POST(request: NextRequest) {
         },
       ],
       mode: "subscription",
+      locale: "en",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/subscription?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      // Redirect to my-account page after showing success message
+      // The subscription page will handle the redirect automatically
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/subscription?canceled=true`,
       client_reference_id: userId,
       metadata: {

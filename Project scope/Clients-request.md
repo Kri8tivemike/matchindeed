@@ -1,7 +1,4 @@
-NOTE --if a user confirm the appoitment booking availabililty request from another user by denied it , the appoitment booking availability date will still appear and become available for that user otherwise is confired succefully 
-
-
-NOTE --The charges fee for accepting the video meeting need to be under pedning untill meeting is conlcuded by host and finalized by matchindeed  , the charges moves to ( pending ) but have been deducted from account balance 
+NOTE --The charges fee for accepting the video meeting need to be under pedning untill meeting is conlcuded by host and finalized by matchindeed  , the charges moves to ( pending ) but have been deducted from account balance and host determine the final credit charges if no users have no fault or if both of them have fault 
 
 NOTE -- Group meeting , admin determine this function , grouping the account holder that have to be in this group , simply by very easy grouping from user dashbaord 
 
@@ -363,12 +360,13 @@ Be honest about your intentions and expectations
 1, Cancellation of meeting------------
 
 
-The user the arrange the meeting , has NO right to cancel the meeting after another user has booked the meeting , if eventually the person that arrange the meeting knows that , the meeting wouldnt be possible , the meeting should be disable or canclled by him or her before someone else sees the calendar and book 
+The user the arrange the meeting , has NO right to cancel the meeting after another user has accepted booked the meeting , if eventually the person that arrange the meeting knows that , the meeting wouldnt be possible , the meeting should be disable or canclled by him or her before someone else sees the calendar and book 
 
+1a, No one has any right to cancel the meeting after it has been accepted and approved by the admin. If a user tries to cancel, the user that accepted or sent the meeting request will be charged for cancellation. No refund of credit.
 
 NOTE -- if eventually the user cancelled the booking time after someone has already , the user will be charged for that and admin determines that , a slot for that price should be put in the place by the amdin , admin can change the charges any time . 
 
-when the user are setting  up the calendar meeting , the note of charges for cancellation should show up and when someome is trying cancel at the momment 
+NOTE -- when the user are setting up the calendar meeting , the note of charges for cancellation should show up and when someone is trying to cancel at the moment. Whoever cancels will be responsible for the charges.
 
  
 
@@ -425,12 +423,14 @@ leaving the meeting due to network , as as the person that accepted the request 
 
 NOTE --- if the person that send the meeting request  ,leave meeting due any reason , the host give 4 minite to appear back if not , the charges applies to this user
 
-
 NOTE -- if the fault comes the user that accpet the request and its obvious as we have evidence , the user get refund after the company analysis and evidence , and sometime takes 1 to 2 days for futher investogations 
+
+NOTE -- Investigation notification to be sent to user:
+containing , (Dear user ( name) In your Previous video dating  meeting held to day date( date) will be reviewd  to determine if there is irregularity and inconcistence which determimne the charges 
 
 Note -- The host send push  pre pused notications which is sent to the user dashboard and email and will allow the user to see in the hostory 
 
- containing , (Dear user ( name) In your Previous video dating  meeting held to day date( date) will be reviewd  to determine if there is irregularity and inconcistence which determimne the charges 
+NOTE -- if a user confirm the appoitment booking availability request from another user by denied it , the appoitment booking availability date will still appear and become available for that user otherwise is confirmed successfully
 
 
            

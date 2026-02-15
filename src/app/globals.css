@@ -1,6 +1,41 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes heartbeat {
+  0%, 100% {
+    transform: scale(1);
+  }
+  10%, 30% {
+    transform: scale(1.1);
+  }
+  20%, 40% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -190,4 +225,29 @@
   background-color: var(--border);
   border-radius: 9999px;
   border: 3px solid transparent;
+}
+
+/* 
+ * Prevent Next.js dev overlay from triggering params enumeration warnings on hover.
+ * This disables the hover inspection feature while keeping error overlays functional.
+ */
+nextjs-portal[data-nextjs-dialog] {
+  /* Keep error dialogs visible */
+}
+
+nextjs-portal:not([data-nextjs-dialog]) {
+  /* Disable hover inspection overlay that causes params warnings */
+  pointer-events: none !important;
+}
+
+/* Safe area inset for mobile nav on notched phones (iPhone etc.) */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Add bottom padding on mobile so content isn't hidden behind the bottom nav */
+@media (max-width: 767px) {
+  .mobile-nav-spacing {
+    padding-bottom: 4.5rem; /* ~72px to clear the bottom nav */
+  }
 }

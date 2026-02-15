@@ -2,13 +2,50 @@ import { supabase } from "./supabase";
 
 /**
  * Get the current authenticated user
+ * Uses getSession instead of getUser to avoid AuthSessionMissingError when not logged in
  */
 export async function getCurrentUser() {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
+  try {
+    // Try getSession first (doesn't throw error if no session)
+    const { data: { session }, error } = await supabase.auth.getSession();
+    
+    if (error || !session || !session.user) {
+      // Check if it's a session missing error (expected when not logged in)
+      if (error?.message?.includes("session") || error?.message?.includes("missing")) {
+        // This is expected - user is not logged in
+        return null;
+      }
+      return null;
+    }
+    
+    return session.user;
+  } catch (error: any) {
+    // Handle AuthSessionMissingError specifically
+    if (error?.name === "AuthSessionMissingError" || error?.message?.includes("session missing")) {
+      // This is expected when user is not logged in - not an error
+      return null;
+    }
+    console.error("Error getting current user:", error);
     return null;
   }
-  return user;
+}
+
+/**
+ * Safely get user without throwing AuthSessionMissingError
+ * Use this when you want to check if user is logged in without errors
+ */
+export async function getCurrentUserSafe() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.user ?? null;
+  } catch (error: any) {
+    // Handle AuthSessionMissingError specifically
+    if (error?.name === "AuthSessionMissingError" || error?.message?.includes("session missing")) {
+      return null;
+    }
+    console.error("Error getting user:", error);
+    return null;
+  }
 }
 
 /**

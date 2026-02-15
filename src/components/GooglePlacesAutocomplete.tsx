@@ -13,6 +13,10 @@ type Props = {
   minChars?: number;
   limit?: number;
   className?: string;
+  /** Google Places types filter. Defaults to ["(cities)"] for worldwide city search.
+   *  Use ["geocode"] for addresses, ["establishment"] for businesses, 
+   *  or undefined/[] for no restriction (broadest results). */
+  types?: string[];
 };
 
 type GoogleAutocompleteService = {
@@ -43,19 +47,36 @@ function loadMaps() {
   if (g && g.maps) return Promise.resolve();
   if (mapsPromise) return mapsPromise;
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  
+  if (!key) {
+    console.error("Google Maps API key is missing. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in your environment variables.");
+    return Promise.reject(new Error("Google Maps API key is missing"));
+  }
+  
   const src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places`;
   mapsPromise = new Promise<void>((resolve, reject) => {
     const s = document.createElement("script");
     s.src = src;
     s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("failed to load maps"));
+    s.onload = () => {
+      // Verify Google Maps is actually loaded
+      const google = (window as unknown as { google?: GoogleMaps }).google;
+      if (google?.maps?.places) {
+        resolve();
+      } else {
+        reject(new Error("Google Maps loaded but Places API not available"));
+      }
+    };
+    s.onerror = (error) => {
+      console.error("Failed to load Google Maps script:", error);
+      reject(new Error("failed to load maps"));
+    };
     document.head.appendChild(s);
   });
   return mapsPromise;
 }
 
-export default function GooglePlacesAutocomplete({ value, onChange, placeholder = "Enter your city", minChars = 2, limit = 8, className = "" }: Props) {
+export default function GooglePlacesAutocomplete({ value, onChange, placeholder = "Enter your city", minChars = 2, limit = 8, className = "", types }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Prediction[]>([]);
@@ -86,39 +107,52 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
       loadMaps()
         .then(() => {
           const g = (window as unknown as { google?: GoogleMaps }).google;
-          if (!g?.maps?.places) return;
+          if (!g?.maps?.places) {
+            console.warn("Google Maps Places API not loaded");
+            return;
+          }
           if (!tokenRef.current) tokenRef.current = new g.maps.places.AutocompleteSessionToken();
           const svc: GoogleAutocompleteService = new g.maps.places.AutocompleteService();
-          const country = (process.env.NEXT_PUBLIC_PLACES_COUNTRY ?? "ng").toLowerCase();
-          const rawTypes = (process.env.NEXT_PUBLIC_PLACES_TYPES ?? "geocode")
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean);
-          const allowed = new Set(["geocode", "establishment", "address"]);
-          const typesSanitized = rawTypes.filter((t) => allowed.has(t));
-          const typesProp = typesSanitized.length > 0 ? [typesSanitized[0]] : undefined;
+          
+          // Determine the types filter for autocomplete
+          // Default to geocode for neighborhoods, suburbs, cities, and addresses worldwide
+          // (cities) only returns locality-level results and excludes neighborhoods like "Dopemu, Lagos"
+          let typesProp: string[] | undefined;
+          
+          if (types && types.length > 0) {
+            // Use the explicit types passed via prop
+            typesProp = types;
+          } else {
+            // Default: use geocode so neighborhoods, areas, and addresses all match
+            // e.g. "Dopemu, Lagos", "Ikeja, Lagos", "Manchester, UK" all work
+            typesProp = ["geocode"];
+          }
 
-          let request: { input: string; types?: string[] } & Record<string, unknown> = {
+          // Build request object - NO country restrictions to allow international suggestions
+          const request: { input: string; types?: string[] } & Record<string, unknown> = {
             input: q,
             types: typesProp,
-            componentRestrictions: { country: [country] },
+            // No componentRestrictions — allows all countries
+            // No locationBias — allows suggestions from anywhere in the world
           };
-          try {
-            const bounds = new g.maps.LatLngBounds(
-              new g.maps.LatLng(4.2, 2.7),
-              new g.maps.LatLng(13.9, 14.6)
-            );
-            request = { ...request, locationBias: bounds };
-          } catch {}
+          
           svc.getPlacePredictions(
             request,
-            (preds) => {
-              const arr = Array.isArray(preds) ? preds.slice(0, limit).map((p) => ({ description: p.description, place_id: p.place_id })) : [];
+            (preds: any, status: any) => {
+              if (ctrl.signal.aborted) return;
+              if (status !== "OK" && status !== "ZERO_RESULTS") {
+                console.warn("Google Places API status:", status, "for query:", q);
+              }
+              const arr = Array.isArray(preds) 
+                ? preds.slice(0, limit).map((p: any) => ({ description: p.description, place_id: p.place_id })) 
+                : [];
               setResults(arr);
             }
           );
         })
-        .catch(() => {});
+        .catch((error) => {
+          console.error("Error loading Google Maps:", error);
+        });
     }, 250);
     return () => {
       ctrl.abort();

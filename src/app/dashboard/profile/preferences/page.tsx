@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles, EyeOff, Mail, Compass, Heart, Search as SearchIcon, MessageCircle, ArrowLeft, ChevronRight, CheckCircle2, Video, Eye, Sparkles as SparklesIcon, Calendar, X, Check } from "lucide-react";
+import { Sparkles, EyeOff, Mail, Compass, Heart, Search as SearchIcon, MessageCircle, ArrowLeft, ChevronRight, CheckCircle2, Video, Eye, Sparkles as SparklesIcon, Calendar, X, Check, Loader2, Pencil } from "lucide-react";
+import { useToast } from "@/components/ToastProvider";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
 import { supabase } from "@/lib/supabase";
+import { saveFormDraft, loadFormDraft, clearFormDraft, getDraftTimestamp } from "@/lib/form-autosave";
 
 type PreferenceData = {
   lookingFor: string;
@@ -33,25 +35,147 @@ type PreferenceData = {
 };
 
 function PreferencesPageContent() {
+  const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const FORM_DRAFT_KEY = "preferences_edit";
 
-  // Check if we should start at congratulations step
+  // Load existing preferences and check status
   useEffect(() => {
-    const checkPreferencesStatus = async () => {
+    const loadPreferences = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) {
+          setInitialized(true);
+          return;
+        }
 
         // Check URL parameter first
         const stepParam = searchParams.get("step");
-        if (stepParam === "16") {
+        const editMode = searchParams.get("edit") === "1";
+        setIsEditMode(editMode);
+        if (stepParam === "16" && !editMode) {
           setCurrentStep(16);
           setInitialized(true);
           return;
+        }
+
+        // Check if draft exists - if it does, skip database load (draft takes precedence)
+        const hasDraft = loadFormDraft(FORM_DRAFT_KEY);
+        if (hasDraft && !editMode) {
+          // Draft exists, user can continue from draft
+          setInitialized(true);
+          return;
+        }
+
+        // Load existing preferences from user_preferences table
+        // Use maybeSingle() to handle case where preferences don't exist yet
+        const { data: preferencesData, error: preferencesError } = await supabase
+          .from("user_preferences")
+          .select("*")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        // Log error only if it's not a "not found" error
+        if (preferencesError && preferencesError.code !== "PGRST116") {
+          console.warn("Error loading preferences:", preferencesError);
+        }
+
+        if (preferencesData) {
+          // Load existing preferences into form data
+          const formatHeight = (minCm: number | null, maxCm: number | null) => {
+            if (!minCm || !maxCm) return "Open to any height";
+            const avgCm = Math.round((minCm + maxCm) / 2);
+            const inches = Math.round(avgCm / 2.54);
+            const feet = Math.floor(inches / 12);
+            const remainingInches = inches % 12;
+            return `${feet}'${remainingInches}" • ${avgCm} cm`;
+          };
+
+          // Parse ethnicity arrays back into nigerian/other structure
+          const ethnicityArray = preferencesData.partner_ethnicity || [];
+          const nigerianEthnicitiesList = [
+            "Hausa-Fulani (North)",
+            "Yoruba (Southwest)",
+            "Igbo (Southeast)",
+            "Ijaw (Niger Delta)",
+            "Kanuri (Northeast)",
+            "Tiv (Middle Belt)",
+            "Edo (South)",
+            "Ibibio/Efik (South-South)",
+          ];
+          const nigerianEthnicities = ethnicityArray.filter((e: string) => 
+            nigerianEthnicitiesList.includes(e) || e === "I'd rather not say"
+          );
+          const otherEthnicities = ethnicityArray.filter((e: string) => 
+            !nigerianEthnicitiesList.includes(e) && e !== "I'd rather not say"
+          );
+
+          // Map database values back to form values
+          const mapHaveChildren = (value: string | null): string => {
+            if (value === "yes") return "Has kids";
+            if (value === "no") return "Doesn't have kids";
+            return "No preference";
+          };
+
+          const mapWantChildren = (value: string | null): string => {
+            if (value === "yes") return "Wants kids";
+            if (value === "no") return "Doesn't want kids";
+            return "No preference";
+          };
+
+          const mapSmoking = (value: string | null): string => {
+            if (value === "no") return "Never";
+            if (value === "yes") return "Smoke Smoke";
+            return "No preference";
+          };
+
+          const mapDrinking = (value: string | null): string => {
+            if (value === "no") return "Doesn't drink";
+            if (value === "yes") return "Drinks often";
+            return "I'd rather not say";
+          };
+
+          const mapPets = (value: string | null): string => {
+            if (value === "no") return "Doesn't have pet(s)";
+            if (value === "yes") return "Has dog(s)";
+            return "Doesn't have pet(s)";
+          };
+
+          setFormData({
+            lookingFor: "", // This isn't stored in DB, keep empty
+            location: preferencesData.partner_location || "",
+            ageRange: preferencesData.partner_age_range || "20 - 29",
+            height: formatHeight(preferencesData.partner_height_min_cm, preferencesData.partner_height_max_cm),
+            ethnicity: {
+              nigerian: nigerianEthnicities.length > 0 ? nigerianEthnicities : ["I'd rather not say"],
+              other: otherEthnicities.length > 0 ? otherEthnicities : ["I'd rather not say"],
+            },
+            languages: { nigerian: [], other: [] }, // Languages aren't stored for preferences
+            education: preferencesData.partner_education?.[0] || "High school",
+            employment: preferencesData.partner_employment || "Employed",
+            drinking: mapDrinking(preferencesData.partner_drinking),
+            smoking: mapSmoking(preferencesData.partner_smoking),
+            diet: preferencesData.partner_diet || "Gluten",
+            religion: preferencesData.partner_religion?.[0] || "Hindu",
+            hasChildren: mapHaveChildren(preferencesData.partner_have_children),
+            wantsChildren: mapWantChildren(preferencesData.partner_want_children),
+            pets: mapPets(preferencesData.partner_pets),
+            benefits: [],
+          });
+
+          // Set height inches for slider
+          if (preferencesData.partner_height_min_cm && preferencesData.partner_height_max_cm) {
+            const avgCm = Math.round((preferencesData.partner_height_min_cm + preferencesData.partner_height_max_cm) / 2);
+            setHeightInches(Math.round(avgCm / 2.54));
+          }
         }
 
         // Check if preferences are already completed
@@ -59,20 +183,20 @@ function PreferencesPageContent() {
           .from("user_progress")
           .select("preferences_completed")
           .eq("user_id", user.id)
-          .single();
+          .maybeSingle();
 
-        if (progress && progress.preferences_completed) {
-          // Preferences already completed, show congratulations step
+        if (progress && progress.preferences_completed && !stepParam && !editMode) {
+          // Preferences already completed, show congratulations step (unless editing)
           setCurrentStep(16);
         }
       } catch (error) {
-        console.error("Error checking preferences status:", error);
+        console.error("Error loading preferences:", error);
       } finally {
         setInitialized(true);
       }
     };
 
-    checkPreferencesStatus();
+    loadPreferences();
   }, [searchParams]);
   const [formData, setFormData] = useState<PreferenceData>({
     lookingFor: "",
@@ -97,9 +221,103 @@ function PreferencesPageContent() {
 
   const totalSteps = 16;
 
+  // Load draft data first (before database)
+  useEffect(() => {
+    const loadDraft = () => {
+      const draft = loadFormDraft<PreferenceData & { heightInches?: number; currentStep?: number }>(FORM_DRAFT_KEY);
+      if (draft) {
+        // Restore form data from draft
+        setFormData({
+          lookingFor: draft.lookingFor || "",
+          location: draft.location || "",
+          ageRange: draft.ageRange || "20 - 29",
+          height: draft.height || "6'0\" • 183 cm",
+          ethnicity: draft.ethnicity || { nigerian: ["I'd rather not say"], other: ["I'd rather not say"] },
+          languages: draft.languages || { nigerian: [], other: [] },
+          education: draft.education || "High school",
+          employment: draft.employment || "Employed",
+          drinking: draft.drinking || "Drinks often",
+          smoking: draft.smoking || "Smoke Smoke",
+          diet: draft.diet || "Gluten",
+          religion: draft.religion || "Hindu",
+          hasChildren: draft.hasChildren || "Doesn't have kids",
+          wantsChildren: draft.wantsChildren || "Doesn't want kids",
+          pets: draft.pets || "Doesn't have pet(s)",
+          benefits: draft.benefits || [],
+        });
+        
+        if (draft.heightInches) {
+          setHeightInches(draft.heightInches);
+        }
+        
+        if (draft.currentStep) {
+          setCurrentStep(draft.currentStep);
+        }
+
+        // Show notification that draft was loaded
+        const draftTime = getDraftTimestamp(FORM_DRAFT_KEY);
+        if (draftTime) {
+          const timeAgo = new Date(draftTime);
+          const hoursAgo = Math.floor((Date.now() - timeAgo.getTime()) / (1000 * 60 * 60));
+          console.log(`Draft loaded from ${hoursAgo} hour(s) ago`);
+        }
+      }
+    };
+
+    loadDraft();
+  }, []);
+
+  // Auto-save form data whenever it changes (debounced)
+  useEffect(() => {
+    // Don't save if not initialized yet
+    if (!initialized) return;
+
+    // Clear previous timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set saving status
+    setSaveStatus("saving");
+
+    // Debounce save by 1 second
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+        // Save form data along with current step and height
+        const draftData = {
+          ...formData,
+          heightInches,
+          currentStep,
+        };
+        saveFormDraft(FORM_DRAFT_KEY, draftData);
+        setSaveStatus("saved");
+        
+        // Clear saved status after 2 seconds
+        setTimeout(() => {
+          setSaveStatus(null);
+        }, 2000);
+      } catch (error) {
+        console.error("Error auto-saving form:", error);
+        setSaveStatus(null);
+      }
+    }, 1000);
+
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [formData, heightInches, currentStep, initialized]);
+
   const handleNext = () => {
     if (currentStep < totalSteps) {
-      setCurrentStep(currentStep + 1);
+      // If moving to the final step (16), submit the form
+      if (currentStep === totalSteps - 1) {
+        handleSubmit();
+      } else {
+        setCurrentStep(currentStep + 1);
+      }
     }
   };
 
@@ -159,42 +377,111 @@ function PreferencesPageContent() {
       const mapDiet = (value: string): string | null => {
         if (!value) return null;
         const lower = value.toLowerCase();
-        if (lower.includes("vegetarian")) return "vegetarian";
+        // Handle specific diet types
+        if (lower.includes("vegetarian") && !lower.includes("lacto")) return "vegetarian";
         if (lower.includes("vegan")) return "vegan";
         if (lower.includes("halal")) return "halal";
         if (lower.includes("kosher")) return "kosher";
+        // "Omnivore", "Gluten", "Free Pescatarian", "Jain", "Lacto vegetarian", "Intermittent", "Ketogenic", "Fasting" → "any"
         return "any";
       };
 
-      // Update user profile with preferences
+      // Map form values to database values with proper transformations
+      const mapHasChildren = (value: string): string => {
+        if (value === "Has kids") return "yes";
+        if (value === "Doesn't have kids") return "no";
+        // "No preference" → "doesnt_matter"
+        return "doesnt_matter";
+      };
+
+      const mapWantChildren = (value: string): string => {
+        if (value === "Wants kids") return "yes";
+        if (value === "Doesn't want kids") return "no";
+        if (value === "Not sure") return "doesnt_matter";
+        return "doesnt_matter";
+      };
+
+      const mapSmoking = (value: string): string => {
+        if (value === "Never") return "no";
+        if (value === "Smoke Smoke" || value === "Smoke Socially") return "yes";
+        // "Trying to quit" or "No preference" → "doesnt_matter"
+        return "doesnt_matter";
+      };
+
+      const mapDrinking = (value: string): string => {
+        if (value === "Doesn't drink") return "no";
+        if (value === "Drinks often" || value === "Drinks sometimes") return "yes";
+        return "doesnt_matter";
+      };
+
+      const mapPets = (value: string): string => {
+        if (value === "Doesn't have pet(s)") return "no";
+        if (value.includes("Has")) return "yes";
+        return "doesnt_matter";
+      };
+
+      // Prepare preferences data for user_preferences table
+      // Field mapping: Form Field → Database Column
       const preferencesUpdate: any = {
         user_id: user.id,
-        partner_location: formData.location || null,
-        partner_age_range: formData.ageRange || null,
-        partner_height_min_cm: heightMinCm,
-        partner_height_max_cm: heightMaxCm,
+        
+        // Location preferences
+        partner_location: formData.location?.trim() || null, // Step 2: location → partner_location
+        partner_age_range: formData.ageRange || null, // Step 3: ageRange → partner_age_range
+        partner_height_min_cm: heightMinCm, // Step 4: height → partner_height_min_cm (calculated)
+        partner_height_max_cm: heightMaxCm, // Step 4: height → partner_height_max_cm (calculated)
+        
+        // Background preferences
         partner_ethnicity: formData.ethnicity.nigerian.length > 0 || formData.ethnicity.other.length > 0 
           ? [...formData.ethnicity.nigerian, ...formData.ethnicity.other] 
-          : null,
-        partner_religion: formData.religion ? [formData.religion] : null,
-        partner_education: formData.education ? [formData.education] : null,
-        partner_have_children: formData.hasChildren === "Has kids" ? "yes" : formData.hasChildren === "Doesn't have kids" ? "no" : "doesnt_matter",
-        partner_want_children: formData.wantsChildren === "Wants kids" ? "yes" : formData.wantsChildren === "Doesn't want kids" ? "no" : "doesnt_matter",
-        partner_smoking: formData.smoking === "Never" ? "no" : formData.smoking === "Smoke Smoke" || formData.smoking === "Smoke Socially" ? "yes" : "doesnt_matter",
-        partner_drinking: formData.drinking === "Doesn't drink" ? "no" : formData.drinking === "Drinks often" ? "yes" : "doesnt_matter",
-        partner_diet: mapDiet(formData.diet),
-        partner_employment: mapEmployment(formData.employment),
-        partner_experience: mapExperience(formData.relationshipType),
-        partner_pets: formData.pets === "Doesn't have pet(s)" ? "no" : formData.pets.includes("Has") ? "yes" : "doesnt_matter",
+          : null, // Step 5: ethnicity → partner_ethnicity (array)
+        partner_religion: formData.religion ? [formData.religion] : null, // Step 12: religion → partner_religion (array)
+        partner_education: formData.education && formData.education !== "No preference" 
+          ? [formData.education] 
+          : null, // Step 7: education → partner_education (array, skip "No preference")
+        
+        // Lifestyle preferences
+        partner_employment: mapEmployment(formData.employment), // Step 8: employment → partner_employment
+        partner_have_children: mapHasChildren(formData.hasChildren), // Step 13: hasChildren → partner_have_children
+        partner_want_children: mapWantChildren(formData.wantsChildren), // Step 14: wantsChildren → partner_want_children
+        partner_smoking: mapSmoking(formData.smoking), // Step 10: smoking → partner_smoking
+        partner_drinking: mapDrinking(formData.drinking), // Step 9: drinking → partner_drinking
+        partner_diet: mapDiet(formData.diet), // Step 11: diet → partner_diet
+        partner_pets: mapPets(formData.pets), // Step 15: pets → partner_pets
+        
+        // Relationship preferences (not in form, set to null for now)
+        partner_experience: null, // Not collected in form - can be added later if needed
+        partner_plans: null, // Not collected in form - can be added later if needed
+        
+        // Status flag
         preferences_completed: true,
       };
 
-      const { error: profileError } = await supabase
-        .from("user_profiles")
-        .upsert(preferencesUpdate, { onConflict: "user_id" });
+      // Save to user_preferences table using upsert
+      const { error: preferencesError, data: savedPreferences } = await supabase
+        .from("user_preferences")
+        .upsert(preferencesUpdate, { onConflict: "user_id" })
+        .select()
+        .single();
 
-      if (profileError) {
-        throw profileError;
+      if (preferencesError) {
+        console.error("Error saving preferences to user_preferences:", {
+          message: preferencesError.message,
+          code: preferencesError.code,
+          details: preferencesError.details,
+          hint: preferencesError.hint,
+        });
+        throw new Error(`Failed to save preferences: ${preferencesError.message || "Unknown error"}`);
+      }
+
+      // Also update preferences_completed in user_profiles for backward compatibility
+      const { error: profileUpdateError } = await supabase
+        .from("user_profiles")
+        .update({ preferences_completed: true })
+        .eq("user_id", user.id);
+
+      if (profileUpdateError) {
+        console.warn("Warning: Could not update preferences_completed in user_profiles:", profileUpdateError);
       }
 
       // Update user progress
@@ -206,14 +493,35 @@ function PreferencesPageContent() {
         }, { onConflict: "user_id" });
 
       if (progressError) {
-        throw progressError;
+        console.error("Error updating user_progress:", {
+          message: progressError.message,
+          code: progressError.code,
+          details: progressError.details,
+        });
+        throw new Error(`Failed to update progress: ${progressError.message || "Unknown error"}`);
       }
 
-      // Redirect to subscription page
-      router.push("/dashboard/profile/subscription");
-    } catch (error) {
+      // Verify the data was saved
+      if (savedPreferences) {
+        console.log("Preferences saved successfully to user_preferences:", savedPreferences);
+      } else {
+        console.warn("Warning: Preferences saved but verification data not returned");
+      }
+
+      // Clear draft since form was successfully submitted
+      clearFormDraft(FORM_DRAFT_KEY);
+      setSaveStatus(null);
+
+      // Redirect: to view when editing, otherwise to subscription
+      if (isEditMode) {
+        router.push("/dashboard/profile/preferences/view");
+      } else {
+        router.push("/dashboard/profile/subscription");
+      }
+    } catch (error: any) {
       console.error("Error saving preferences:", error);
-      alert("Failed to save preferences. Please try again.");
+      const errorMessage = error?.message || "Failed to save preferences. Please try again.";
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -868,6 +1176,17 @@ function PreferencesPageContent() {
               <p className="text-lg sm:text-xl font-medium">Ready to find your perfect match?</p>
               <p className="mt-2 text-sm sm:text-base text-white/90">Start discovering compatible singles now!</p>
             </div>
+
+            <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                type="button"
+                onClick={() => setCurrentStep(1)}
+                className="inline-flex items-center gap-2 rounded-xl border-2 border-white/60 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/20"
+              >
+                <Pencil className="h-4 w-4" />
+                Change preferences
+              </button>
+            </div>
           </div>
         );
 
@@ -891,6 +1210,30 @@ function PreferencesPageContent() {
               }}></div>
             </div>
           </div>
+          
+          {/* Auto-save Status Indicator */}
+          {saveStatus && (
+            <div className="absolute top-4 sm:top-6 left-4 sm:left-6">
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm ${
+                saveStatus === "saving" 
+                  ? "bg-blue-500/80 text-white" 
+                  : "bg-green-500/80 text-white"
+              }`}>
+                {saveStatus === "saving" ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3 w-3" />
+                    <span>Saved</span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          
           {/* Close Button */}
           <div className="absolute top-4 sm:top-6 right-4 sm:right-6">
             <Link
@@ -916,7 +1259,16 @@ function PreferencesPageContent() {
 
           {/* Navigation button - Bottom Right */}
           {initialized && currentStep !== 16 && (
-            <div className="mt-8 sm:mt-10 md:mt-12 flex w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl justify-end px-2 sm:px-4">
+            <div className="mt-8 sm:mt-10 md:mt-12 flex w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl justify-between items-center px-2 sm:px-4 gap-4">
+              <button
+                type="button"
+                onClick={handleBack}
+                disabled={currentStep === 1}
+                className="rounded-lg border-2 border-white/60 bg-white/10 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-all hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/10"
+              >
+                <ArrowLeft className="h-4 w-4 inline mr-1" />
+                Back
+              </button>
               {currentStep < totalSteps ? (
                 <button
                   type="button"
