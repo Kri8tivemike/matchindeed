@@ -191,7 +191,7 @@ export default function EditProfilePage() {
         if (!user) {
           // Try getUser as final fallback
           const { data: { user: directUser } } = await supabase.auth.getUser();
-          user = directUser;
+          user = directUser || undefined;
         }
         
         // If still no user, redirect to login
@@ -249,10 +249,10 @@ export default function EditProfilePage() {
             religion: profile.religion || "Protestant",
             education: profile.education_level || "High school",
             languages: profile.languages || [],
-            relationshipStatus: profile.relationship_status ? profile.relationship_status.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) : "Single",
+            relationshipStatus: profile.relationship_status ? profile.relationship_status.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase()) : "Single",
             hasChildren: profile.have_children ? "Has kid(s) and wants more" : "Doesn't have kids but wants them",
             wantsChildren: profile.want_children === "yes" ? "Want kids" : profile.want_children === "no" ? "Don't want kids" : "Not sure",
-            smoking: profile.smoking_habits ? profile.smoking_habits.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) : "Smoke Smoke",
+            smoking: profile.smoking_habits ? profile.smoking_habits.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase()) : "Smoke Smoke",
             relocationPlan: profile.willing_to_relocate || "Not ready for relocation plan",
             readyToMarry: profile.ready_for_marriage || "Get married yes, settle down no",
             relationshipType: profile.relationship_type || "Hangout",

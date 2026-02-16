@@ -188,8 +188,6 @@ function VerifyEmailContent() {
                     .from("accounts")
                     .update({ email_verified: true })
                     .eq("id", session.user.id)
-                    .then(() => {})
-                    .catch(() => {});
                 }
                 setTimeout(() => router.push("/dashboard/profile"), 3000);
                 return;
@@ -205,10 +203,6 @@ function VerifyEmailContent() {
               if (sessionData.user.id) {
                 await supabase
                   .from("accounts")
-                  .update({ email_verified: true })
-                  .eq("id", sessionData.user.id)
-                  .then(() => {})
-                  .catch(() => {});
               }
               setTimeout(() => router.push("/dashboard/profile"), 3000);
               return;

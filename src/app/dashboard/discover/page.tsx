@@ -66,8 +66,10 @@ export default function DiscoverPage() {
     week: { used: number; limit: number };
     month: { used: number; limit: number };
   } | null>(null);
-  const [mutualMatch, setMutualMatch] = useState<string | null>(null);
+    const [mutualMatch, setMutualMatch] = useState<string | null>(null);
   const [likedProfileIds, setLikedProfileIds] = useState<Set<string>>(new Set());
+  const [winkedIds, setWinkedIds] = useState<Set<string>>(new Set());
+  const [interestedIds, setInterestedIds] = useState<Set<string>>(new Set());
 
   // Meeting request modal state
   const [meetingRequestModalOpen, setMeetingRequestModalOpen] = useState(false);
@@ -1307,7 +1309,7 @@ export default function DiscoverPage() {
                     <div className="flex items-center gap-1.5 text-2xl font-semibold text-gray-900">
                       {currentProfile.name}
                       {currentProfile.verified && (
-                        <BadgeCheck className="h-5 w-5 text-blue-500 flex-shrink-0" title="Verified profile" />
+                        <BadgeCheck className="h-5 w-5 text-blue-500 flex-shrink-0" />
                       )}
                     </div>
                   <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">

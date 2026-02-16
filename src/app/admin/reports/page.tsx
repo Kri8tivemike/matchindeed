@@ -454,7 +454,7 @@ export default function AdminReportsPage() {
   const formatReason = (reason: string) => {
     return reason
       .replace(/_/g, " ")
-      .replace(/\b\w/g, (l) => l.toUpperCase());
+      .replace(/\b\w/g, (l: string) => l.toUpperCase());
   };
 
   /**

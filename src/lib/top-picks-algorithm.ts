@@ -214,7 +214,7 @@ function calculatePreferenceScore(
   }
 
   // Have children match (4 points) - profile has boolean, preferences have string
-  const profileHaveChildren = profile.have_children === true ? 'yes' : (profile.have_children === false ? 'no' : null);
+  const profileHaveChildren = profile.have_children; // string value 'yes' or 'no'
   if (matchesStringPreference(profileHaveChildren, preferences.partner_have_children)) {
     score += pointsPerCriteria * 0.7;
   }
@@ -404,7 +404,7 @@ export async function generateTopPicks(
       .from("accounts")
       .select("id, account_status")
       .eq("account_status", "active")
-      .neq("id", userId);
+      .neq("id", userId) as { data: { id: string; account_status: string }[] | null };
 
     if (!activeAccounts || activeAccounts.length === 0) {
       return [];
@@ -417,7 +417,23 @@ export async function generateTopPicks(
     const { data: profiles } = await admin
       .from("user_profiles")
       .select("user_id, first_name, last_name, date_of_birth, location, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, ethnicity, updated_at")
-      .in("user_id", activeUserIds);
+      .in("user_id", activeUserIds) as { data: { 
+  user_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  date_of_birth: string | null;
+  location: string | null;
+  height_cm: number | null;
+  photos: string[] | null;
+  profile_photo_url: string | null;
+  education_level: string | null;
+  religion: string | null;
+  have_children: string | null;
+  want_children: string | null;
+  smoking_habits: string | null;
+  ethnicity: string | null;
+  updated_at: string | null;
+}[] | null };
 
     if (!profiles || profiles.length === 0) {
       return [];
@@ -428,7 +444,7 @@ export async function generateTopPicks(
       .from("user_activities")
       .select("target_user_id")
       .eq("user_id", userId)
-      .eq("activity_type", "rejected");
+      .eq("activity_type", "rejected") as { data: { target_user_id: string }[] | null };
 
     const rejectedUserIds = new Set((rejectedActivities || []).map(a => a.target_user_id));
 
@@ -437,7 +453,7 @@ export async function generateTopPicks(
       .from("user_activities")
       .select("target_user_id")
       .eq("user_id", userId)
-      .in("activity_type", ["like", "wink", "interested"]);
+      .in("activity_type", ["like", "wink", "interested"]) as { data: { target_user_id: string }[] | null };
 
     const likedUserIds = new Set((likedActivities || []).map(a => a.target_user_id));
 
@@ -446,7 +462,7 @@ export async function generateTopPicks(
       .from("user_activities")
       .select("user_id")
       .eq("target_user_id", userId)
-      .in("activity_type", ["like", "wink", "interested"]);
+      .in("activity_type", ["like", "wink", "interested"]) as { data: { user_id: string }[] | null };
 
     const mutualUserIds = new Set((mutualActivities || []).map(a => a.user_id));
 
@@ -469,7 +485,7 @@ export async function generateTopPicks(
           education_level: profile.education_level,
           employment: null, // Not available in user_profiles
           religion: profile.religion,
-          have_children: profile.have_children ? "yes" : (profile.have_children === false ? "no" : null),
+          have_children: profile.have_children, // string value: "yes" or "no"
           want_children: profile.want_children,
           smoking: profile.smoking_habits,
           drinking: null, // Not available in user_profiles

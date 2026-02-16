@@ -1,473 +1,281 @@
 "use client";
 
 /**
- * AdminMeetingsPage - Meeting Management
- * 
- * Features per client request:
- * - Verify if both users sent requests to each other
- * - Mark and verify user profiles
- * - Add coordinator name, date, IP address
- * - Handle meeting allocations (3+ people on same date)
- * - View meeting details and participants
+ * AdminMfaSetupPage — TOTP MFA enrollment for admin accounts.
+ *
+ * Admins are redirected here on first login if they haven't enrolled MFA.
+ * Shows a QR code to scan with Google Authenticator / Authy / 1Password.
+ * After verifying a code, the factor is confirmed and the admin can proceed.
  */
 
-import { useEffect, useState } from "react";
-import { useToast } from "@/components/ToastProvider";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
-  Video,
-  Search,
-  Filter,
-  UserCheck,
-  UserX,
-  Calendar,
-  Clock,
+  Shield,
+  KeyRound,
+  Loader2,
   AlertCircle,
   CheckCircle,
-  Loader2,
-  RefreshCw,
-  Eye,
-  User,
-  Users,
 } from "lucide-react";
-import Link from "next/link";
+import Image from "next/image";
 
-type Meeting = {
-  id: string;
-  host_id: string;
-  type: string;
-  status: string;
-  scheduled_at: string;
-  location_pref: string | null;
-  fee_cents: number;
-  charge_status: string;
-  created_at: string;
-  host: {
-    email: string;
-    display_name: string | null;
-  } | null;
-  participants: {
-    user_id: string;
-    role: string;
-    response: string | null;
-    user: {
-      email: string;
-      display_name: string | null;
-    } | null;
-  }[];
-};
-
-export default function AdminMeetingsPage() {
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
+export default function AdminMfaSetupPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
-  const [coordinatorName, setCoordinatorName] = useState("");
-  const [coordinatorIP, setCoordinatorIP] = useState("");
+  const [enrolling, setEnrolling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Enrollment data
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [factorId, setFactorId] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [success, setSuccess] = useState(false);
 
   /**
-   * Fetch all meetings
+   * Start MFA enrollment — generates a QR code and secret key.
    */
-  const fetchMeetings = async () => {
-    setLoading(true);
-    try {
-      // Fetch meetings with host info
-      const { data: meetingsData, error } = await supabase
-        .from("meetings")
-        .select(`
-          id,
-          host_id,
-          type,
-          status,
-          scheduled_at,
-          location_pref,
-          fee_cents,
-          charge_status,
-          created_at,
-          accounts!host_id (
-            email,
-            display_name
-          )
-        `)
-        .order("scheduled_at", { ascending: false });
+  useEffect(() => {
+    const startEnrollment = async () => {
+      try {
+        // Verify user is logged in and is an admin
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          router.push("/admin/login");
+          return;
+        }
 
-      if (error) {
-        console.error("Error fetching meetings:", error);
+        // Check if already enrolled
+        const { data: factors } = await supabase.auth.mfa.listFactors();
+        const verified = factors?.totp?.find((f) => f.status === "verified");
+        if (verified) {
+          router.push("/admin");
+          return;
+        }
+
+        // Unenroll any unverified factors first
+        for (const factor of factors?.totp || []) {
+          if (factor.status !== "verified") {
+            await supabase.auth.mfa.unenroll({ factorId: factor.id });
+          }
+        }
+
+        // Enroll a new TOTP factor
+        const { data, error: enrollError } = await supabase.auth.mfa.enroll({
+          factorType: "totp",
+          friendlyName: "MatchIndeed Admin",
+        });
+
+        if (enrollError) {
+          setError(
+            enrollError.message ||
+              "Failed to start MFA enrollment. Enable MFA in Supabase Dashboard → Authentication → Providers, or set NEXT_PUBLIC_ADMIN_MFA_REQUIRED=false to skip."
+          );
+          setLoading(false);
+          return;
+        }
+
+        setQrCode(data.totp.qr_code);
+        setSecret(data.totp.secret);
+        setFactorId(data.id);
+      } catch {
+        setError("An unexpected error occurred.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    startEnrollment();
+  }, [router]);
+
+  /**
+   * Verify the TOTP code to confirm enrollment.
+   */
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setEnrolling(true);
+
+    try {
+      if (!factorId) {
+        setError("Enrollment data missing. Please refresh and try again.");
+        setEnrolling(false);
         return;
       }
 
-      // Fetch participants separately to avoid RLS recursion
-      const meetingIds = (meetingsData || []).map((m: any) => m.id);
-      let participantsMap: Record<string, any[]> = {};
+      // Challenge + verify to confirm the factor
+      const { data: challengeData, error: challengeError } =
+        await supabase.auth.mfa.challenge({ factorId });
 
-      if (meetingIds.length > 0) {
-        const { data: participantsData } = await supabase
-          .from("meeting_participants")
-          .select("meeting_id, user_id, role, response")
-          .in("meeting_id", meetingIds);
-
-        if (participantsData) {
-          // Group by meeting_id
-          participantsMap = participantsData.reduce((acc: Record<string, any[]>, p: any) => {
-            if (!acc[p.meeting_id]) {
-              acc[p.meeting_id] = [];
-            }
-            acc[p.meeting_id].push(p);
-            return acc;
-          }, {});
-
-          // Fetch user details for participants
-          const participantUserIds = [...new Set(participantsData.map((p: any) => p.user_id))];
-          const { data: participantUsers } = await supabase
-            .from("accounts")
-            .select("id, email, display_name")
-            .in("id", participantUserIds);
-
-          if (participantUsers) {
-            const userMap = participantUsers.reduce((acc: Record<string, any>, u: any) => {
-              acc[u.id] = u;
-              return acc;
-            }, {});
-
-            // Attach user info to participants
-            Object.keys(participantsMap).forEach(meetingId => {
-              participantsMap[meetingId] = participantsMap[meetingId].map((p: any) => ({
-                ...p,
-                user: userMap[p.user_id] || null,
-              }));
-            });
-          }
-        }
+      if (challengeError) {
+        setError("Failed to create challenge.");
+        setEnrolling(false);
+        return;
       }
 
-      const data = meetingsData;
+      const { error: verifyError } = await supabase.auth.mfa.verify({
+        factorId,
+        challengeId: challengeData.id,
+        code: totpCode,
+      });
 
-      const transformedMeetings: Meeting[] = (data || []).map((meeting: any) => ({
-        id: meeting.id,
-        host_id: meeting.host_id,
-        type: meeting.type,
-        status: meeting.status,
-        scheduled_at: meeting.scheduled_at,
-        location_pref: meeting.location_pref,
-        fee_cents: meeting.fee_cents,
-        charge_status: meeting.charge_status,
-        created_at: meeting.created_at,
-        host: Array.isArray(meeting.accounts) ? meeting.accounts[0] : meeting.accounts,
-        participants: participantsMap[meeting.id] || [],
-      }));
-
-      setMeetings(transformedMeetings);
-    } catch (error) {
-      console.error("Error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchMeetings();
-  }, []);
-
-  /**
-   * Check if both users sent requests to each other
-   */
-  const checkMutualRequests = async (userId1: string, userId2: string) => {
-    const { data } = await supabase
-      .from("meetings")
-      .select("id, host_id")
-      .or(`and(host_id.eq.${userId1},participants.user_id.eq.${userId2}),and(host_id.eq.${userId2},participants.user_id.eq.${userId1})`);
-
-    return data && data.length >= 2;
-  };
-
-  /**
-   * Mark meeting with coordinator details
-   */
-  const handleMarkMeeting = async (meetingId: string) => {
-    if (!coordinatorName.trim()) {
-      toast.warning("Please enter coordinator name");
-      return;
-    }
-
-    try {
-      // Get user's IP (would be done server-side in production)
-      const ip = coordinatorIP || "N/A";
-
-      // Log admin action
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from("admin_logs").insert({
-          admin_id: user.id,
-          target_user_id: selectedMeeting?.host_id,
-          action: "meeting_marked",
-          meta: {
-            meeting_id: meetingId,
-            coordinator_name: coordinatorName,
-            coordinator_ip: ip,
-            date: new Date().toISOString(),
-          },
-        });
+      if (verifyError) {
+        setError("Invalid code. Make sure your authenticator app is synced and try again.");
+        setTotpCode("");
+        setEnrolling(false);
+        return;
       }
 
-      setCoordinatorName("");
-      setCoordinatorIP("");
-      setSelectedMeeting(null);
-      toast.success("Meeting marked successfully!");
-    } catch (error) {
-      console.error("Error:", error);
+      setSuccess(true);
+      // Redirect to admin dashboard after a brief success message
+      setTimeout(() => router.push("/admin"), 2000);
+    } catch {
+      setError("Verification failed. Please try again.");
+      setEnrolling(false);
     }
   };
 
-  const filteredMeetings = meetings.filter(meeting => {
-    if (statusFilter !== "all" && meeting.status !== statusFilter) return false;
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
+  if (loading) {
     return (
-      meeting.host?.email?.toLowerCase().includes(query) ||
-      meeting.host?.display_name?.toLowerCase().includes(query) ||
-      meeting.participants.some(p => 
-        p.user?.email?.toLowerCase().includes(query) ||
-        p.user?.display_name?.toLowerCase().includes(query)
-      )
+      <div className="min-h-screen bg-gradient-to-br from-[#1f419a] to-[#2a44a3] flex items-center justify-center">
+        <Loader2 className="h-8 w-8 text-white animate-spin" />
+      </div>
     );
-  });
+  }
 
   return (
-    <div className="p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Meeting Management</h1>
-          <p className="text-gray-500">Manage meetings, verify requests, assign coordinators</p>
-        </div>
-        <button
-          onClick={() => fetchMeetings()}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-[#1f419a] to-[#2a44a3] flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#1f419a] to-[#2a44a3] mb-4">
+              <Shield className="h-8 w-8 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Set Up Two-Factor Authentication
+            </h1>
+            <p className="text-gray-500 mt-1 text-sm">
+              MFA is required for all admin accounts. Scan the QR code with
+              Google Authenticator, Authy, or 1Password.
+            </p>
+          </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mb-6">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by user email or name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
-            />
-          </div>
-          <div className="w-full sm:w-48">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
-            >
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="accepted">Accepted</option>
-              <option value="declined">Declined</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Meetings List */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-[#1f419a]" />
-          </div>
-        ) : filteredMeetings.length === 0 ? (
-          <div className="text-center py-12">
-            <Video className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500">No meetings found</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Meeting</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Host</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Participants</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scheduled</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredMeetings.map((meeting) => (
-                  <tr key={meeting.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <Video className="h-4 w-4 text-gray-400" />
-                        <span className="text-sm font-medium text-gray-900">
-                          {meeting.type === "one_on_one" ? "1-on-1" : "Group"}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-gray-400" />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">
-                            {meeting.host?.display_name || "Unknown"}
-                          </p>
-                          <p className="text-xs text-gray-500">{meeting.host?.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1">
-                        <Users className="h-4 w-4 text-gray-400" />
-                        <span className="text-sm text-gray-700">{meeting.participants.length}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2 text-sm text-gray-700">
-                        <Calendar className="h-4 w-4" />
-                        {new Date(meeting.scheduled_at).toLocaleDateString()}
-                        <Clock className="h-4 w-4 ml-2" />
-                        {new Date(meeting.scheduled_at).toLocaleTimeString()}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                        meeting.status === "completed" ? "bg-green-100 text-green-700" :
-                        meeting.status === "accepted" ? "bg-blue-100 text-blue-700" :
-                        meeting.status === "declined" ? "bg-red-100 text-red-700" :
-                        meeting.status === "pending" ? "bg-amber-100 text-amber-700" :
-                        "bg-gray-100 text-gray-700"
-                      }`}>
-                        {meeting.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => setSelectedMeeting(meeting)}
-                          className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
-                          title="View Details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (meeting.participants.length > 0) {
-                              const mutual = await checkMutualRequests(
-                                meeting.host_id,
-                                meeting.participants[0].user_id
-                              );
-                              toast.info(mutual ? "Both users sent requests ✓" : "No mutual requests");
-                            }
-                          }}
-                          className="p-2 rounded-lg hover:bg-blue-50 text-blue-600"
-                          title="Check Mutual Requests"
-                        >
-                          <UserCheck className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Meeting Detail Modal */}
-      {selectedMeeting && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-900">Meeting Details</h3>
+          {/* Error */}
+          {error && (
+            <div className="mb-4 flex flex-col gap-3 p-4 rounded-xl bg-red-50 text-red-700 border border-red-200">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                <p className="text-sm">{error}</p>
+              </div>
               <button
-                onClick={() => setSelectedMeeting(null)}
-                className="p-1 rounded hover:bg-gray-100"
+                type="button"
+                onClick={() => router.push("/admin")}
+                className="text-sm font-medium text-[#1f419a] hover:underline text-left"
               >
-                ×
+                Skip for now and go to admin panel →
               </button>
             </div>
+          )}
 
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Host</label>
-                  <p className="text-sm font-medium">{selectedMeeting.host?.display_name}</p>
-                  <p className="text-xs text-gray-500">{selectedMeeting.host?.email}</p>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
-                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                    selectedMeeting.status === "completed" ? "bg-green-100 text-green-700" :
-                    selectedMeeting.status === "accepted" ? "bg-blue-100 text-blue-700" :
-                    "bg-amber-100 text-amber-700"
-                  }`}>
-                    {selectedMeeting.status}
-                  </span>
-                </div>
+          {/* Success */}
+          {success ? (
+            <div className="text-center py-6">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-4">
+                <CheckCircle className="h-8 w-8 text-green-600" />
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Participants</label>
-                <div className="space-y-2">
-                  {selectedMeeting.participants.map((p, idx) => (
-                    <div key={idx} className="p-2 bg-gray-50 rounded-lg">
-                      <p className="text-sm font-medium">{p.user?.display_name || "Unknown"}</p>
-                      <p className="text-xs text-gray-500">{p.user?.email}</p>
-                      {p.response && (
-                        <span className={`inline-flex mt-1 px-2 py-0.5 rounded text-xs ${
-                          p.response === "accepted" ? "bg-green-100 text-green-700" :
-                          p.response === "declined" ? "bg-red-100 text-red-700" :
-                          "bg-gray-100 text-gray-700"
-                        }`}>
-                          {p.response}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Coordinator Details</label>
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    placeholder="Coordinator Name"
-                    value={coordinatorName}
-                    onChange={(e) => setCoordinatorName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
-                  />
-                  <input
-                    type="text"
-                    placeholder="IP Address (optional)"
-                    value={coordinatorIP}
-                    onChange={(e) => setCoordinatorIP(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
-                  />
-                  <button
-                    onClick={() => handleMarkMeeting(selectedMeeting.id)}
-                    className="w-full py-2 rounded-lg bg-[#1f419a] text-white hover:bg-[#17357b]"
-                  >
-                    Mark Meeting
-                  </button>
-                </div>
-              </div>
+              <h2 className="text-lg font-semibold text-gray-900">MFA Enabled!</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Redirecting to admin dashboard...
+              </p>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* QR Code */}
+              {qrCode && (
+                <div className="flex flex-col items-center mb-6">
+                  <div className="p-3 bg-white border-2 border-gray-200 rounded-xl mb-3">
+                    <img
+                      src={qrCode}
+                      alt="Scan this QR code with your authenticator app"
+                      className="w-48 h-48"
+                    />
+                  </div>
+                  {/* Manual entry key */}
+                  {secret && (
+                    <details className="w-full text-center">
+                      <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
+                        Can&apos;t scan? Enter key manually
+                      </summary>
+                      <code className="mt-2 block text-xs bg-gray-50 p-2 rounded-lg font-mono text-gray-700 break-all">
+                        {secret}
+                      </code>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {/* Verify Code */}
+              <form onSubmit={handleVerify} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Enter the 6-digit code from your app
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <KeyRound className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={totpCode}
+                      onChange={(e) =>
+                        setTotpCode(e.target.value.replace(/\D/g, ""))
+                      }
+                      placeholder="000000"
+                      required
+                      autoFocus
+                      className="w-full pl-10 text-center text-xl tracking-[0.5em] py-3 rounded-xl border border-gray-300 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none transition-all font-mono"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={enrolling || totpCode.length !== 6}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {enrolling ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    "Confirm & Enable MFA"
+                  )}
+                </button>
+              </form>
+            </>
+          )}
         </div>
-      )}
+
+        {/* Logo */}
+        <div className="mt-6 text-center">
+          <Image
+            src="/matchindeed.svg"
+            alt="Matchindeed"
+            width={140}
+            height={36}
+            className="inline-block opacity-80"
+            style={{ width: "auto", height: "auto" }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

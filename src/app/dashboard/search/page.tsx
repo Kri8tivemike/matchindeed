@@ -81,6 +81,8 @@ export default function SearchPage() {
   const [selectedProfile, setSelectedProfile] = useState<CardProfile | null>(null);
   
   // Meeting request modal state
+  const [winkedIds, setWinkedIds] = useState<Set<string>>(new Set());
+  const [interestedIds, setInterestedIds] = useState<Set<string>>(new Set());
   const [meetingRequestModalOpen, setMeetingRequestModalOpen] = useState(false);
   const [selectedUserForMeeting, setSelectedUserForMeeting] = useState<{
     id: string;
@@ -860,7 +862,7 @@ export default function SearchPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1 text-lg font-semibold text-gray-900">
                               <span className="truncate">{p.name}</span>
-                              {p.verified && <BadgeCheck className="h-4.5 w-4.5 text-blue-500 flex-shrink-0" title="Verified profile" />}
+                              {p.verified && <BadgeCheck className="h-4.5 w-4.5 text-blue-500 flex-shrink-0" />}
                             </div>
                             <div className="text-sm text-gray-600">
                               {p.age !== null ? `Age ${p.age}` : ""}

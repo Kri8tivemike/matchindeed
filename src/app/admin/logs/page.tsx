@@ -234,7 +234,7 @@ export default function AdminLogsPage() {
   const formatAction = (action: string) => {
     return action
       .replace(/_/g, " ")
-      .replace(/\b\w/g, (l) => l.toUpperCase());
+      .replace(/\b\w/g, (l: string) => l.toUpperCase());
   };
 
   /**

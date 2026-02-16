@@ -225,7 +225,7 @@ export async function GET(request: NextRequest) {
           religion: profile.religion || null,
           have_children: profile.have_children || null,
           want_children: profile.want_children || null,
-          smoking: profile.smoking_habits || null,
+          smoking: profile.smoking || null,
       };
     });
 

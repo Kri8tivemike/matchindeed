@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-11-20.acacia",
+  apiVersion: "2026-01-28.clover",
   typescript: true,
 });
 
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       }
 
       const normalizedCurrency = currency.toLowerCase();
-      
+
       if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
         return NextResponse.json(
           { error: "Invalid currency. Supported: NGN, USD, GBP" },
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
       }
 
       const normalizedCurrency = currency.toLowerCase();
-      
+
       if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
         return NextResponse.json(
           { error: "Invalid currency. Supported: NGN, USD, GBP" },
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     // Normalize currency to lowercase
     const normalizedCurrency = currency.toLowerCase();
-    
+
     // Validate currency
     if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
       return NextResponse.json(
@@ -167,7 +167,7 @@ export async function POST(request: NextRequest) {
 
     // Get pricing for the tier
     const tierPricing = baseTierPricing[tier];
-    
+
     if (!tierPricing) {
       return NextResponse.json(
         { error: "Invalid tier" },
@@ -189,11 +189,11 @@ export async function POST(request: NextRequest) {
 
     // If custom amount provided, use it (for admin overrides)
     if (amount && typeof amount === "number") {
-      finalAmount = normalizedCurrency === "ngn" 
+      finalAmount = normalizedCurrency === "ngn"
         ? Math.round(amount * 100) // Convert to kobo
         : normalizedCurrency === "gbp"
-        ? Math.round(amount * 100) // Convert to pence
-        : Math.round(amount * 100); // Convert to cents
+          ? Math.round(amount * 100) // Convert to pence
+          : Math.round(amount * 100); // Convert to cents
     }
 
     // If priceId is not provided, create product and price dynamically
@@ -248,8 +248,6 @@ export async function POST(request: NextRequest) {
       mode: "subscription",
       locale: "en",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/subscription?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      // Redirect to my-account page after showing success message
-      // The subscription page will handle the redirect automatically
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/subscription?canceled=true`,
       client_reference_id: userId,
       metadata: {
@@ -259,12 +257,12 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ sessionId: session.id, url: session.url });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error creating checkout session:", error);
+    const msg = error instanceof Error ? error.message : "Failed to create checkout session";
     return NextResponse.json(
-      { error: error.message || "Failed to create checkout session" },
+      { error: msg },
       { status: 500 }
     );
   }
 }
-

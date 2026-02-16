@@ -506,12 +506,18 @@ export default function MeetingRequestModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={
+            disabled={(
               !selectedSlot ||
               submitting ||
               !tierPermission?.allowed ||
               (credits && credits.available < credits.required)
-            }
+            ) as boolean}
+
+
+
+
+
+
             className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {submitting ? (

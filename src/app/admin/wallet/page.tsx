@@ -2,7 +2,7 @@
 
 /**
  * AdminWalletPage - Wallet & Credit Management
- * 
+ *
  * Features per client request:
  * - View wallet balance for all users
  * - Add/remove credits from user wallets
@@ -21,7 +21,6 @@ import {
   Minus,
   History,
   TrendingUp,
-  TrendingDown,
   Loader2,
   RefreshCw,
   User,
@@ -81,7 +80,6 @@ export default function AdminWalletPage() {
 
       // Use a fresh query with explicit timestamp to avoid caching
       // RLS policy should allow admins to see all wallets
-      // Try querying wallets first, then fetch accounts separately if needed
       const { data: walletsData, error: walletsError } = await supabase
         .from("wallets")
         .select(`
@@ -90,22 +88,21 @@ export default function AdminWalletPage() {
           updated_at
         `)
         .order("updated_at", { ascending: false });
-      
+
       // If the join fails, try fetching accounts separately
-      // This ensures we get all wallets even if the foreign key join has RLS issues
       if (walletsData && walletsData.length > 0) {
         const userIds = walletsData.map(w => w.user_id);
         const { data: accountsData } = await supabase
           .from("accounts")
           .select("id, email, display_name")
           .in("id", userIds);
-        
+
         // Merge accounts data with wallets
         const walletsWithAccounts = walletsData.map(wallet => ({
           ...wallet,
           accounts: accountsData?.find(a => a.id === wallet.user_id) || null,
         }));
-        
+
         // Update walletsData to include accounts
         walletsData.forEach((wallet, index) => {
           walletsData[index] = walletsWithAccounts[index];
@@ -122,13 +119,15 @@ export default function AdminWalletPage() {
         });
         return;
       }
-      
-      console.log("[Admin Wallet] Fetched wallets:", walletsData?.length || 0, "wallets");
-      console.log("[Admin Wallet] Wallet details:", walletsData?.map(w => ({
-        user_id: w.user_id,
-        email: Array.isArray(w.accounts) ? w.accounts[0]?.email : w.accounts?.email,
-        balance: w.balance_cents,
-      })));
+
+      console.log("[Admin Wallet] Wallet details:", walletsData?.map(w => {
+        const wExt = w as { user_id: string; balance_cents: number; accounts?: { email?: string } | { email?: string }[] | null };
+        return {
+          user_id: w.user_id,
+          email: Array.isArray(wExt.accounts) ? wExt.accounts[0]?.email : wExt.accounts?.email,
+          balance: w.balance_cents,
+        };
+      }));
 
       // Process wallets - handle cases where accounts might be null or array
       const walletsWithTransactions = await Promise.all(
@@ -151,10 +150,9 @@ export default function AdminWalletPage() {
               .select("email, display_name")
               .eq("id", wallet.user_id)
               .single();
-            
+
             if (accountError) {
               console.warn("[Admin Wallet] Could not fetch account for wallet:", wallet.user_id, accountError);
-              // Create a placeholder user object
               userData = {
                 email: `User ${wallet.user_id.substring(0, 8)}...`,
                 display_name: "Unknown",
@@ -204,37 +202,34 @@ export default function AdminWalletPage() {
       return;
     }
 
-    // Confirm the adjustment
     const adjustmentInNaira = Math.abs(adjustmentAmount / 100);
     const action = adjustmentAmount > 0 ? "add" : "remove";
     const confirmMessage = `Are you sure you want to ${action} ₦${adjustmentInNaira.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${action === "add" ? "to" : "from"} this wallet?\n\nCurrent balance: ₦${(selectedWallet.balance_cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nNew balance: ₦${((selectedWallet.balance_cents + adjustmentAmount) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\nReason: ${adjustmentReason}`;
-    
+
     if (!confirm(confirmMessage)) {
       return;
     }
 
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
-      
+
       if (authError || !user) {
         toast.error("Authentication error. Please log in again.");
         return;
       }
 
       const currentBalance = selectedWallet.balance_cents;
-      // adjustmentAmount is already in cents, can be positive or negative
       const calculatedBalance = currentBalance + adjustmentAmount;
-      const newBalance = Math.max(0, calculatedBalance); // Ensure balance never goes negative
-      
-      // Warn if adjustment would result in negative balance
+      const newBalance = Math.max(0, calculatedBalance);
+
       if (calculatedBalance < 0) {
         const wouldBeNegative = calculatedBalance;
         if (!confirm(`Warning: This adjustment would result in a negative balance (₦${(wouldBeNegative / 100).toFixed(2)}). The balance will be set to ₦0.00 instead. Continue?`)) {
           return;
         }
       }
-      
-      const adjustmentInCents = adjustmentAmount; // Already in cents
+
+      const adjustmentInCents = adjustmentAmount;
 
       console.log("[Admin Wallet] Adjusting wallet:", {
         userId: selectedWallet.user_id,
@@ -259,17 +254,15 @@ export default function AdminWalletPage() {
         throw walletError;
       }
 
-      // Create transaction record
-      // amount_cents stores the absolute value, but we track the direction in description
       const adjustmentDirection = adjustmentInCents > 0 ? "Added" : "Removed";
       const adjustmentAbs = Math.abs(adjustmentInCents);
-      
+
       const { error: transError } = await supabase
         .from("wallet_transactions")
         .insert({
           user_id: selectedWallet.user_id,
           type: "admin_adjustment",
-          amount_cents: adjustmentAbs, // Store absolute value (constraint may require positive)
+          amount_cents: adjustmentAbs,
           balance_before_cents: currentBalance,
           balance_after_cents: newBalance,
           description: `Admin ${adjustmentDirection}: ₦${(adjustmentAbs / 100).toFixed(2)} - ${adjustmentReason}${calculatedBalance < 0 ? ` (Balance capped at ₦0.00)` : ""}`,
@@ -279,7 +272,6 @@ export default function AdminWalletPage() {
 
       if (transError) {
         console.error("[Admin Wallet] Error creating transaction:", transError);
-        // Rollback wallet update if transaction record fails
         await supabase
           .from("wallets")
           .upsert({
@@ -290,7 +282,6 @@ export default function AdminWalletPage() {
         throw transError;
       }
 
-      // Log admin action (if admin_logs table exists)
       try {
         const { error: logError } = await supabase.from("admin_logs").insert({
           admin_id: user.id,
@@ -306,7 +297,6 @@ export default function AdminWalletPage() {
 
         if (logError) {
           console.warn("[Admin Wallet] Could not log admin action (table may not exist):", logError);
-          // Don't fail the operation if logging fails
         }
       } catch (logErr) {
         console.warn("[Admin Wallet] Admin log error (non-critical):", logErr);
@@ -317,9 +307,10 @@ export default function AdminWalletPage() {
       setSelectedWallet(null);
       await fetchWallets();
       toast.success(`Wallet adjusted successfully! New balance: ₦${(newBalance / 100).toLocaleString()}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[Admin Wallet] Error adjusting wallet:", error);
-      toast.error(`Failed to adjust wallet: ${error.message || "Unknown error"}`);
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      toast.error(`Failed to adjust wallet: ${msg}`);
     }
   };
 
@@ -333,6 +324,12 @@ export default function AdminWalletPage() {
   });
 
   const totalBalance = wallets.reduce((sum, w) => sum + w.balance_cents, 0);
+
+  /** Determine if a transaction is a credit (green) or debit (red) using amount_cents */
+  const isCredit = (tx: { type: string; amount_cents: number }) =>
+    tx.type === "topup" ||
+    tx.type === "refund" ||
+    (tx.type === "admin_adjustment" && tx.amount_cents > 0);
 
   return (
     <div className="p-6 lg:p-8">
@@ -439,7 +436,7 @@ export default function AdminWalletPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <p className={`text-sm font-bold ${wallet.balance_cents < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                      <p className={`text-sm font-bold ${wallet.balance_cents < 0 ? "text-red-600" : "text-gray-900"}`}>
                         ₦{(wallet.balance_cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
                       {wallet.balance_cents < 0 && (
@@ -501,7 +498,7 @@ export default function AdminWalletPage() {
                 </label>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setAdjustmentAmount(adjustmentAmount - 100000)} // -1000 naira = -100000 cents
+                    onClick={() => setAdjustmentAmount(adjustmentAmount - 100000)}
                     className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
                     disabled={adjusting}
                   >
@@ -517,14 +514,14 @@ export default function AdminWalletPage() {
                       value={(adjustmentAmount / 100).toFixed(2)}
                       onChange={(e) => {
                         const nairaValue = parseFloat(e.target.value) || 0;
-                        setAdjustmentAmount(Math.round(nairaValue * 100)); // Convert to cents
+                        setAdjustmentAmount(Math.round(nairaValue * 100));
                       }}
                       className="flex-1 text-center px-3 py-2 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
                       disabled={adjusting}
                     />
                   </div>
                   <button
-                    onClick={() => setAdjustmentAmount(adjustmentAmount + 100000)} // +1000 naira = +100000 cents
+                    onClick={() => setAdjustmentAmount(adjustmentAmount + 100000)}
                     className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
                     disabled={adjusting}
                   >
@@ -628,9 +625,7 @@ export default function AdminWalletPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              tx.type === "topup" ||
-                              tx.type === "refund" ||
-                              (tx.type === "admin_adjustment" && tx.balance_after_cents > tx.balance_before_cents)
+                              isCredit(tx)
                                 ? "bg-green-100 text-green-700"
                                 : "bg-red-100 text-red-700"
                             }`}>
@@ -649,11 +644,11 @@ export default function AdminWalletPage() {
                         </div>
                         <div className="text-right">
                           <p className={`text-sm font-bold ${
-                            tx.type === "topup" || tx.type === "refund" || (tx.type === "admin_adjustment" && tx.balance_after_cents > tx.balance_before_cents)
+                            isCredit(tx)
                               ? "text-green-600"
                               : "text-red-600"
                           }`}>
-                            {tx.balance_after_cents > tx.balance_before_cents ? "+" : "-"}₦{(Math.abs(tx.amount_cents) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {tx.amount_cents > 0 ? "+" : "-"}₦{(Math.abs(tx.amount_cents) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
                             Balance: ₦{(tx.balance_after_cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

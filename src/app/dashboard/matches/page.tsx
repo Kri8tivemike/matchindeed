@@ -368,7 +368,7 @@ export default function MutualMatchesPage() {
                           <h3 className="text-lg font-bold text-gray-900 truncate">
                             {match.name}
                             {match.verified && (
-                              <BadgeCheck className="inline-block ml-1.5 h-4.5 w-4.5 text-blue-500" title="Verified profile" />
+                              <BadgeCheck className="inline-block ml-1.5 h-4.5 w-4.5 text-blue-500" />
                             )}
                           </h3>
                           <div className="text-sm text-gray-600">

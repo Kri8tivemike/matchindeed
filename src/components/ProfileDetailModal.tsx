@@ -177,17 +177,17 @@ export default function ProfileDetailModal({
       const currentUserId = session?.user?.id;
 
       // Fetch profile, account data, and block status in parallel
-      const promises: Promise<unknown>[] = [
+      const promises = [
         supabase
           .from("user_profiles")
           .select("*")
           .eq("user_id", userId)
-          .maybeSingle(),
+          .maybeSingle().then(res => res),
         supabase
           .from("accounts")
           .select("email_verified")
           .eq("id", userId)
-          .maybeSingle(),
+          .maybeSingle().then(res => res),
       ];
 
       // Check if this user is already blocked by the current user
@@ -198,7 +198,7 @@ export default function ProfileDetailModal({
             .select("id")
             .eq("blocker_id", currentUserId)
             .eq("blocked_id", userId)
-            .maybeSingle()
+            .maybeSingle().then(res => res)
         );
       }
 
@@ -504,7 +504,7 @@ export default function ProfileDetailModal({
                   <h2 className="flex items-center gap-2 text-3xl font-bold text-gray-900">
                     {name}
                     {verified && (
-                      <BadgeCheck className="h-6 w-6 text-blue-500 flex-shrink-0" title="Verified profile" />
+                      <BadgeCheck className="h-6 w-6 text-blue-500 flex-shrink-0" aria-label="Verified profile" />
                     )}
                     {age !== null && (
                       <span className="text-2xl font-normal text-gray-500">

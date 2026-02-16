@@ -138,11 +138,7 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
           
           svc.getPlacePredictions(
             request,
-            (preds: any, status: any) => {
-              if (ctrl.signal.aborted) return;
-              if (status !== "OK" && status !== "ZERO_RESULTS") {
-                console.warn("Google Places API status:", status, "for query:", q);
-              }
+            (preds) => {
               const arr = Array.isArray(preds) 
                 ? preds.slice(0, limit).map((p: any) => ({ description: p.description, place_id: p.place_id })) 
                 : [];

@@ -58,7 +58,7 @@ export default function AdminMfaSetupPage() {
 
         // Unenroll any unverified factors first
         for (const factor of factors?.totp || []) {
-          if (factor.status === "unverified") {
+          if (factor.status !== "verified") {
             await supabase.auth.mfa.unenroll({ factorId: factor.id });
           }
         }

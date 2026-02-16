@@ -41,6 +41,9 @@ export default function OneSignalProvider({ userId }: OneSignalProviderProps) {
           allowLocalhostAsSecureOrigin: process.env.NODE_ENV === "development",
           notifyButton: {
             enable: false, // We handle UI ourselves
+            prenotify: false,
+            showCredit: false,
+            text: {} as any,
           },
         });
 
