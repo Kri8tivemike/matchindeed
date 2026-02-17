@@ -89,9 +89,9 @@
 - [ ] Moderation workflow
 
 ### Phase 5: Location & Matching (Week 4)
-- [ ] Google Maps integration
-- [ ] Country blocking
-- [ ] Age/restriction enforcement (18-23 rule)
+- [x] Google Maps integration (GooglePlacesAutocomplete)
+- [x] Country blocking (blocked_locations in preferences)
+- [x] Age/restriction enforcement (18-23 rule — users aged 18–23 excluded from discover/search/top-picks)
 
 ### Phase 6: Integrations (Weeks 4-5)
 - [ ] SMS integration

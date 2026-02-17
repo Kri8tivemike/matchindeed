@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 import { createActivity, type ActivityResponse } from "@/lib/activities";
 import { calculateCompatibility, type ProfileData, type UserPreferences } from "@/lib/top-picks-algorithm";
 import { getBlockedUserIds } from "@/lib/blocked-users";
+import { isAgeRestrictedForMatching } from "@/lib/age-restrictions";
 import { getActiveStatus } from "@/lib/active-status";
 import MeetingRequestModal from "@/components/MeetingRequestModal";
 import { useToast } from "@/components/ToastProvider";
@@ -402,6 +403,11 @@ export default function DiscoverPage() {
             if (isBlocked) {
               return false;
             }
+          }
+
+          // Exclude users aged 18–23 (platform rule: no matching for this age range)
+          if (isAgeRestrictedForMatching(p.date_of_birth)) {
+            return false;
           }
 
           return true;

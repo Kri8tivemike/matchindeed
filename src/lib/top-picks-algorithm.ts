@@ -9,6 +9,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { isAgeRestrictedForMatching } from "./age-restrictions";
 
 // Lazy initialization of admin client (only for server-side use)
 let supabaseAdmin: ReturnType<typeof createClient> | null = null;
@@ -466,9 +467,12 @@ export async function generateTopPicks(
 
     const mutualUserIds = new Set((mutualActivities || []).map(a => a.user_id));
 
-    // Calculate compatibility scores
+    // Calculate compatibility scores (exclude profiles aged 18–23 per platform rule)
     const scores: CompatibilityScore[] = profiles
       .map(profile => {
+        // Exclude users aged 18–23 from matching pool
+        if (isAgeRestrictedForMatching(profile.date_of_birth)) return null;
+
         const account = accountMap.get(profile.user_id);
         if (!account) return null;
 

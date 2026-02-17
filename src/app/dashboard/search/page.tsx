@@ -9,6 +9,7 @@ import ProfileCompletenessCard from "@/components/ProfileCompletenessCard";
 import { supabase } from "@/lib/supabase";
 import { calculateMatchPercentage, type PartnerPreferences } from "@/lib/match-percentage";
 import { getBlockedUserIds } from "@/lib/blocked-users";
+import { isAgeRestrictedForMatching } from "@/lib/age-restrictions";
 import { getActiveStatus, isOnline } from "@/lib/active-status";
 import MeetingRequestModal from "@/components/MeetingRequestModal";
 import ProfileDetailModal from "@/components/ProfileDetailModal";
@@ -267,6 +268,9 @@ export default function SearchPage() {
             );
             if (isBlocked) return false;
           }
+
+          // Exclude users aged 18–23 (platform rule: no matching for this age range)
+          if (isAgeRestrictedForMatching(p.date_of_birth)) return false;
 
           return true;
         });
