@@ -454,18 +454,18 @@ export default function Home() {
       {/* STATS BAR                                                  */}
       {/* ========================================================= */}
       <section className="border-b border-gray-100 bg-gray-50 py-8">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-8 px-6 text-center sm:gap-16">
+        <div className="mx-auto flex max-w-5xl flex-nowrap items-center justify-center gap-4 px-4 text-center sm:gap-8 sm:px-6 md:gap-16">
           {[
             { value: "50K+", label: "Active Members" },
             { value: "12K+", label: "Matches Made" },
             { value: "8K+", label: "Video Dates" },
             { value: "4.8/5", label: "User Rating" },
           ].map((stat) => (
-            <div key={stat.label}>
-              <div className="text-2xl font-bold text-[#1f419a] sm:text-3xl">
+            <div key={stat.label} className="shrink-0">
+              <div className="text-lg font-bold text-[#1f419a] sm:text-2xl md:text-3xl">
                 {stat.value}
               </div>
-              <div className="mt-1 text-sm text-gray-500">{stat.label}</div>
+              <div className="mt-0.5 text-xs text-gray-500 sm:mt-1 sm:text-sm">{stat.label}</div>
             </div>
           ))}
         </div>
