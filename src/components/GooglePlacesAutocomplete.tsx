@@ -140,6 +140,7 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
             request,
             (preds) => {
               const arr = Array.isArray(preds) 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
                 ? preds.slice(0, limit).map((p: any) => ({ description: p.description, place_id: p.place_id })) 
                 : [];
               setResults(arr);
@@ -154,6 +155,7 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
       ctrl.abort();
       clearTimeout(t);
     };
+// eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, query, minChars, limit]);
 
   const commit = (v: string, p?: Prediction) => {

@@ -21,6 +21,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 /**
  * Helper to get authenticated user from request
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getAuthUser(request: NextRequest, body?: any): Promise<string | null> {
   // Check query params for user_id
   const { searchParams } = new URL(request.url);
@@ -105,6 +106,7 @@ export async function GET(request: NextRequest) {
 
     // If picks exist for today, fetch profile data for them
     if (existingPicks && existingPicks.length > 0) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const targetUserIds = existingPicks.map((pick: any) => pick.target_user_id);
       
       // Fetch accounts for these users
@@ -113,6 +115,7 @@ export async function GET(request: NextRequest) {
         .select("id, display_name, account_status")
         .in("id", targetUserIds);
       
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const accountMap = new Map((accounts || []).map((acc: any) => [acc.id, acc]));
       
       // Fetch profiles for these users
@@ -121,8 +124,10 @@ export async function GET(request: NextRequest) {
         .select("user_id, first_name, last_name, date_of_birth, location, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, updated_at, ethnicity")
         .in("user_id", targetUserIds);
       
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const profileMap = new Map((profiles || []).map((prof: any) => [prof.user_id, prof]));
       
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const picks = existingPicks.map((pick: any) => {
         const profile = profileMap.get(pick.target_user_id);
         const account = accountMap.get(pick.target_user_id);

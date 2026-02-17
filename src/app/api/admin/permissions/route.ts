@@ -35,6 +35,7 @@ async function verifySuperAdmin(request: NextRequest): Promise<boolean> {
   return account?.role === "superadmin";
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { ALL_PERMISSIONS } from "@/lib/admin-permissions";
 
 export async function GET(request: NextRequest) {

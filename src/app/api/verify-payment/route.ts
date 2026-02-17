@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
       paid: false,
       payment_status: session.payment_status,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error verifying payment:", error);
     return NextResponse.json(

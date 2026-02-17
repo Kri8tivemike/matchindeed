@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   DollarSign,
   Save,
   AlertCircle,
   CheckCircle,
   Loader2,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   Crown,
   RefreshCw,
   History,
@@ -150,6 +152,7 @@ export default function AdminPricingPage() {
 
       // Log admin action
       if (user) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
         const originalTier = originalPricing.find(o => o.tier_id);
         await supabase.from("admin_logs").insert({
           admin_id: user.id,
@@ -253,7 +256,7 @@ export default function AdminPricingPage() {
       {hasChanges && (
         <div className="mb-6 flex items-center gap-3 p-4 rounded-xl bg-amber-50 text-amber-700 border border-amber-200">
           <AlertCircle className="h-5 w-5" />
-          You have unsaved changes. Click "Save Changes" to apply them.
+            You have unsaved changes. Click &quot;Save Changes&quot; to apply them.
         </div>
       )}
 

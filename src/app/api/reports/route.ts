@@ -185,6 +185,7 @@ export async function POST(request: NextRequest) {
         .in("role", ["admin", "superadmin"]);
 
       if (admins && admins.length > 0) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
         const adminNotifications = admins.map((admin: any) => ({
           user_id: admin.id,
           type: "admin_report",

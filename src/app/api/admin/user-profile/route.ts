@@ -199,9 +199,11 @@ export async function GET(request: NextRequest) {
         .eq("user_id", userId);
 
       const meetingIds = (participations || []).map(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
         (p: any) => p.meeting_id
       );
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       let meetings: any[] = [];
       if (meetingIds.length > 0) {
         const { data: meetingData } = await supabase

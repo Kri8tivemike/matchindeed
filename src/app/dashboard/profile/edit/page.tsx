@@ -1,13 +1,13 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Sparkles, EyeOff, Mail, Compass, Heart, Search as SearchIcon, MessageCircle, ArrowLeft, ChevronRight, Camera, Upload, X, Check, Save, Loader2, ArrowUp, ArrowDown, Star } from "lucide-react";
+import { Camera, X, Check, Loader2, ArrowUp, ArrowDown, Star } from "lucide-react";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
-import { saveFormDraft, loadFormDraft, clearFormDraft, hasFormDraft, getDraftTimestamp } from "@/lib/form-autosave";
+import { saveFormDraft, loadFormDraft, clearFormDraft, getDraftTimestamp } from "@/lib/form-autosave";
 
 type ProfileData = {
   birthday: string;
@@ -126,7 +126,7 @@ export default function EditProfilePage() {
     };
 
     loadDraft();
-  }, []);
+  }, [router]);
 
   // Auto-save form data whenever it changes (debounced)
   useEffect(() => {
@@ -283,7 +283,7 @@ export default function EditProfilePage() {
     };
 
     loadProfileData();
-  }, []);
+  }, [router]);
 
   const handleNext = () => {
     // Validate current step before proceeding
@@ -305,12 +305,6 @@ export default function EditProfilePage() {
     } else if (currentStep === totalSteps) {
       // Last step, automatically submit
       handleSubmit();
-    }
-  };
-
-  const handleBack = () => {
-    if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
     }
   };
 
@@ -443,9 +437,11 @@ export default function EditProfilePage() {
             } else {
               uploadErrors.push(`Failed to get URL for "${file.name}"`);
             }
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error("Photo upload exception:", error);
-            uploadErrors.push(`Error uploading "${file.name}": ${error.message || "Unknown error"}`);
+            const message =
+              error instanceof Error ? error.message : "Unknown error";
+            uploadErrors.push(`Error uploading "${file.name}": ${message}`);
           }
         }
       }
@@ -514,7 +510,7 @@ export default function EditProfilePage() {
         return null;
       };
 
-      const profileUpdate: any = {
+      const profileUpdate: Record<string, unknown> = {
         user_id: finalUser.id,
         first_name: formData.firstName || null,
         gender: mapGender(formData.gender),
@@ -596,37 +592,47 @@ export default function EditProfilePage() {
         console.error("Error checking preferences status:", progressError);
         window.location.href = "/dashboard/profile/preferences";
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving profile:", error);
       
       // Extract detailed error message
       let errorMessage = "Failed to save profile. Please try again.";
+      const errorObj =
+        typeof error === "object" && error !== null
+          ? (error as {
+              message?: string;
+              details?: string;
+              hint?: string;
+              code?: string;
+              status?: number;
+            })
+          : {};
       
-      if (error?.message) {
-        errorMessage = error.message;
-      } else if (error?.details) {
-        errorMessage = error.details;
-      } else if (typeof error === 'string') {
+      if (errorObj.message) {
+        errorMessage = errorObj.message;
+      } else if (errorObj.details) {
+        errorMessage = errorObj.details;
+      } else if (typeof error === "string") {
         errorMessage = error;
       }
       
       // Log full error details for debugging
       console.error("Full error details:", JSON.stringify({
-        message: error?.message,
-        details: error?.details,
-        hint: error?.hint,
-        code: error?.code,
-        status: error?.status,
+        message: errorObj.message,
+        details: errorObj.details,
+        hint: errorObj.hint,
+        code: errorObj.code,
+        status: errorObj.status,
         error: error
       }, null, 2));
       
       // Don't redirect to login on save errors - just show the error
       // Only redirect if it's an authentication error
-      if (error?.message?.includes("session") || 
-          error?.message?.includes("auth") || 
-          error?.message?.includes("unauthorized") ||
-          error?.code === "PGRST301" ||
-          error?.status === 401) {
+      if (errorObj.message?.includes("session") || 
+          errorObj.message?.includes("auth") || 
+          errorObj.message?.includes("unauthorized") ||
+          errorObj.code === "PGRST301" ||
+          errorObj.status === 401) {
         toast.error("Your session has expired. Please log in again.");
         router.push("/login");
       } else {
@@ -657,7 +663,7 @@ export default function EditProfilePage() {
     const validFiles: File[] = [];
     const errors: string[] = [];
     
-    files.forEach((file, index) => {
+    files.forEach((file) => {
       if (!allowedTypes.includes(file.type)) {
         errors.push(`${file.name}: Invalid file type. Please use JPEG, PNG, WebP, or GIF.`);
         return;
@@ -829,17 +835,6 @@ export default function EditProfilePage() {
     <h2 className="text-3xl sm:text-4xl font-semibold text-white">{text}</h2>
   );
 
-  // Helper function for text input
-  const textInput = (value: string, onChange: (value: string) => void, placeholder: string) => (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full bg-transparent border-0 border-b-2 border-gray-300/60 text-blue-100 text-center text-base sm:text-lg md:text-xl lg:text-2xl placeholder-blue-200/70 focus:border-blue-200 focus:text-white focus:outline-none pb-2 sm:pb-3 transition-colors"
-    />
-  );
-
   const renderStep = () => {
     switch (currentStep) {
       case 1:
@@ -869,7 +864,7 @@ export default function EditProfilePage() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div className="px-2 sm:px-4">
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white leading-tight mb-3 sm:mb-4 md:mb-5">Hi, let's get started.<br />When's your birthday?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white leading-tight mb-3 sm:mb-4 md:mb-5">Hi, let&apos;s get started.<br />When&apos;s your birthday?</h2>
             </div>
             <div>
               <input
@@ -894,7 +889,7 @@ export default function EditProfilePage() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-3xl sm:text-4xl font-semibold text-white">What's your first name?</h2>
+                    <h2 className="text-3xl sm:text-4xl font-semibold text-white">What&apos;s your first name?</h2>
             </div>
             <div>
               <input
@@ -1006,8 +1001,8 @@ export default function EditProfilePage() {
                   className="range-brand w-full disabled:opacity-50"
                 />
                 <div className="mt-2 flex justify-between text-xs text-blue-100/80">
-                  <span>4'7"</span>
-                  <span>6'10"</span>
+                        <span>4&apos;7&quot;</span>
+                        <span>6&apos;10&quot;</span>
                 </div>
                 <div className="mt-2 text-center text-sm font-medium text-blue-100">
                   {formData.height === "I'd rather not say" ? "I'd rather not say" : formData.height}
@@ -1026,7 +1021,7 @@ export default function EditProfilePage() {
                     formData.height === "I'd rather not say" ? "border-[#1f419a] bg-[#1f419a] text-white shadow-lg shadow-[#1f419a]/30" : "border-gray-200/60 bg-white/90 text-gray-700 hover:border-gray-300 hover:bg-white hover:shadow-sm"
                 }`}
               >
-                I'd rather not say
+                          I&apos;d rather not say
               </button>
             </div>
           </div>
@@ -1672,7 +1667,7 @@ export default function EditProfilePage() {
                 onClick={handleNext}
                 className="rounded-lg bg-white px-6 py-3 sm:px-8 sm:py-4 md:px-10 md:py-5 text-sm sm:text-base md:text-lg font-semibold text-[#1f419a] shadow-lg transition-all hover:shadow-xl hover:scale-105"
               >
-                That's it
+                  That&apos;s it
               </button>
             ) : (
               <button

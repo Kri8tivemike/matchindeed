@@ -9,6 +9,39 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+type ParticipantMeetingRow = {
+  id: string;
+  status: string;
+  type: string;
+  scheduled_at: string;
+  [key: string]: unknown;
+};
+
+type ParticipantRow = {
+  meeting_id: string;
+  role: string;
+  response: string | null;
+  responded_at: string | null;
+  meetings: ParticipantMeetingRow | null;
+};
+
+type NewParticipant = {
+  meeting_id: string;
+  user_id: string;
+  role: "host" | "guest";
+  response: "requested" | "accepted";
+};
+
+type TierPermissionConfig = {
+  tier: string;
+  can_one_on_one_to_basic: boolean;
+  can_one_on_one_to_standard: boolean;
+  can_one_on_one_to_premium: boolean;
+  can_one_on_one_to_vip: boolean;
+  extra_charge_one_on_one_to_premium: boolean;
+  extra_charge_one_on_one_to_vip: boolean;
+};
+
 /**
  * Helper to get authenticated user from request
  */
@@ -108,7 +141,7 @@ export async function GET(request: NextRequest) {
       });
     });
 
-    participantData?.forEach((p: any) => {
+    (participantData as ParticipantRow[] | null)?.forEach((p) => {
       if (p.meetings && !meetingMap.has(p.meetings.id)) {
         // Apply filters to participant meetings too
         if (status && p.meetings.status !== status) return;
@@ -235,7 +268,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check requester's credit balance
-    const { data: credits, error: creditsError } = await supabase
+    const { data: credits } = await supabase
       .from("credits")
       .select("total, used")
       .eq("user_id", user.id)
@@ -256,7 +289,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate meeting fee (based on tier pricing)
-    const { data: pricing, error: pricingError } = await supabase
+    const { data: pricing } = await supabase
       .from("subscription_pricing")
       .select("price_ngn")
       .eq("tier_id", requesterAccount.tier)
@@ -296,7 +329,7 @@ export async function POST(request: NextRequest) {
 
     // Add participants
     // For group meetings, include additional participants
-    const participants: any[] = [
+    const participants: NewParticipant[] = [
       { meeting_id: meeting.id, user_id: target_user_id, role: "host", response: "requested" },
       { meeting_id: meeting.id, user_id: user.id, role: "guest", response: "accepted" }, // Requester auto-accepts
     ];
@@ -407,16 +440,9 @@ export async function POST(request: NextRequest) {
  * Check if a user's tier can contact another tier
  */
 function checkTierPermission(
-  config: any, 
+  config: TierPermissionConfig,
   targetTier: string
 ): { allowed: boolean; message: string; extra_charge: boolean } {
-  const tierLevels: Record<string, number> = {
-    basic: 1,
-    standard: 2,
-    premium: 3,
-    vip: 4,
-  };
-
   // VIP can contact everyone
   if (config.tier === "vip") {
     return { allowed: true, message: "", extra_charge: false };
@@ -572,8 +598,8 @@ export async function PATCH(request: NextRequest) {
             });
 
             if (zoomResult.success) {
-              const videoUpdate: Record<string, any> = {
-                video_link: zoomResult.join_url,
+              const videoUpdate: Record<string, string | boolean | null> = {
+                video_link: zoomResult.join_url || "",
                 video_password: zoomResult.password || null,
                 video_link_is_fallback: zoomResult.is_fallback || false,
               };

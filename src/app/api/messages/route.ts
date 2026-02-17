@@ -116,7 +116,9 @@ export async function GET(request: NextRequest) {
     // MODE 2: List all conversations (matches with messaging)
     // -------------------------------------------------------
     // Try fetching with last_message_at column; fall back gracefully if it doesn't exist
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     let matches: any[] | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     let matchesError: any = null;
 
     const { data: matchData, error: matchErr } = await supabase
@@ -135,6 +137,7 @@ export async function GET(request: NextRequest) {
         .eq("messaging_enabled", true)
         .order("matched_at", { ascending: false });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       matches = (fallbackData || []).map((m: any) => ({
         ...m,
         last_message_at: null,

@@ -71,6 +71,31 @@ type UpcomingMeeting = {
   partner_photo: string | null;
 };
 
+type ActivityRow = {
+  id: string;
+  user_id: string;
+  activity_type: string;
+  created_at: string;
+};
+
+type ProfileLookupRow = {
+  user_id: string;
+  first_name: string | null;
+  profile_photo_url: string | null;
+  photos: string[] | null;
+};
+
+type MeetingParticipantRow = {
+  user_id: string;
+};
+
+type MeetingRow = {
+  id: string;
+  scheduled_at: string;
+  status: string;
+  meeting_participants: MeetingParticipantRow[] | null;
+};
+
 export default function DashboardHomePage() {
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState("User");
@@ -158,18 +183,19 @@ export default function DashboardHomePage() {
 
         // Compute available credits safely
         const creditsData = creditsRes.data as { total?: number; used?: number; rollover?: number } | null;
+        const walletData = walletRes.data as { balance_cents?: number } | null;
         const availableCredits = creditsData
           ? (creditsData.total || 0) - (creditsData.used || 0) + (creditsData.rollover || 0)
           : 0;
 
         setStats({
-          matches: (matchesRes as any)?.count || 0,
-          unreadMessages: (messagesRes as any)?.count || 0,
-          upcomingMeetings: (meetingsRes as any)?.count || 0,
+          matches: matchesRes.count || 0,
+          unreadMessages: messagesRes.count || 0,
+          upcomingMeetings: meetingsRes.count || 0,
           credits: availableCredits,
-          walletBalance: (walletRes.data as any)?.balance_cents ? (walletRes.data as any).balance_cents / 100 : 0,
+          walletBalance: walletData?.balance_cents ? walletData.balance_cents / 100 : 0,
           profileViews: 0, // placeholder for future feature
-          totalLikes: (likesRes as any)?.count || 0,
+          totalLikes: likesRes.count || 0,
         });
 
         // Fetch recent activity (last 5 interactions received)
@@ -182,19 +208,20 @@ export default function DashboardHomePage() {
           .limit(5);
 
         if (activityData && activityData.length > 0) {
+          const activities = activityData as ActivityRow[];
           // Get names for activity users
-          const activityUserIds = [...new Set(activityData.map((a: any) => a.user_id))];
+          const activityUserIds = [...new Set(activities.map((a) => a.user_id))];
           const { data: activityProfiles } = await supabase
             .from("user_profiles")
             .select("user_id, first_name, profile_photo_url, photos")
             .in("user_id", activityUserIds);
 
           const profileMap = new Map(
-            (activityProfiles || []).map((p: any) => [p.user_id, p])
+            ((activityProfiles || []) as ProfileLookupRow[]).map((p) => [p.user_id, p])
           );
 
           setRecentActivity(
-            activityData.map((a: any) => {
+            activities.map((a) => {
               const p = profileMap.get(a.user_id);
               return {
                 id: a.id,
@@ -221,10 +248,11 @@ export default function DashboardHomePage() {
           .limit(3);
 
         if (meetingData && meetingData.length > 0) {
+          const meetings = meetingData as MeetingRow[];
           // Find partner info for each meeting
-          const partnerIds = meetingData.flatMap((m: any) =>
+          const partnerIds = meetings.flatMap((m) =>
             (m.meeting_participants || [])
-              .map((p: any) => p.user_id)
+              .map((p) => p.user_id)
               .filter((uid: string) => uid !== user.id)
           );
 
@@ -234,13 +262,13 @@ export default function DashboardHomePage() {
             .in("user_id", partnerIds);
 
           const partnerMap = new Map(
-            (partnerProfiles || []).map((p: any) => [p.user_id, p])
+            ((partnerProfiles || []) as ProfileLookupRow[]).map((p) => [p.user_id, p])
           );
 
           setUpcomingMeetings(
-            meetingData.map((m: any) => {
+            meetings.map((m) => {
               const partnerId = (m.meeting_participants || [])
-                .map((p: any) => p.user_id)
+                .map((p) => p.user_id)
                 .find((uid: string) => uid !== user.id);
               const partner = partnerId ? partnerMap.get(partnerId) : null;
               return {

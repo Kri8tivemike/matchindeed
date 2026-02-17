@@ -18,6 +18,39 @@ import {
   CheckCircle,
 } from "lucide-react";
 
+type MeetingParticipant = {
+  user_id: string;
+  role: string;
+  user?: {
+    id: string;
+    email: string;
+    display_name: string | null;
+    tier: string | null;
+  } | null;
+};
+
+type MeetingData = {
+  id: string;
+  status: string;
+  scheduled_at: string;
+  meeting_participants: MeetingParticipant[] | null;
+};
+
+type PartnerData = {
+  id: string;
+  name: string;
+  photo: string | null;
+  tier: string;
+  role: string;
+};
+
+type MeetingResponseData = {
+  id?: string;
+  response: string;
+  agreement_text?: string | null;
+  signed_at: string | null;
+};
+
 /**
  * MeetingResponsePage - Full-page experience for submitting Yes/No response
  * after a completed video dating meeting.
@@ -33,15 +66,14 @@ export default function MeetingResponsePage() {
   const router = useRouter();
   const meetingId = params.id as string;
 
-  const [meeting, setMeeting] = useState<any>(null);
-  const [partner, setPartner] = useState<any>(null);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [meeting, setMeeting] = useState<MeetingData | null>(null);
+  const [partner, setPartner] = useState<PartnerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [alreadyResponded, setAlreadyResponded] = useState(false);
-  const [existingResponseData, setExistingResponseData] = useState<any>(null);
+  const [existingResponseData, setExistingResponseData] = useState<MeetingResponseData | null>(null);
   // Whether the other party has also responded
-  const [partnerResponse, setPartnerResponse] = useState<any>(null);
+  const [partnerResponse, setPartnerResponse] = useState<MeetingResponseData | null>(null);
 
   useEffect(() => {
     const fetchMeetingData = async () => {
@@ -53,7 +85,6 @@ export default function MeetingResponsePage() {
           router.push("/login");
           return;
         }
-        setCurrentUser(user);
 
         // Fetch meeting details with participants and profiles
         const { data: meetingData, error: meetingError } = await supabase
@@ -92,9 +123,9 @@ export default function MeetingResponsePage() {
         }
 
         // Verify user is a participant
-        const participants = meetingData.meeting_participants || [];
+        const participants = (meetingData as MeetingData).meeting_participants || [];
         const myParticipation = participants.find(
-          (p: any) => p.user_id === user.id
+          (p) => p.user_id === user.id
         );
         if (!myParticipation) {
           setError("You are not a participant in this meeting.");
@@ -104,7 +135,7 @@ export default function MeetingResponsePage() {
 
         // Find partner (other participant)
         const partnerParticipant = participants.find(
-          (p: any) => p.user_id !== user.id
+          (p) => p.user_id !== user.id
         );
 
         if (!partnerParticipant) {
@@ -157,9 +188,9 @@ export default function MeetingResponsePage() {
         if (partnerResp) {
           setPartnerResponse(partnerResp);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Error fetching meeting:", err);
-        setError(err.message || "Failed to load meeting details.");
+        setError(err instanceof Error ? err.message : "Failed to load meeting details.");
       } finally {
         setLoading(false);
       }
@@ -266,9 +297,9 @@ export default function MeetingResponsePage() {
                     </h1>
                     <p className="text-sm text-gray-500">
                       You submitted your response on{" "}
-                      {new Date(
-                        existingResponseData.signed_at
-                      ).toLocaleDateString()}
+                      {existingResponseData.signed_at
+                        ? new Date(existingResponseData.signed_at).toLocaleDateString()
+                        : "an unknown date"}
                     </p>
                   </div>
                 </div>
@@ -324,9 +355,9 @@ export default function MeetingResponsePage() {
                   </p>
                   <p className="text-xs text-gray-400 mt-3">
                     Signed:{" "}
-                    {new Date(
-                      existingResponseData.signed_at
-                    ).toLocaleString()}
+                    {existingResponseData.signed_at
+                      ? new Date(existingResponseData.signed_at).toLocaleString()
+                      : "Unknown"}
                   </p>
                 </div>
               </div>
@@ -412,10 +443,13 @@ export default function MeetingResponsePage() {
                     <div className="flex flex-col items-center gap-1">
                       <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden border-2 border-white shadow-md">
                         {partner.photo ? (
-                          <img
+                          <Image
                             src={partner.photo}
                             alt={partner.name}
+                            width={56}
+                            height={56}
                             className="w-full h-full object-cover"
+                            unoptimized
                           />
                         ) : (
                           <span className="text-lg font-bold text-gray-400">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import {
@@ -33,7 +33,7 @@ type AdminLog = {
   admin_id: string;
   target_user_id: string | null;
   action: string;
-  meta: any;
+  meta: Record<string, string | number | boolean | null> | null;
   created_at: string;
   admin: {
     email: string;
@@ -43,6 +43,31 @@ type AdminLog = {
     email: string;
     display_name: string | null;
   } | null;
+};
+
+type AdminLogRow = {
+  id: number;
+  admin_id: string;
+  target_user_id: string | null;
+  action: string;
+  meta: Record<string, string | number | boolean | null> | null;
+  created_at: string;
+  accounts:
+    | {
+        email: string;
+        display_name: string | null;
+      }
+    | Array<{
+        email: string;
+        display_name: string | null;
+      }>
+    | null;
+};
+
+type TargetUserRow = {
+  id: string;
+  email: string;
+  display_name: string | null;
 };
 
 /**
@@ -71,7 +96,7 @@ export default function AdminLogsPage() {
   /**
    * Get date range for filter
    */
-  const getDateRange = () => {
+  const getDateRange = useCallback(() => {
     const now = new Date();
     switch (dateFilter) {
       case "today":
@@ -89,12 +114,12 @@ export default function AdminLogsPage() {
       default:
         return null;
     }
-  };
+  }, [dateFilter]);
 
   /**
    * Fetch admin logs
    */
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
       // Fetch logs with admin info (we'll get target user info separately if needed)
@@ -147,12 +172,14 @@ export default function AdminLogsPage() {
         return;
       }
 
+      const rows = (data || []) as AdminLogRow[];
+
       // Fetch target user data separately for logs that have target_user_id
-      const targetUserIds = (data || [])
-        .map((log: any) => log.target_user_id)
+      const targetUserIds = rows
+        .map((log) => log.target_user_id)
         .filter((id: string | null) => id !== null) as string[];
       
-      let targetUsers: Record<string, any> = {};
+      let targetUsers: Record<string, TargetUserRow> = {};
       if (targetUserIds.length > 0) {
         const { data: targetUserData } = await supabase
           .from("accounts")
@@ -160,14 +187,14 @@ export default function AdminLogsPage() {
           .in("id", targetUserIds);
         
         if (targetUserData) {
-          targetUsers = targetUserData.reduce((acc: Record<string, any>, user: any) => {
+          targetUsers = (targetUserData as TargetUserRow[]).reduce((acc: Record<string, TargetUserRow>, user) => {
             acc[user.id] = user;
             return acc;
           }, {});
         }
       }
 
-      const transformedLogs: AdminLog[] = (data || []).map((log: any) => ({
+      const transformedLogs: AdminLog[] = rows.map((log) => ({
         id: log.id,
         admin_id: log.admin_id,
         target_user_id: log.target_user_id,
@@ -185,11 +212,11 @@ export default function AdminLogsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [actionFilter, currentPage, getDateRange, searchQuery]);
 
   useEffect(() => {
     fetchLogs();
-  }, [actionFilter, dateFilter, currentPage]);
+  }, [fetchLogs]);
 
   // Debounced search
   useEffect(() => {
@@ -198,7 +225,7 @@ export default function AdminLogsPage() {
       fetchLogs();
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [fetchLogs, searchQuery]);
 
   /**
    * Get action icon
@@ -321,7 +348,7 @@ export default function AdminLogsPage() {
               <select
                 value={dateFilter}
                 onChange={(e) => {
-                  setDateFilter(e.target.value as any);
+                  setDateFilter(e.target.value as "today" | "week" | "month" | "all");
                   setCurrentPage(1);
                 }}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"

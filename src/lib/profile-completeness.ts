@@ -63,7 +63,7 @@ export const TOTAL_WEIGHT = PROFILE_FIELDS.reduce((sum, f) => sum + f.weight, 0)
 /**
  * Check if a field has a valid (non-empty) value
  */
-function isFieldFilled(value: any): boolean {
+function isFieldFilled(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === "string") return value.trim().length > 0;
   if (typeof value === "boolean") return true; // booleans are always "filled"
@@ -99,7 +99,7 @@ export type CompletenessResult = {
  * @param profileData — object with profile field values (from user_profiles)
  * @returns CompletenessResult with score and missing fields
  */
-export function calculateCompleteness(profileData: Record<string, any>): CompletenessResult {
+export function calculateCompleteness(profileData: Record<string, unknown>): CompletenessResult {
   let earnedWeight = 0;
   const missingFields: ProfileField[] = [];
   const filledFields: ProfileField[] = [];

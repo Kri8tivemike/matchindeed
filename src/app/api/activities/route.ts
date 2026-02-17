@@ -153,6 +153,7 @@ async function createNotification(
  * Helper to get authenticated user from request
  * For client-side calls, user_id is passed in body/query params and validated
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getAuthUser(request: NextRequest, body?: any): Promise<string | null> {
   // Check query params for user_id (for DELETE requests)
   const { searchParams } = new URL(request.url);
@@ -204,6 +205,7 @@ async function getAuthUser(request: NextRequest, body?: any): Promise<string | n
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { target_user_id, activity_type, user_id } = body;
 
     // Validate input

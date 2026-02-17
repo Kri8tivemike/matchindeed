@@ -1,5 +1,14 @@
 import { supabase } from "./supabase";
 
+function isSessionMissingError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { name?: string; message?: string };
+  return (
+    maybeError.name === "AuthSessionMissingError" ||
+    maybeError.message?.includes("session missing") === true
+  );
+}
+
 /**
  * Get the current authenticated user
  * Uses getSession instead of getUser to avoid AuthSessionMissingError when not logged in
@@ -19,9 +28,9 @@ export async function getCurrentUser() {
     }
     
     return session.user;
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Handle AuthSessionMissingError specifically
-    if (error?.name === "AuthSessionMissingError" || error?.message?.includes("session missing")) {
+    if (isSessionMissingError(error)) {
       // This is expected when user is not logged in - not an error
       return null;
     }
@@ -38,9 +47,9 @@ export async function getCurrentUserSafe() {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     return session?.user ?? null;
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Handle AuthSessionMissingError specifically
-    if (error?.name === "AuthSessionMissingError" || error?.message?.includes("session missing")) {
+    if (isSessionMissingError(error)) {
       return null;
     }
     console.error("Error getting user:", error);
@@ -174,4 +183,3 @@ export async function getAuthenticatedAdmin() {
   const adminStatus = await isAdmin(user.id);
   return { user, isAdmin: adminStatus };
 }
-

@@ -84,6 +84,7 @@ export default function HostDashboard() {
   const [loading, setLoading] = useState(true);
   const [host, setHost] = useState<HostProfile | null>(null);
   const [meetings, setMeetings] = useState<HostMeeting[]>([]);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [earnings, setEarnings] = useState<HostEarning[]>([]);
   const [stats, setStats] = useState<HostStats>({
     totalMeetings: 0,

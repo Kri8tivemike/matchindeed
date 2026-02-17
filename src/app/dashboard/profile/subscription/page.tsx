@@ -20,6 +20,7 @@ import {
   Crown,
   Star,
   Zap,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   X,
   Loader2,
   Wallet,
@@ -156,7 +157,7 @@ async function detectCurrency(): Promise<Currency> {
   try {
     const res = await fetch("/api/geo");
     const data = await res.json();
-    let c = (data.currency || "usd").toLowerCase();
+    const c = (data.currency || "usd").toLowerCase();
     if (c === "usd" && !data.country_code) {
       try {
         const fb = await fetch("https://reallyfreegeoip.org/json/");
@@ -273,7 +274,6 @@ function SubscriptionContent() {
   useEffect(() => {
     fetchCurrentTier();
     fetchWalletBalance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Stripe redirect handling

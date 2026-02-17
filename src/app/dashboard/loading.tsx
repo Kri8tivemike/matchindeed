@@ -6,6 +6,8 @@
  * with animated pulse placeholders for immediate visual feedback.
  */
 
+const SIDEBAR_SKELETON_WIDTHS = ["68%", "74%", "79%", "85%", "71%", "82%", "90%"];
+
 export default function Loading() {
   return (
     <div className="min-h-screen w-full bg-gray-50 animate-in fade-in duration-200">
@@ -26,7 +28,7 @@ export default function Loading() {
                 <div className="h-5 w-5 rounded bg-gray-200 animate-pulse" />
                 <div
                   className="h-4 rounded bg-gray-200 animate-pulse"
-                  style={{ width: `${60 + Math.random() * 40}%` }}
+                  style={{ width: SIDEBAR_SKELETON_WIDTHS[i] }}
                 />
               </div>
             ))}

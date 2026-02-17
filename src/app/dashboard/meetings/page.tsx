@@ -21,6 +21,7 @@ import {
   Video,
   Check,
   X,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   ChevronRight,
   RefreshCw,
   Ban,
@@ -530,6 +531,7 @@ export default function MeetingsPage() {
                 const myPart = meeting.participants?.find((p) => p.user_id === userId);
                 const needsResponse = myPart?.response === "requested" && !isHost;
                 const sc = statusConfig[meeting.status] || statusConfig.completed;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
                 const isPastMeeting =
                   new Date(meeting.scheduled_at) < new Date() || meeting.status === "completed";
 

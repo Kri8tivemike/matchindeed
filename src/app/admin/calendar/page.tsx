@@ -11,24 +11,18 @@
  * - Handle meeting conflicts (3+ people on same date)
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
 import {
   Calendar as CalendarIcon,
   Search,
-  Filter,
   Mail,
   Edit,
-  Clock,
   User,
   AlertCircle,
-  CheckCircle,
-  XCircle,
   Loader2,
   RefreshCw,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -47,7 +41,25 @@ type CalendarSlot = {
 type MeetingConflict = {
   date: string;
   count: number;
-  meetings: any[];
+  meetings: CalendarSlot[];
+};
+
+type CalendarSlotRow = {
+  id: string;
+  user_id: string;
+  slot_date: string;
+  slot_time: string;
+  source: string;
+  accounts:
+    | {
+        email: string;
+        display_name: string | null;
+      }
+    | Array<{
+        email: string;
+        display_name: string | null;
+      }>
+    | null;
 };
 
 export default function AdminCalendarPage() {
@@ -65,7 +77,7 @@ export default function AdminCalendarPage() {
   /**
    * Fetch all calendar slots
    */
-  const fetchSlots = async () => {
+  const fetchSlots = useCallback(async () => {
     setLoading(true);
     try {
       let query = supabase
@@ -95,7 +107,7 @@ export default function AdminCalendarPage() {
         return;
       }
 
-      const transformedSlots: CalendarSlot[] = (data || []).map((slot: any) => ({
+      const transformedSlots: CalendarSlot[] = ((data || []) as CalendarSlotRow[]).map((slot) => ({
         id: slot.id,
         user_id: slot.user_id,
         slot_date: slot.slot_date,
@@ -113,7 +125,7 @@ export default function AdminCalendarPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dateFilter]);
 
   /**
    * Detect meeting conflicts
@@ -144,7 +156,7 @@ export default function AdminCalendarPage() {
 
   useEffect(() => {
     fetchSlots();
-  }, [dateFilter]);
+  }, [fetchSlots]);
 
   /**
    * Update calendar slot

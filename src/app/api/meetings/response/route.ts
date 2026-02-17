@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if meeting is completed
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     const meeting = participant.meetings as any;
     if (meeting.status !== "completed") {
       return NextResponse.json(

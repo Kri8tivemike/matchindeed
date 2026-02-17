@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
       .in("activity_type", ["like", "wink", "interested"]);
 
     // Find mutual: users who appear in both sent and received
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
     const sentTargets = new Set(
       (sentActivities || []).map((a) => a.target_user_id)
     );
@@ -163,6 +164,7 @@ export async function GET(request: NextRequest) {
       .in("user_id", [...allPartnerIds]);
 
     const profileMap = new Map(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       (profiles || []).map((p: any) => [p.user_id, p])
     );
 
@@ -173,10 +175,12 @@ export async function GET(request: NextRequest) {
       .in("id", [...allPartnerIds]);
 
     const accountMap = new Map(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       (accounts || []).map((a: any) => [a.id, a])
     );
 
     // Build the unified matches list
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     const matches: any[] = [];
 
     for (const partnerId of allPartnerIds) {

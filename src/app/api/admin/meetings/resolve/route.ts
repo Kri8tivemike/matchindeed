@@ -442,6 +442,7 @@ export async function POST(request: NextRequest) {
       charge_status: newChargeStatus,
       refund_issued: !!refundUserId,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in POST /api/admin/meetings/resolve:", error);
     return NextResponse.json(

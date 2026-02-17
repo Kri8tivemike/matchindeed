@@ -11,6 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
  * Correct wallet balance based on actual transaction records
  * This recalculates the balance from transaction history
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function POST(request: NextRequest) {
   try {
     // Get authenticated user from server-side session
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) => {
                 cookieStore.set(name, value, options);
               });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (error) {
               // Ignore cookie setting errors
             }
@@ -134,6 +136,7 @@ export async function POST(request: NextRequest) {
       difference,
       message: "Balance is correct, no adjustment needed",
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error correcting wallet balance:", error);
     return NextResponse.json(

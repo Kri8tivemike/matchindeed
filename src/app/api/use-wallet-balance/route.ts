@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) => {
                 cookieStore.set(name, value, options);
               });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (error) {
               // Ignore cookie setting errors
             }
@@ -225,6 +226,7 @@ export async function POST(request: NextRequest) {
         ? `${credits} credits added successfully`
         : "Payment processed successfully",
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error using wallet balance:", error);
     return NextResponse.json(

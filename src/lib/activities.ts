@@ -10,7 +10,7 @@ export type ActivityType = "wink" | "like" | "interested" | "rejected";
 
 export interface ActivityResponse {
   success: boolean;
-  activity?: any;
+  activity?: unknown;
   mutual_match?: boolean;
   limits?: {
     day: { used: number; limit: number };

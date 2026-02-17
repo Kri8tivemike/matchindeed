@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Shield, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 
 /**
  * AdminLoginPage - Login page for admin panel
@@ -24,6 +25,11 @@ export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const unauthorizedQueryError =
+    searchParams.get("error") === "unauthorized"
+      ? "You don't have permission to access the admin panel."
+      : null;
+  const displayedError = error ?? unauthorizedQueryError;
 
   // MFA state
   const [mfaStep, setMfaStep] = useState(false);
@@ -38,12 +44,6 @@ export default function AdminLoginPage() {
       }
     };
     handleLogout();
-
-    // Show error message if redirected with error
-    const errorParam = searchParams.get("error");
-    if (errorParam === "unauthorized") {
-      setError("You don't have permission to access the admin panel.");
-    }
   }, [searchParams]);
 
   /**
@@ -188,10 +188,10 @@ export default function AdminLoginPage() {
           </div>
 
           {/* Error Message */}
-          {error && (
+          {displayedError && (
             <div className="mb-6 flex items-center gap-3 p-4 rounded-xl bg-red-50 text-red-700 border border-red-200">
               <AlertCircle className="h-5 w-5 flex-shrink-0" />
-              <p className="text-sm">{error}</p>
+              <p className="text-sm">{displayedError}</p>
             </div>
           )}
 
@@ -325,12 +325,12 @@ export default function AdminLoginPage() {
             <p className="text-sm text-gray-500">
               Only authorized administrators can access this panel.
             </p>
-            <a
+            <Link
               href="/"
               className="inline-flex items-center gap-1 text-sm text-[#1f419a] hover:underline mt-2"
             >
               ← Back to Matchindeed
-            </a>
+            </Link>
           </div>
         </div>
 

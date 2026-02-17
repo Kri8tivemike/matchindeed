@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) => {
                 cookieStore.set(name, value, options);
               });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (error) {
               // Ignore cookie setting errors
             }
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
       payment_status: session.payment_status,
       mode: session.mode,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error verifying subscription:", error);
     return NextResponse.json(

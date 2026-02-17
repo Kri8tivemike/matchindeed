@@ -56,6 +56,46 @@ type Profile = {
   isUserOnline?: boolean;
 };
 
+type RawProfile = {
+  user_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  date_of_birth: string | null;
+  location: string | null;
+  height_cm: number | null;
+  photos: string[] | null;
+  profile_photo_url: string | null;
+  education_level: string | null;
+  relationship_type: string | null;
+  religion: string | null;
+  have_children: boolean | null;
+  want_children: string | null;
+  smoking_habits: string | null;
+  ethnicity: string | string[] | null;
+  updated_at: string | null;
+  gender: string | null;
+  relationship_status: string | null;
+  languages: string[] | null;
+  verified?: boolean;
+};
+
+type AccountRow = {
+  id: string;
+  display_name: string | null;
+  account_status: string | null;
+  profile_visible?: boolean | null;
+  email_verified?: boolean | null;
+  last_active_at?: string | null;
+};
+
+type ActivityTargetRow = {
+  target_user_id: string;
+};
+
+type ActivityUserRow = {
+  user_id: string;
+};
+
 export default function DiscoverPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,8 +109,8 @@ export default function DiscoverPage() {
   } | null>(null);
     const [mutualMatch, setMutualMatch] = useState<string | null>(null);
   const [likedProfileIds, setLikedProfileIds] = useState<Set<string>>(new Set());
-  const [winkedIds, setWinkedIds] = useState<Set<string>>(new Set());
-  const [interestedIds, setInterestedIds] = useState<Set<string>>(new Set());
+  const [, setWinkedIds] = useState<Set<string>>(new Set());
+  const [, setInterestedIds] = useState<Set<string>>(new Set());
 
   // Meeting request modal state
   const [meetingRequestModalOpen, setMeetingRequestModalOpen] = useState(false);
@@ -204,6 +244,8 @@ export default function DiscoverPage() {
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
+    // fetchTopPicks is intentionally called from the timer; activeTab gates execution.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   /**
@@ -218,7 +260,7 @@ export default function DiscoverPage() {
         if (!isMounted) return;
         setLoading(true);
         
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        const { data: { user } } = await supabase.auth.getUser();
         
         if (!isMounted) return;
         if (!user) {
@@ -227,13 +269,6 @@ export default function DiscoverPage() {
           setLoading(false);
           return;
         }
-
-        // Get current user's profile to exclude from results
-        const { data: currentUserProfile } = await supabase
-          .from("user_profiles")
-          .select("user_id")
-          .eq("user_id", user.id)
-          .maybeSingle();
 
         // Get user's preferences for filtering (including blocked locations)
         const { data: preferences } = await supabase
@@ -247,7 +282,7 @@ export default function DiscoverPage() {
 
         // Fetch other users' profiles
         // Try a simple query first to test RLS
-        const { data: testData, error: testError } = await supabase
+        const { error: testError } = await supabase
           .from("user_profiles")
           .select("user_id, first_name")
           .limit(5);
@@ -298,8 +333,9 @@ export default function DiscoverPage() {
         const blockedUserIds = await getBlockedUserIds();
 
         // Filter out current user's profile and blocked users
-        const otherProfiles = (profilesData || []).filter(
-          (p: any) => p.user_id !== user.id && !blockedUserIds.has(p.user_id)
+        const rawProfiles = (profilesData || []) as RawProfile[];
+        const otherProfiles = rawProfiles.filter(
+          (p) => p.user_id !== user.id && !blockedUserIds.has(p.user_id)
         );
 
         if (otherProfiles.length === 0) {
@@ -309,12 +345,12 @@ export default function DiscoverPage() {
         }
 
         // Fetch account display names separately (only if we have profiles)
-        let accountsMap = new Map();
-        const accountIds = otherProfiles.map((p: any) => p.user_id);
+        let accountsMap = new Map<string, AccountRow>();
+        const accountIds = otherProfiles.map((p) => p.user_id);
 
         // Try fetching with profile_visible filter; fall back if column doesn't exist
-        let accountsData: any[] | null = null;
-        let accountsError: any = null;
+        let accountsData: AccountRow[] | null = null;
+        let accountsError: { code?: string } | null = null;
 
         const { data: accData, error: accErr } = await supabase
           .from("accounts")
@@ -327,10 +363,11 @@ export default function DiscoverPage() {
             .from("accounts")
             .select("id, display_name, account_status, email_verified")
             .in("id", accountIds);
-          accountsData = (fallbackData || []).map((a: any) => ({ ...a, profile_visible: true, last_active_at: null }));
+          const fallbackRows = (fallbackData || []) as AccountRow[];
+          accountsData = fallbackRows.map((a) => ({ ...a, profile_visible: true, last_active_at: null }));
           accountsError = fallbackErr;
         } else {
-          accountsData = accData;
+          accountsData = (accData || null) as AccountRow[] | null;
           accountsError = accErr;
         }
 
@@ -340,9 +377,9 @@ export default function DiscoverPage() {
         } else {
           // Only include active AND visible accounts
           const activeAccounts = (accountsData || []).filter(
-            (a: any) => a.account_status === "active" && a.profile_visible !== false
+            (a) => a.account_status === "active" && a.profile_visible !== false
           );
-          accountsMap = new Map(activeAccounts.map((a: any) => [a.id, a]));
+          accountsMap = new Map(activeAccounts.map((a) => [a.id, a]));
         }
 
         // Get users the current user has rejected (to exclude them from discovery)
@@ -358,7 +395,7 @@ export default function DiscoverPage() {
           .eq("user_id", user.id)
           .eq("activity_type", "rejected");
 
-        const rejectedUserIds = new Set((rejectedActivities || []).map((a: any) => a.target_user_id));
+        const rejectedUserIds = new Set(((rejectedActivities || []) as ActivityTargetRow[]).map((a) => a.target_user_id));
 
         // Get profiles the current user has liked (to show red heart icon)
         const { data: likedActivities } = await supabase
@@ -367,7 +404,7 @@ export default function DiscoverPage() {
           .eq("user_id", user.id)
           .in("activity_type", ["like", "wink", "interested"]);
 
-        const likedIds = new Set((likedActivities || []).map((a: any) => a.target_user_id));
+        const likedIds = new Set(((likedActivities || []) as ActivityTargetRow[]).map((a) => a.target_user_id));
         setLikedProfileIds(likedIds);
 
         // Get mutual interests (profiles that have liked this user)
@@ -377,10 +414,10 @@ export default function DiscoverPage() {
           .eq("target_user_id", user.id)
           .in("activity_type", ["like", "wink", "interested"]);
 
-        const mutualUserIds = new Set((mutualActivities || []).map((a: any) => a.user_id));
+        const mutualUserIds = new Set(((mutualActivities || []) as ActivityUserRow[]).map((a) => a.user_id));
         
         
-        let filteredProfiles = otherProfiles.filter((p: any) => {
+        let filteredProfiles = otherProfiles.filter((p) => {
           // Only include profiles with active accounts
           const hasActiveAccount = accountsMap.has(p.user_id);
           if (!hasActiveAccount) {
@@ -421,8 +458,7 @@ export default function DiscoverPage() {
           const ageRangeStr = preferences.partner_age_range.trim().replace(/\s+/g, "-");
           const [minAge, maxAge] = ageRangeStr.split("-").map(Number);
           if (minAge && maxAge) {
-            const beforeCount = filteredProfiles.length;
-            const ageFiltered = filteredProfiles.filter((p: any) => {
+            const ageFiltered = filteredProfiles.filter((p) => {
               if (!p.date_of_birth) {
                 return false;
               }
@@ -447,7 +483,7 @@ export default function DiscoverPage() {
         }
 
         // Calculate compatibility scores for each profile and sort by score
-        const profilesWithScores = filteredProfiles.map((p: any) => {
+        const profilesWithScores = filteredProfiles.map((p) => {
           const account = accountsMap.get(p.user_id);
           
           // Map profile data to ProfileData format for compatibility algorithm
@@ -585,7 +621,7 @@ export default function DiscoverPage() {
             matchBgColor,
             gender: p.gender || null,
             religion: p.religion || null,
-            ethnicity: p.ethnicity || null,
+            ethnicity: Array.isArray(p.ethnicity) ? (p.ethnicity[0] || null) : p.ethnicity || null,
             education: p.education_level || null,
             languages: p.languages || [],
             smoking_habits: p.smoking_habits || null,
@@ -1397,7 +1433,7 @@ export default function DiscoverPage() {
                   {mutualMatch && (
                     <div className="mt-4 rounded-lg bg-green-50 border border-green-200 p-3 flex items-center gap-2">
                       <Heart className="h-4 w-4 text-green-600 flex-shrink-0" />
-                      <p className="text-sm text-green-800">It's a match! You both like each other!</p>
+                    <p className="text-sm text-green-800">It&apos;s a match! You both like each other!</p>
                     </div>
                   )}
                   {activityLimits && (
@@ -1512,7 +1548,7 @@ export default function DiscoverPage() {
                 ) : topPicks.length === 0 ? (
                   <div className="text-center py-12">
                     <User className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-600">We're finding your perfect matches. Check back soon!</p>
+                        <p className="text-gray-600">We&apos;re finding your perfect matches. Check back soon!</p>
                     <p className="text-sm text-gray-500 mt-2">Complete your preferences to get better matches.</p>
                   </div>
                 ) : (
@@ -1579,7 +1615,7 @@ export default function DiscoverPage() {
                         <div className="mt-4 flex flex-wrap gap-2">
                           {topPick?.height_cm && (
                             <span className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700">
-                              {Math.floor(topPick.height_cm / 30.48)}'{Math.round((topPick.height_cm % 30.48) / 2.54)}"
+                              {Math.floor(topPick.height_cm / 30.48)}&apos;{Math.round((topPick.height_cm % 30.48) / 2.54)}&quot;
                             </span>
                           )}
                           {topPick?.education_level && (
@@ -1900,7 +1936,7 @@ export default function DiscoverPage() {
             setSelectedUserForMeeting(null);
           }}
           targetUser={selectedUserForMeeting}
-          onSuccess={(meeting) => {
+          onSuccess={() => {
             // Show success message
             setError(null);
           }}

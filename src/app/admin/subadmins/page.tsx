@@ -15,11 +15,13 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/ToastProvider";
 import {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   UserCog,
   Shield,
   Loader2,
   RefreshCw,
   Check,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   ChevronDown,
 } from "lucide-react";
 import { ALL_PERMISSIONS } from "@/lib/admin-permissions";

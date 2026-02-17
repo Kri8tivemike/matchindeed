@@ -140,6 +140,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: "Reactivation request submitted. Your partner will be notified to respond.",
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in POST /api/profile/reactivate:", error);
     return NextResponse.json(
@@ -180,6 +181,7 @@ export async function GET(request: NextRequest) {
       reactivation_status: match.reactivation_status || null,
       reactivation_reason: match.reactivation_reason || null,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in GET /api/profile/reactivate:", error);
     return NextResponse.json(

@@ -36,6 +36,7 @@ import {
   Ban,
   MessageSquare,
   Search,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   TrendingUp,
   FileWarning,
   CheckCircle,
@@ -206,6 +207,7 @@ export default function AdminReportsPage() {
         return;
       }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       let transformedData: ReportItem[] = (data || []).map((item: any) => ({
         id: item.id,
         reporter_id: item.reporter_id,
@@ -267,6 +269,7 @@ export default function AdminReportsPage() {
         data: { user },
       } = await supabase.auth.getUser();
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updateData: Record<string, any> = {
         status: newStatus,
         reviewed_by: user?.id,

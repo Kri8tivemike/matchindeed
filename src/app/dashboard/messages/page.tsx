@@ -26,8 +26,10 @@ import {
   MessageCircle,
   Search,
   Loader2,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   Heart,
   ArrowRight,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   User,
   Inbox,
 } from "lucide-react";

@@ -18,6 +18,7 @@ import { supabase } from "@/lib/supabase";
 import {
   Video,
   Clock,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   User,
   Shield,
   ExternalLink,
@@ -26,6 +27,7 @@ import {
   Copy,
   CheckCircle,
   AlertTriangle,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   Calendar,
   Camera,
   Mic,

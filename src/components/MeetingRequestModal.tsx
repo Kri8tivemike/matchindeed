@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import {
   X,
   Calendar,
@@ -8,8 +9,6 @@ import {
   Video,
   AlertCircle,
   Check,
-  ChevronLeft,
-  ChevronRight,
   Loader2,
   CreditCard,
   Crown,
@@ -46,6 +45,7 @@ type MeetingRequestModalProps = {
   /** Target user to request meeting with */
   targetUser: UserInfo;
   /** Callback when meeting is successfully requested */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   onSuccess?: (meeting: any) => void;
 };
 
@@ -68,8 +68,6 @@ export default function MeetingRequestModal({
   const [submitting, setSubmitting] = useState(false);
   // Selected slot
   const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null);
-  // Current month being viewed
-  const [currentMonth, setCurrentMonth] = useState(new Date());
   // User's credits
   const [credits, setCredits] = useState<{ available: number; required: number } | null>(null);
   // Error/success messages
@@ -161,6 +159,7 @@ export default function MeetingRequestModal({
   /**
    * Check tier permissions
    */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   function checkTierPermission(config: any, targetTier: string) {
     if (config.tier === "vip") {
       return { allowed: true, message: "", extra_charge: false };
@@ -343,10 +342,13 @@ export default function MeetingRequestModal({
           <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
             <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
               {targetUser.profile_photo_url ? (
-                <img
+                <Image
                   src={targetUser.profile_photo_url}
                   alt={targetUser.first_name || "User"}
+                  width={48}
+                  height={48}
                   className="w-full h-full object-cover"
+                  unoptimized
                 />
               ) : (
                 <span className="text-xl font-bold text-gray-400">
@@ -427,7 +429,7 @@ export default function MeetingRequestModal({
               <Calendar className="h-12 w-12 mx-auto mb-3 text-gray-300" />
               <p className="text-gray-500">No available slots</p>
               <p className="text-sm text-gray-400">
-                This user hasn't set any availability yet.
+              This user hasn&apos;t set any availability yet.
               </p>
             </div>
           ) : (

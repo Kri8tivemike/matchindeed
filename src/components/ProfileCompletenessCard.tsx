@@ -35,6 +35,7 @@ import {
   calculateCompleteness,
   getTopMissingFields,
   type CompletenessResult,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   type ProfileField,
 } from "@/lib/profile-completeness";
 

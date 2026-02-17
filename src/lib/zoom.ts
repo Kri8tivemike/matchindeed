@@ -63,6 +63,15 @@ export type ZoomTokenResponse = {
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    const maybeMessage = (error as { message?: unknown }).message;
+    if (typeof maybeMessage === "string") return maybeMessage;
+  }
+  return fallback;
+}
+
 /**
  * Get a valid Zoom OAuth access token using Server-to-Server OAuth flow.
  * Caches the token and refreshes when expired.
@@ -222,11 +231,11 @@ export async function createZoomMeeting(options: {
       password: meeting.password,
       is_fallback: false,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[Zoom] Error creating meeting:", error);
     return {
       success: false,
-      error: error.message || "Zoom API error",
+      error: getErrorMessage(error, "Zoom API error"),
     };
   }
 }

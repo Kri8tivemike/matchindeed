@@ -12,22 +12,16 @@
  * - Filter by status and date range
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
 import {
-  RotateCcw,
-  UserCheck,
-  UserX,
   Mail,
   CheckCircle,
   XCircle,
   Loader2,
   RefreshCw,
-  Eye,
   Search,
-  Filter,
-  Download,
   AlertCircle,
 } from "lucide-react";
 
@@ -52,6 +46,27 @@ type ReactivationRequest = {
     email: string;
     display_name: string | null;
   } | null;
+};
+
+type ReactivationRequestRow = {
+  id: string;
+  user_id: string;
+  matched_with_user_id: string;
+  reason_code: number | null;
+  reason_text: string | null;
+  status: string;
+  partner_response_code: number | null;
+  partner_response_text: string | null;
+  admin_decision: string | null;
+  admin_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type AccountLookupRow = {
+  id: string;
+  email: string;
+  display_name: string | null;
 };
 
 const REACTIVATION_REASONS: Record<number, string> = {
@@ -101,7 +116,7 @@ export default function AdminReactivationPage() {
   const itemsPerPage = 10;
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -117,12 +132,13 @@ export default function AdminReactivationPage() {
 
       // Fetch user data
       const userIds = new Set<string>();
-      (data || []).forEach((req: any) => {
+      const requestRows = (data || []) as ReactivationRequestRow[];
+      requestRows.forEach((req) => {
         userIds.add(req.user_id);
         userIds.add(req.matched_with_user_id);
       });
 
-      let userMap: Record<string, any> = {};
+      let userMap: Record<string, AccountLookupRow> = {};
       if (userIds.size > 0) {
         const { data: usersData } = await supabase
           .from("accounts")
@@ -130,14 +146,14 @@ export default function AdminReactivationPage() {
           .in("id", Array.from(userIds));
 
         if (usersData) {
-          userMap = usersData.reduce((acc: Record<string, any>, u: any) => {
+          userMap = (usersData as AccountLookupRow[]).reduce((acc: Record<string, AccountLookupRow>, u) => {
             acc[u.id] = u;
             return acc;
           }, {});
         }
       }
 
-      const transformed = (data || []).map((req: any) => ({
+      const transformed: ReactivationRequest[] = requestRows.map((req) => ({
         ...req,
         user: userMap[req.user_id] || null,
         matched_user: userMap[req.matched_with_user_id] || null,
@@ -151,7 +167,7 @@ export default function AdminReactivationPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterStatus, searchTerm, toast]);
 
   const applyFilters = (
     data: ReactivationRequest[],
@@ -180,7 +196,7 @@ export default function AdminReactivationPage() {
 
   useEffect(() => {
     fetchRequests();
-  }, []);
+  }, [fetchRequests]);
 
   useEffect(() => {
     applyFilters(requests, searchTerm, filterStatus);
@@ -493,7 +509,7 @@ export default function AdminReactivationPage() {
               {/* User Request */}
               <div>
                 <label className="block text-sm font-semibold text-gray-900 mb-3">
-                  User's Request Reason
+                    User&apos;s Request Reason
                 </label>
                 <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                   <p className="text-sm text-gray-700">
@@ -524,7 +540,7 @@ export default function AdminReactivationPage() {
                     <label className="block text-sm font-semibold text-gray-900 mb-3">Decision</label>
                     <select
                       value={decision}
-                      onChange={(e) => setDecision(e.target.value as any)}
+                      onChange={(e) => setDecision(e.target.value as "approved" | "rejected")}
                       className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
                     >
                       <option value="approved">✓ Approve Reactivation</option>

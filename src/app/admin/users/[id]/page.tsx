@@ -14,6 +14,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowLeft,
   Mail,
@@ -26,19 +27,16 @@ import {
   Ban,
   AlertTriangle,
   CheckCircle,
-  XCircle,
   Edit,
   Loader2,
   Save,
   Plus,
   Minus,
   User,
-  RefreshCw,
   Eye,
   Heart,
   MessageCircle,
   Flag,
-  Clock,
   Activity,
   FileWarning,
   Send,
@@ -91,6 +89,68 @@ type UserDetail = {
 
 type TabType = "overview" | "activities" | "reports" | "meetings";
 
+type ActivityTabRow = {
+  id: string;
+  activity_type: string;
+  created_at: string;
+  target_user?: {
+    display_name: string | null;
+    email: string;
+  } | null;
+  user?: {
+    display_name: string | null;
+    email: string;
+  } | null;
+};
+
+type ReportTabRow = {
+  id: string;
+  priority: string;
+  status: string;
+  reason: string;
+  created_at: string;
+  reporter?: {
+    display_name: string | null;
+    email: string;
+  } | null;
+  reported_user?: {
+    display_name: string | null;
+    email: string;
+  } | null;
+  description?: string | null;
+  resolution?: string | null;
+};
+
+type MeetingTabRow = {
+  id: string;
+  title?: string | null;
+  status: string;
+  scheduled_at?: string;
+  scheduled_date?: string | null;
+  scheduled_time?: string | null;
+  duration_minutes?: number | null;
+  created_at: string;
+};
+
+type UserTabData = {
+  counts?: {
+    winks_sent?: number;
+    likes_sent?: number;
+    interested_sent?: number;
+    total_sent?: number;
+    total_received?: number;
+    total_against?: number;
+    total_by_user?: number;
+    by_status?: Record<string, number>;
+    total?: number;
+  };
+  sent?: ActivityTabRow[];
+  received?: ActivityTabRow[];
+  against?: ReportTabRow[];
+  by_user?: ReportTabRow[];
+  meetings?: MeetingTabRow[];
+};
+
 // ---------------------------------------------------------------
 // MAIN COMPONENT
 // ---------------------------------------------------------------
@@ -115,7 +175,7 @@ export default function AdminUserDetailPage() {
   const [activeTab, setActiveTab] = useState<TabType>("overview");
 
   // Tab data states
-  const [tabData, setTabData] = useState<any>(null);
+  const [tabData, setTabData] = useState<UserTabData | null>(null);
   const [tabLoading, setTabLoading] = useState(false);
 
   // ── Fetch User ────────────────────────────────────────
@@ -208,7 +268,7 @@ export default function AdminUserDetailPage() {
         );
 
         if (res.ok) {
-          setTabData(await res.json());
+          setTabData((await res.json()) as UserTabData);
         }
       } catch (err) {
         console.error("Error fetching tab data:", err);
@@ -320,7 +380,7 @@ export default function AdminUserDetailPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const updateData: Record<string, any> = {
+      const updateData: Record<string, string | null> = {
         account_status: newStatus,
       };
       if (newStatus === "suspended") {
@@ -490,10 +550,13 @@ export default function AdminUserDetailPage() {
         <div className="flex items-center gap-4 flex-1 min-w-0">
           <div className="w-14 h-14 rounded-xl bg-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0">
             {user.profile?.profile_photo_url ? (
-              <img
+              <Image
                 src={user.profile.profile_photo_url}
                 alt=""
+                width={56}
+                height={56}
                 className="w-full h-full object-cover"
+                unoptimized
               />
             ) : (
               <User className="h-7 w-7 text-gray-400" />
@@ -964,7 +1027,7 @@ export default function AdminUserDetailPage() {
                       No sent activities
                     </p>
                   ) : (
-                    (tabData.sent || []).map((a: any) => (
+                    (tabData.sent || []).map((a) => (
                       <div
                         key={a.id}
                         className="px-5 py-2.5 flex items-center justify-between text-sm"
@@ -1012,7 +1075,7 @@ export default function AdminUserDetailPage() {
                       No received activities
                     </p>
                   ) : (
-                    (tabData.received || []).map((a: any) => (
+                    (tabData.received || []).map((a) => (
                       <div
                         key={a.id}
                         className="px-5 py-2.5 flex items-center justify-between text-sm"
@@ -1098,7 +1161,7 @@ export default function AdminUserDetailPage() {
                       No reports against this user
                     </p>
                   ) : (
-                    (tabData.against || []).map((r: any) => (
+                    (tabData.against || []).map((r) => (
                       <div key={r.id} className="px-5 py-3">
                         <div className="flex items-center gap-2 mb-1">
                           <span
@@ -1167,7 +1230,7 @@ export default function AdminUserDetailPage() {
                       No reports made
                     </p>
                   ) : (
-                    (tabData.by_user || []).map((r: any) => (
+                    (tabData.by_user || []).map((r) => (
                       <div key={r.id} className="px-5 py-3">
                         <div className="flex items-center gap-2 mb-1">
                           <span
@@ -1252,7 +1315,7 @@ export default function AdminUserDetailPage() {
                       No meetings found
                     </p>
                   ) : (
-                    (tabData.meetings || []).map((m: any) => (
+                    (tabData.meetings || []).map((m) => (
                       <div
                         key={m.id}
                         className="px-5 py-3 flex items-center justify-between"

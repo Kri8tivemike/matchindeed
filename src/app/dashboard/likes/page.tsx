@@ -54,6 +54,34 @@ type LikeProfile = {
   verified?: boolean;
 };
 
+type ActivityRow = {
+  id: string;
+  user_id: string;
+  target_user_id: string;
+  activity_type: "wink" | "like" | "interested";
+  created_at: string;
+};
+
+type ProfileRow = {
+  user_id: string;
+  first_name: string | null;
+  photos: string[] | null;
+  profile_photo_url: string | null;
+  location: string | null;
+  date_of_birth: string | null;
+};
+
+type AccountRow = {
+  id: string;
+  display_name: string | null;
+  tier: string | null;
+  email_verified: boolean | null;
+};
+
+type AvailabilityRow = {
+  user_id: string;
+};
+
 // ---------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------
@@ -113,8 +141,10 @@ export default function LikesPage() {
         if (sErr) { setError("Failed to load sent likes."); setLoading(false); return; }
 
         // 3. Collect user IDs
-        const rIds = new Set((receivedActs || []).map((a: any) => a.user_id));
-        const sIds = new Set((sentActs || []).map((a: any) => a.target_user_id));
+        const receivedActivityRows = (receivedActs || []) as ActivityRow[];
+        const sentActivityRows = (sentActs || []) as ActivityRow[];
+        const rIds = new Set(receivedActivityRows.map((a) => a.user_id));
+        const sIds = new Set(sentActivityRows.map((a) => a.target_user_id));
         const allIds = Array.from(new Set([...rIds, ...sIds]));
         if (allIds.length === 0) { setReceivedLikes([]); setMyLikes([]); setMutualMatches(new Set()); setLoading(false); return; }
 
@@ -125,12 +155,12 @@ export default function LikesPage() {
           supabase.from("meeting_availability").select("user_id").in("user_id", allIds).gte("slot_date", new Date().toISOString().split("T")[0]),
         ]);
 
-        const profilesMap = new Map((profilesRes.data || []).map((p: any) => [p.user_id, p]));
-        const accountsMap = new Map((accountsRes.data || []).map((a: any) => [a.id, a]));
-        const slotsSet = new Set((availRes.data || []).map((a: any) => a.user_id));
+        const profilesMap = new Map(((profilesRes.data || []) as ProfileRow[]).map((p) => [p.user_id, p]));
+        const accountsMap = new Map(((accountsRes.data || []) as AccountRow[]).map((a) => [a.id, a]));
+        const slotsSet = new Set(((availRes.data || []) as AvailabilityRow[]).map((a) => a.user_id));
 
         /** Transform an activity row into a LikeProfile */
-        const transform = (act: any, targetId: string): LikeProfile | null => {
+        const transform = (act: ActivityRow, targetId: string): LikeProfile | null => {
           const prof = profilesMap.get(targetId);
           const acct = accountsMap.get(targetId);
           if (!prof && !acct) return null;
@@ -160,8 +190,8 @@ export default function LikesPage() {
 
         const blockedIds = await getBlockedUserIds();
 
-        const tReceived = (receivedActs || []).map((a: any) => transform(a, a.user_id)).filter((p): p is LikeProfile => p !== null && !blockedIds.has(p.user_id));
-        const tSent = (sentActs || []).map((a: any) => transform(a, a.target_user_id)).filter((p): p is LikeProfile => p !== null && !blockedIds.has(p.user_id));
+        const tReceived = receivedActivityRows.map((a) => transform(a, a.user_id)).filter((p): p is LikeProfile => p !== null && !blockedIds.has(p.user_id));
+        const tSent = sentActivityRows.map((a) => transform(a, a.target_user_id)).filter((p): p is LikeProfile => p !== null && !blockedIds.has(p.user_id));
 
         // Mutual matches
         const rSet = new Set(tReceived.map((l) => l.user_id));

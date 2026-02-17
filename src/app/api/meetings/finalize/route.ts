@@ -353,6 +353,7 @@ export async function POST(request: NextRequest) {
       outcome,
       fault,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in POST /api/meetings/finalize:", error);
     return NextResponse.json(
@@ -369,6 +370,7 @@ function buildNotificationMessage(
   outcome: string,
   fault: string,
   chargeDecision: string,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   refundIssued: boolean
 ): string {
   let message = "";

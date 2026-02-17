@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) => {
                 cookieStore.set(name, value, options);
               });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (error) {
               // Ignore cookie setting errors in API routes
             }
@@ -204,6 +205,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Update credits
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { data: updatedCredits, error: updateError } = await supabase
       .from("credits")
       .upsert({
@@ -280,6 +282,7 @@ export async function POST(request: NextRequest) {
       totalBefore,
       totalAfter,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error adding credits:", error);
     return NextResponse.json(

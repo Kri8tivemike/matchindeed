@@ -83,7 +83,7 @@ async function detectCurrency(): Promise<Currency> {
   try {
     const res = await fetch("/api/geo");
     const data = await res.json();
-    let c = (data.currency || "usd").toLowerCase();
+    const c = (data.currency || "usd").toLowerCase();
     if (c === "usd" && !data.country_code) {
       try {
         const fb = await fetch("https://reallyfreegeoip.org/json/");
@@ -288,11 +288,12 @@ function WalletContent() {
       }
 
       // Wallet balance
-      let { data: wallet, error: walletError } = await supabase
+      const { data: walletData, error: walletError } = await supabase
         .from("wallets")
         .select("balance_cents")
         .eq("user_id", user.id)
         .single();
+      let wallet = walletData;
 
       if (walletError?.code === "PGRST116") {
         await supabase.from("wallets").insert({ user_id: user.id, balance_cents: 0 });
@@ -311,11 +312,12 @@ function WalletContent() {
       }
 
       // Credits
-      let { data: credits, error: creditsError } = await supabase
+      const { data: creditsData, error: creditsError } = await supabase
         .from("credits")
         .select("total, used, rollover")
         .eq("user_id", user.id)
         .single();
+      let credits = creditsData;
 
       if (creditsError?.code === "PGRST116") {
         await supabase.from("credits").insert({ user_id: user.id, total: 0, used: 0, rollover: 0 });
@@ -369,7 +371,6 @@ function WalletContent() {
 
   useEffect(() => {
     fetchWalletData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---------------------------------------------------------------

@@ -198,10 +198,13 @@ export default function AdminMfaSetupPage() {
               {qrCode && (
                 <div className="flex flex-col items-center mb-6">
                   <div className="p-3 bg-white border-2 border-gray-200 rounded-xl mb-3">
-                    <img
+                    <Image
                       src={qrCode}
                       alt="Scan this QR code with your authenticator app"
+                      width={192}
+                      height={192}
                       className="w-48 h-48"
+                      unoptimized
                     />
                   </div>
                   {/* Manual entry key */}

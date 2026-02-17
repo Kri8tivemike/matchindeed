@@ -176,6 +176,7 @@ export default function MeetingResponseForm({
       if (onSuccess) {
         setTimeout(() => onSuccess(), 2500);
       }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error("Error submitting response:", err);
       setError(err.message || "Failed to submit response. Please try again.");

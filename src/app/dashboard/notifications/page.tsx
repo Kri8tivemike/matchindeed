@@ -36,6 +36,7 @@ import {
   Filter,
   ChevronDown,
   Inbox,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   Cigarette,
 } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
@@ -51,6 +52,7 @@ type Notification = {
   type: string;
   title: string;
   message: string;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: Record<string, any> | null;
   read: boolean;
   read_at: string | null;

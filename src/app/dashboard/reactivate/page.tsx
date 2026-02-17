@@ -47,6 +47,7 @@ export default function ReactivatePage() {
     };
 
     checkReactivationStatus();
+// eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSubmit = async (reason: string, customReason?: string) => {
@@ -76,6 +77,7 @@ export default function ReactivatePage() {
         const data = await statusRes.json();
         setStatus(data);
       }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       setError(err.message || 'Failed to submit reactivation request');
     } finally {

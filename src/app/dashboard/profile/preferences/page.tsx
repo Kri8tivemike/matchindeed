@@ -1,9 +1,8 @@
 "use client";
 import { useState, useEffect, Suspense, useRef } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles, EyeOff, Mail, Compass, Heart, Search as SearchIcon, MessageCircle, ArrowLeft, ChevronRight, CheckCircle2, Video, Eye, Sparkles as SparklesIcon, Calendar, X, Check, Loader2, Pencil } from "lucide-react";
+import { Heart, ArrowLeft, CheckCircle2, Video, Eye, Calendar, X, Check, Loader2, Pencil } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
 import { supabase } from "@/lib/supabase";
@@ -336,11 +335,6 @@ function PreferencesPageContent() {
         return;
       }
 
-      // Parse age range to min/max
-      const ageRangeMatch = formData.ageRange.match(/(\d+)\s*-\s*(\d+)/);
-      const ageMin = ageRangeMatch ? parseInt(ageRangeMatch[1]) : null;
-      const ageMax = ageRangeMatch ? parseInt(ageRangeMatch[2]) : null;
-
       // Parse height to cm
       let heightMinCm = null;
       let heightMaxCm = null;
@@ -362,15 +356,6 @@ function PreferencesPageContent() {
         if (lower.includes("self-employed") || lower.includes("freelance")) return "self_employed";
         if (lower.includes("student")) return "student";
         if (lower.includes("retired")) return "retired";
-        return "any";
-      };
-
-      const mapExperience = (value: string): string | null => {
-        if (!value) return null;
-        const lower = value.toLowerCase();
-        if (lower.includes("serious") || lower.includes("marriage") || lower.includes("true love")) return "serious_relationship";
-        if (lower.includes("casual") || lower.includes("hangout")) return "casual_dating";
-        if (lower.includes("marriage")) return "marriage_focused";
         return "any";
       };
 
@@ -422,6 +407,7 @@ function PreferencesPageContent() {
 
       // Prepare preferences data for user_preferences table
       // Field mapping: Form Field → Database Column
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const preferencesUpdate: any = {
         user_id: user.id,
         
@@ -518,6 +504,7 @@ function PreferencesPageContent() {
       } else {
         router.push("/dashboard/profile/subscription");
       }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error("Error saving preferences:", error);
       const errorMessage = error?.message || "Failed to save preferences. Please try again.";
@@ -576,7 +563,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div className="px-2 sm:px-4">
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white mb-3 sm:mb-4 md:mb-5 leading-tight">Tell us who you're looking for.</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white mb-3 sm:mb-4 md:mb-5 leading-tight">Tell us who you&apos;re looking for.</h2>
               <p className="mt-3 sm:mt-4 md:mt-5 text-white/90 text-sm sm:text-base md:text-lg lg:text-xl leading-relaxed max-w-2xl mx-auto">That way we can recommend singles to tickle your fancy.<br />And vice versa.</p>
             </div>
             <div className="space-y-3 sm:space-y-4 mt-6 sm:mt-8">
@@ -602,7 +589,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner's location?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner&apos;s location?</h2>
             </div>
             <div>
               <GooglePlacesAutocomplete
@@ -679,8 +666,8 @@ function PreferencesPageContent() {
                   className="range-brand w-full disabled:opacity-50"
                 />
                 <div className="mt-2 flex justify-between text-xs text-gray-500">
-                  <span>4'7"</span>
-                  <span>6'10"</span>
+                        <span>4&apos;7&quot;</span>
+                        <span>6&apos;10&quot;</span>
                 </div>
                 <div className="mt-2 text-center text-sm font-medium text-gray-900">
                   {formData.height === "Open to any height" ? "Open to any height" : formData.height}
@@ -709,7 +696,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner's ethnicity?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner&apos;s ethnicity?</h2>
             </div>
             <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
               <div>
@@ -883,7 +870,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner's education level?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner&apos;s education level?</h2>
             </div>
             <div className="space-y-3 sm:space-y-4">
               {["High school", "Some college", "Associates degree", "Bachelors degree/Masters", "PhD / post doctoral", "No preference"].map((option) => (
@@ -906,7 +893,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner's employment?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner&apos;s employment?</h2>
             </div>
             <div className="space-y-3 sm:space-y-4">
               {["Employed", "Full-time Employed", "Part-time", "Freelance worker", "Self-employed", "Unemployed", "Retired"].map((option) => (
@@ -929,7 +916,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner's drinking lifestyle?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner&apos;s drinking lifestyle?</h2>
             </div>
             <div className="space-y-3 sm:space-y-4">
               {["Drinks often", "Drinks sometimes", "Doesn't drink", "I'd rather not say"].map((option) => (
@@ -975,7 +962,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner's diet?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner&apos;s diet?</h2>
             </div>
             <div className="space-y-3 sm:space-y-4">
               {[
@@ -1011,7 +998,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner's religion?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your ideal partner&apos;s religion?</h2>
             </div>
             <div className="space-y-3 sm:space-y-4">
               {[
@@ -1095,7 +1082,7 @@ function PreferencesPageContent() {
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner's pet(s)?</h2>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">My ideal partner&apos;s pet(s)?</h2>
             </div>
             <div className="space-y-3 sm:space-y-4">
               {["Doesn't have pet(s)", "Has other pet(s)", "Has cat(s)", "Has dog(s)"].map((option) => (
@@ -1145,12 +1132,12 @@ function PreferencesPageContent() {
                 <CheckCircle2 className="h-10 w-10 sm:h-12 sm:w-12 text-[#1f419a]" />
               </div>
               <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-3">Congratulations!</h2>
-              <p className="mt-2 text-base sm:text-lg text-white/90">You've completed your preferences setup</p>
+                    <p className="mt-2 text-base sm:text-lg text-white/90">You&apos;ve completed your preferences setup</p>
               <p className="mt-2 text-sm sm:text-base text-blue-100/80">Now you can enjoy the full MatchIndeed experience</p>
             </div>
 
             <div className="space-y-4 sm:space-y-6 mt-8">
-              <h3 className="text-xl sm:text-2xl font-semibold text-white text-center">Here's what you'll enjoy on MatchIndeed:</h3>
+                      <h3 className="text-xl sm:text-2xl font-semibold text-white text-center">Here&apos;s what you&apos;ll enjoy on MatchIndeed:</h3>
               <div className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2">
                 {features.map((feature, index) => {
                   const IconComponent = feature.icon;
@@ -1275,7 +1262,7 @@ function PreferencesPageContent() {
                   onClick={handleNext}
                   className="rounded-lg bg-white px-6 py-3 sm:px-8 sm:py-4 md:px-10 md:py-5 text-sm sm:text-base md:text-lg font-semibold text-[#1f419a] shadow-lg transition-all hover:shadow-xl hover:scale-105"
                 >
-                  That's it
+                    That&apos;s it
                 </button>
               ) : (
                 <button
@@ -1297,7 +1284,7 @@ function PreferencesPageContent() {
                 href="/dashboard/discover"
                 className="rounded-lg bg-white px-6 py-3 sm:px-8 sm:py-4 md:px-10 md:py-5 text-sm sm:text-base md:text-lg font-semibold text-[#1f419a] shadow-lg transition-all hover:shadow-xl hover:scale-105"
               >
-                That's it
+                  That&apos;s it
               </Link>
             </div>
           )}
@@ -1324,4 +1311,3 @@ export default function PreferencesPage() {
     </Suspense>
   );
 }
-

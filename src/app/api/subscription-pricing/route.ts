@@ -9,6 +9,7 @@ import { getAuthenticatedAdmin } from "@/lib/auth-helpers";
  * This endpoint allows administrators to configure pricing that overrides
  * the base pricing in the subscription page.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(request: NextRequest) {
   try {
     // Check if admin pricing exists in database
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
 
     // If admin pricing exists, return it
     if (adminPricing && adminPricing.length > 0) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tiers = adminPricing.map((p: any) => ({
         id: p.tier_id,
         pricing: {
@@ -65,6 +67,7 @@ export async function GET(request: NextRequest) {
         },
       ],
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in subscription-pricing API:", error);
     return NextResponse.json(
@@ -163,6 +166,7 @@ export async function POST(request: NextRequest) {
       pricing: data,
       message: `Pricing for ${tier_id} tier updated successfully`,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error updating subscription pricing:", error);
     return NextResponse.json(

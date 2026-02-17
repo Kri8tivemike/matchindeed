@@ -43,6 +43,7 @@ export default function OneSignalProvider({ userId }: OneSignalProviderProps) {
             enable: false, // We handle UI ourselves
             prenotify: false,
             showCredit: false,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
             text: {} as any,
           },
         });

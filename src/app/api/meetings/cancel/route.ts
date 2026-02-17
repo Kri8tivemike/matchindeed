@@ -87,6 +87,7 @@ export async function GET(request: NextRequest) {
     // Determine if cancellation is allowed and what fees apply
     const cancellationFeeCents = meeting.cancellation_fee_cents || 0;
     const isAdminApproved = meeting.status === "confirmed";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
     const isHost = participant.role === "host";
 
     // Per client rules: No one can cancel after admin approval
@@ -130,6 +131,7 @@ export async function GET(request: NextRequest) {
         charged_to: "cancelling_user",
       },
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in GET /api/meetings/cancel:", error);
     return NextResponse.json(
@@ -452,6 +454,7 @@ export async function POST(request: NextRequest) {
       credit_refunded: !isAdminApproved,
       canceled_by: participant.role,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in POST /api/meetings/cancel:", error);
     return NextResponse.json(

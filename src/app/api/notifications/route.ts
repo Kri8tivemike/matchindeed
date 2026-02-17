@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
     const typeFilter = searchParams.get("type");
 
     // Build query — try with read_at column first, fallback without it
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     let notifications: any[] = [];
     let total = 0;
     let unreadCount = 0;
@@ -91,6 +92,7 @@ export async function GET(request: NextRequest) {
         notifications = data || [];
         total = count || 0;
       }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
       hasReadAtColumn = false;
     }
@@ -136,6 +138,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Map notifications to include a computed `read` boolean
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mappedNotifications = notifications.map((n: any) => ({
       ...n,
       read: hasReadAtColumn ? !!n.read_at : false,

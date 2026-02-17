@@ -28,6 +28,7 @@ export default function Sidebar({ active }: SidebarProps) {
     location: null,
     photo: null,
   });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [loading, setLoading] = useState(true);
   const [isProfileExpanded, setIsProfileExpanded] = useState(false);
   const [isAppointmentsExpanded, setIsAppointmentsExpanded] = useState(false);
@@ -310,6 +311,7 @@ export default function Sidebar({ active }: SidebarProps) {
       try {
         localStorage.removeItem("form_draft_profile_edit");
         localStorage.removeItem("form_draft_preferences_edit");
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (e) {
         // Ignore localStorage errors
       }

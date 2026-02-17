@@ -2,7 +2,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { User, SlidersHorizontal, X, ChevronDown, Video, Calendar, Loader2, CheckCircle, AlertCircle, ArrowUpDown, BadgeCheck } from "lucide-react";
+import { User, SlidersHorizontal, X, ChevronDown, Video, Calendar, Loader2, CheckCircle, ArrowUpDown, BadgeCheck } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import ProfileCompletenessCard from "@/components/ProfileCompletenessCard";
@@ -52,6 +52,39 @@ type CardProfile = {
   isUserOnline?: boolean;
 };
 
+type RawProfile = {
+  user_id: string;
+  first_name: string | null;
+  date_of_birth: string | null;
+  location: string | null;
+  photos: string[] | null;
+  profile_photo_url: string | null;
+  gender: string | null;
+  education_level: string | null;
+  religion: string | null;
+  ethnicity: string | null;
+  languages: string[] | null;
+  smoking_habits: string | null;
+  have_children: boolean | null;
+  want_children: string | null;
+  relationship_status: string | null;
+  updated_at: string | null;
+  height_cm: number | null;
+};
+
+type AccountRow = {
+  id: string;
+  tier: string | null;
+  display_name: string | null;
+  email_verified?: boolean | null;
+  profile_visible?: boolean | null;
+  last_active_at?: string | null;
+};
+
+type AvailabilityRow = {
+  user_id: string;
+};
+
 export default function SearchPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [minAge, setMinAge] = useState(18);
@@ -82,8 +115,8 @@ export default function SearchPage() {
   const [selectedProfile, setSelectedProfile] = useState<CardProfile | null>(null);
   
   // Meeting request modal state
-  const [winkedIds, setWinkedIds] = useState<Set<string>>(new Set());
-  const [interestedIds, setInterestedIds] = useState<Set<string>>(new Set());
+  const [, setWinkedIds] = useState<Set<string>>(new Set());
+  const [, setInterestedIds] = useState<Set<string>>(new Set());
   const [meetingRequestModalOpen, setMeetingRequestModalOpen] = useState(false);
   const [selectedUserForMeeting, setSelectedUserForMeeting] = useState<{
     id: string;
@@ -126,9 +159,6 @@ export default function SearchPage() {
     fetchExistingActivities();
   }, []);
 
-  const likesCount = 2;
-  const singlesCountLabel = `${profiles.length > 0 ? profiles.length : "+1000"} singles`;
-
   const fallbacks = [
     "/placeholder-profile.svg",
     "/placeholder-profile.svg",
@@ -152,13 +182,6 @@ export default function SearchPage() {
           setLoading(false);
           return;
         }
-
-        // Get current user's profile to exclude from results
-        const { data: currentUserProfile } = await supabase
-          .from("user_profiles")
-          .select("user_id")
-          .eq("user_id", user.id)
-          .maybeSingle();
 
         // Fetch user's preferences (including blocked locations and partner preferences for match %)
         let blockedLocations: string[] = [];
@@ -213,15 +236,16 @@ export default function SearchPage() {
         const blockedUserIds = await getBlockedUserIds();
 
         // Filter out current user and blocked users
-        const otherProfiles = (profilesData || []).filter(
-          (p: any) => p.user_id !== user.id && !blockedUserIds.has(p.user_id)
+        const rawProfiles = (profilesData || []) as RawProfile[];
+        const otherProfiles = rawProfiles.filter(
+          (p) => p.user_id !== user.id && !blockedUserIds.has(p.user_id)
         );
 
         // Fetch account info (tier, display_name, visibility)
-        const userIds = otherProfiles.map((p: any) => p.user_id);
+        const userIds = otherProfiles.map((p) => p.user_id);
 
         // Try fetching with profile_visible; fall back if column doesn't exist
-        let accountsData: any[] | null = null;
+        let accountsData: AccountRow[] | null = null;
 
         const { data: accData, error: accErr } = await supabase
           .from("accounts")
@@ -234,14 +258,15 @@ export default function SearchPage() {
             .from("accounts")
             .select("id, tier, display_name, email_verified")
             .in("id", userIds);
-          accountsData = (fallbackData || []).map((a: any) => ({ ...a, profile_visible: true, last_active_at: null }));
+          const fallbackRows = (fallbackData || []) as AccountRow[];
+          accountsData = fallbackRows.map((a) => ({ ...a, profile_visible: true, last_active_at: null }));
         } else {
-          accountsData = accData;
+          accountsData = (accData || null) as AccountRow[] | null;
         }
 
         // Filter out hidden profiles
         accountsData = (accountsData || []).filter(
-          (a: any) => a.profile_visible !== false
+          (a) => a.profile_visible !== false
         );
 
         // Check which users have calendar slots
@@ -251,11 +276,11 @@ export default function SearchPage() {
           .in("user_id", userIds)
           .gte("slot_date", new Date().toISOString().split("T")[0]);
 
-        const usersWithSlots = new Set((availabilityData || []).map((a: any) => a.user_id));
-        const accountsMap = new Map((accountsData || []).map((a: any) => [a.id, a]));
+        const usersWithSlots = new Set(((availabilityData || []) as AvailabilityRow[]).map((a) => a.user_id));
+        const accountsMap = new Map((accountsData || []).map((a) => [a.id, a]));
 
         // Filter out profiles without a valid visible account and from blocked locations
-        const visibleProfiles = otherProfiles.filter((p: any) => {
+        const visibleProfiles = otherProfiles.filter((p) => {
           // Must have a visible account
           if (!accountsMap.has(p.user_id)) return false;
 
@@ -276,7 +301,7 @@ export default function SearchPage() {
         });
 
         // Transform profiles
-        const transformedProfiles: CardProfile[] = visibleProfiles.map((p: any) => {
+        const transformedProfiles: CardProfile[] = visibleProfiles.map((p) => {
           const account = accountsMap.get(p.user_id);
           
           // Calculate age
@@ -1285,7 +1310,7 @@ export default function SearchPage() {
             setSelectedUserForMeeting(null);
           }}
           targetUser={selectedUserForMeeting}
-          onSuccess={(meeting) => {
+          onSuccess={() => {
             // Success handled by modal
           }}
         />

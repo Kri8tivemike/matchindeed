@@ -50,9 +50,9 @@ export default function MeetingConcludePage() {
   const meetingId = params.id as string;
 
   // Meeting & participant data
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [meeting, setMeeting] = useState<any>(null);
   const [participants, setParticipants] = useState<ParticipantInfo[]>([]);
-  const [currentUser, setCurrentUser] = useState<any>(null);
   // Page states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +86,6 @@ export default function MeetingConcludePage() {
           router.push("/login");
           return;
         }
-        setCurrentUser(user);
 
         // Fetch meeting with participants
         const { data: meetingData, error: meetingError } = await supabase
@@ -178,6 +177,7 @@ export default function MeetingConcludePage() {
         }
 
         setParticipants(participantList);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error("Error fetching meeting data:", err);
         setError("Failed to load meeting details.");
@@ -251,6 +251,7 @@ export default function MeetingConcludePage() {
       setTimeout(() => {
         router.push("/dashboard/meetings");
       }, 3000);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error("Error submitting conclusion:", err);
       setError("An error occurred. Please try again.");
@@ -459,10 +460,13 @@ export default function MeetingConcludePage() {
                           <div className="flex items-center gap-3 mb-3">
                             <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
                               {p.photo ? (
-                                <img
+                                <Image
                                   src={p.photo}
                                   alt={p.name}
+                                  width={40}
+                                  height={40}
                                   className="w-full h-full object-cover"
+                                  unoptimized
                                 />
                               ) : (
                                 <User className="h-5 w-5 text-gray-400" />

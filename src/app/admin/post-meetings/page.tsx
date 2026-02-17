@@ -21,19 +21,13 @@ import {
   Video,
   CheckCircle,
   XCircle,
-  DollarSign,
-  User,
-  Calendar,
   Loader2,
   RefreshCw,
-  Eye,
   Check,
-  X,
   AlertTriangle,
   Search,
   Shield,
   FileText,
-  Clock,
   ArrowRight,
 } from "lucide-react";
 
@@ -47,6 +41,7 @@ type MeetingReport = {
   meeting_id: string;
   coordinator_name: string;
   conclusion: string | null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   participant_yes_no: any;
   video_recording_url: string | null;
   host_decision: string | null;
@@ -175,6 +170,7 @@ export default function AdminPostMeetingsPage() {
         return;
       }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transformedReports: MeetingReport[] = (data || []).map((report: any) => ({
         ...report,
         meeting: Array.isArray(report.meetings) ? report.meetings[0] : report.meetings,
@@ -890,6 +886,7 @@ export default function AdminPostMeetingsPage() {
                   {selectedReport.participant_yes_no &&
                   typeof selectedReport.participant_yes_no === "object" ? (
                     Object.entries(selectedReport.participant_yes_no).map(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
                       ([userId, response]: [string, any]) => (
                         <div
                           key={userId}
@@ -959,6 +956,7 @@ export default function AdminPostMeetingsPage() {
                 <select
                   value={finalizeAction}
                   onChange={(e) =>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
                     setFinalizeAction(e.target.value as any)
                   }
                   className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"

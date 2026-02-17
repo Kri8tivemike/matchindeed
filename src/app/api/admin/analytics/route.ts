@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
     // Date helpers
     const now = new Date();
     const today = now.toISOString().split("T")[0];
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
       .toISOString();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)

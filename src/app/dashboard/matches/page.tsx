@@ -18,17 +18,10 @@ import {
   Heart,
   MessageCircle,
   Video,
-  MapPin,
-  User,
   Loader2,
   Sparkles,
-  Calendar,
-  X,
   ChevronRight,
-  Filter,
-  CheckCircle,
   BadgeCheck,
-  Star,
   Users,
   Clock,
 } from "lucide-react";
@@ -147,6 +140,7 @@ export default function MutualMatchesPage() {
         // Filter out blocked users (bidirectional)
         const blockedUserIds = await getBlockedUserIds();
         const filteredMatches = (data.matches || []).filter(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
           (m: any) => !blockedUserIds.has(m.partner_id)
         );
         setMatches(filteredMatches);

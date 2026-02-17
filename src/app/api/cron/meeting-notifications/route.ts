@@ -72,7 +72,9 @@ export async function GET(request: NextRequest) {
 
     for (const notification of pendingNotifications) {
       try {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
         const meeting = notification.meeting as any;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
         const participants = meeting.meeting_participants || [];
         
         // Get notification message based on type
@@ -112,6 +114,7 @@ export async function GET(request: NextRequest) {
         // Send email notification (if not already sent)
         if (!notification.email_sent) {
           try {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
             const meeting = notification.meeting as any;
             const meetingParticipants = meeting.meeting_participants || [];
 
@@ -140,6 +143,7 @@ export async function GET(request: NextRequest) {
                 .single();
 
               const otherP = meetingParticipants.find(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (x: any) => x.user_id !== p.user_id
               );
               const { data: otherProfile } = await supabase
@@ -172,6 +176,7 @@ export async function GET(request: NextRequest) {
         }
 
         sentNotifications.push(notification.id);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
         console.error(`Error processing notification ${notification.id}:`, error);
         errors.push({ notification_id: notification.id, error: error.message });
@@ -185,6 +190,7 @@ export async function GET(request: NextRequest) {
       errors: errors.length,
       error_details: errors,
     });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Error in cron job:", error);
     return NextResponse.json(

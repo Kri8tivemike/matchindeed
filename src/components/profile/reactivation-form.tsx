@@ -41,6 +41,7 @@ export function ReactivationForm({ onSubmit, isLoading = false, error, success }
       await onSubmit(selectedReason, isCustomReasonSelected ? customReason : undefined);
       setSelectedReason('');
       setCustomReason('');
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       setLocalError(err.message || 'Failed to submit reactivation request');
     } finally {
@@ -52,7 +53,7 @@ export function ReactivationForm({ onSubmit, isLoading = false, error, success }
     <form onSubmit={handleSubmit} className="space-y-6 p-6 bg-white rounded-lg shadow">
       <div>
         <h2 className="text-2xl font-bold mb-4">Request Profile Reactivation</h2>
-        <p className="text-gray-600 mb-6">Tell us why you'd like to reactivate your profile. Your partner will be notified, and if they don't respond, your request will be auto-approved after 7 days.</p>
+      <p className="text-gray-600 mb-6">Tell us why you&apos;d like to reactivate your profile. Your partner will be notified, and if they don&apos;t respond, your request will be auto-approved after 7 days.</p>
       </div>
 
       <div>

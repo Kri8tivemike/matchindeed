@@ -3,12 +3,11 @@
 import { useEffect, useState } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
-import Link from "next/link";
+import Image from "next/image";
 import {
   Image as ImageIcon,
   Check,
   X,
-  AlertTriangle,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -95,6 +94,7 @@ export default function AdminModerationPage() {
         return;
       }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transformedData: PhotoModerationItem[] = (data || []).map((item: any) => ({
         id: item.id,
         user_id: item.user_id,
@@ -116,6 +116,7 @@ export default function AdminModerationPage() {
 
   useEffect(() => {
     fetchPhotos();
+// eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, currentPage]);
 
   /**
@@ -274,10 +275,13 @@ export default function AdminModerationPage() {
               >
                 {/* Photo */}
                 <div className="relative aspect-square bg-gray-100">
-                  <img
+                  <Image
                     src={photo.photo_url}
                     alt="User photo"
+                    fill
                     className="w-full h-full object-cover"
+                    sizes="(max-width: 1024px) 50vw, 25vw"
+                    unoptimized
                   />
                   
                   {/* Overlay */}
@@ -365,10 +369,13 @@ export default function AdminModerationPage() {
           <div className="bg-white rounded-2xl max-w-lg w-full overflow-hidden">
             {/* Photo */}
             <div className="relative aspect-square bg-gray-100">
-              <img
+              <Image
                 src={selectedPhoto.photo_url}
                 alt="User photo"
+                fill
                 className="w-full h-full object-cover"
+                sizes="(max-width: 1024px) 90vw, 600px"
+                unoptimized
               />
             </div>
 

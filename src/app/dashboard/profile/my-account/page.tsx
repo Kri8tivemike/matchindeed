@@ -296,6 +296,7 @@ export default function MyAccountPage() {
         setConfirmPassword("");
         setShowPasswordSection(false);
       }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
       setPwMessage({ type: "error", text: "An unexpected error occurred." });
     } finally {
@@ -330,6 +331,7 @@ export default function MyAccountPage() {
         await supabase.auth.signOut();
         router.push("/login");
       }, 2000);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       setActionMessage({ type: "error", text: err.message || "Failed to deactivate account" });
     } finally {
@@ -365,6 +367,7 @@ export default function MyAccountPage() {
         await supabase.auth.signOut();
         router.push("/login");
       }, 2000);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       setActionMessage({ type: "error", text: err.message || "Failed to delete account" });
     } finally {

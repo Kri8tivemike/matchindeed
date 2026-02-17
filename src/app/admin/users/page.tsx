@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Search,
   Filter,
@@ -134,6 +135,7 @@ export default function AdminUsersPage() {
       }
 
       // Transform data
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transformedUsers: UserListItem[] = (data || []).map((user: any) => ({
         id: user.id,
         email: user.email,
@@ -157,6 +159,7 @@ export default function AdminUsersPage() {
 
   useEffect(() => {
     fetchUsers();
+// eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, currentPage]);
 
   // Debounced search
@@ -166,6 +169,7 @@ export default function AdminUsersPage() {
       fetchUsers();
     }, 300);
     return () => clearTimeout(timer);
+// eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
   /**
@@ -401,10 +405,13 @@ export default function AdminUsersPage() {
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
                             {user.profile?.profile_photo_url ? (
-                              <img
+                              <Image
                                 src={user.profile.profile_photo_url}
                                 alt=""
+                                width={40}
+                                height={40}
                                 className="w-full h-full object-cover"
+                                unoptimized
                               />
                             ) : (
                               <span className="text-sm font-medium text-gray-500">

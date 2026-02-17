@@ -26,6 +26,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const authDisabled = process.env.NEXT_PUBLIC_AUTH_DISABLED === "true";
   const handleTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), []);

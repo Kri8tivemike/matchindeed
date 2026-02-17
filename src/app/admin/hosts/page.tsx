@@ -15,16 +15,8 @@ import { useEffect, useState } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
 import {
-  UserCheck,
   Plus,
-  Edit,
-  Trash2,
-  Eye,
   Loader2,
-  RefreshCw,
-  Shield,
-  Phone,
-  Mail,
   DollarSign,
 } from "lucide-react";
 
@@ -34,7 +26,7 @@ type Coordinator = {
   email: string;
   phone: string | null;
   enabled: boolean;
-  permissions: any;
+  permissions: Record<string, unknown> | null;
   created_at: string;
 };
 

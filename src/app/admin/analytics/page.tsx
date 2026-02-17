@@ -213,19 +213,27 @@ function DonutChart({
   const cx = size / 2;
   const cy = size / 2;
   const strokeWidth = 18;
+  const segmentGeometry = segments.map((seg, index) => {
+    const percent = seg.value / total;
+    const dashArray = 2 * Math.PI * radius;
+    const dashOffset = dashArray * (1 - percent);
+    const previousPercent = segments
+      .slice(0, index)
+      .reduce((sum, previous) => sum + previous.value / total, 0);
+    const rotation = previousPercent * 360 - 90;
 
-  let cumulativePercent = 0;
+    return {
+      ...seg,
+      dashArray,
+      dashOffset,
+      rotation,
+    };
+  });
 
   return (
     <div className="flex items-center gap-4">
       <svg width={size} height={size} className="flex-shrink-0">
-        {segments.map((seg, i) => {
-          const percent = seg.value / total;
-          const dashArray = 2 * Math.PI * radius;
-          const dashOffset = dashArray * (1 - percent);
-          const rotation = cumulativePercent * 360 - 90;
-          cumulativePercent += percent;
-
+        {segmentGeometry.map((seg, i) => {
           return (
             <circle
               key={i}
@@ -235,9 +243,9 @@ function DonutChart({
               fill="none"
               stroke={seg.color}
               strokeWidth={strokeWidth}
-              strokeDasharray={dashArray}
-              strokeDashoffset={dashOffset}
-              transform={`rotate(${rotation} ${cx} ${cy})`}
+              strokeDasharray={seg.dashArray}
+              strokeDashoffset={seg.dashOffset}
+              transform={`rotate(${seg.rotation} ${cx} ${cy})`}
               className="transition-all duration-500"
             />
           );

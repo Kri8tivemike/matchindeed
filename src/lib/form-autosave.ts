@@ -8,7 +8,7 @@
 /**
  * Save form data to localStorage
  */
-export function saveFormDraft(formKey: string, data: any): void {
+export function saveFormDraft(formKey: string, data: unknown): void {
   try {
     const key = `form_draft_${formKey}`;
     const timestamp = new Date().toISOString();
@@ -67,7 +67,7 @@ export function hasFormDraft(formKey: string): boolean {
   try {
     const key = `form_draft_${formKey}`;
     return localStorage.getItem(key) !== null;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -83,7 +83,7 @@ export function getDraftTimestamp(formKey: string): string | null {
 
     const draftData = JSON.parse(stored);
     return draftData.timestamp;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

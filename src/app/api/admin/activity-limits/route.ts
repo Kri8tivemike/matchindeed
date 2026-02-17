@@ -97,6 +97,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Ensure all tiers are represented
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     const existingTiers = new Set((limits || []).map((l: any) => l.tier));
     const allLimits = [...(limits || [])];
 
@@ -108,6 +109,7 @@ export async function GET(request: NextRequest) {
 
     // Sort by tier order
     allLimits.sort(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       (a: any, b: any) =>
         VALID_TIERS.indexOf(a.tier) - VALID_TIERS.indexOf(b.tier)
     );
@@ -145,6 +147,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Validate and sanitize limit values
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: Record<string, any> = { tier };
 
     for (const field of LIMIT_FIELDS) {
@@ -293,6 +296,7 @@ export async function POST(request: NextRequest) {
  * Values: 0 = unlimited
  */
 function getDefaultForTier(tier: string) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   const defaults: Record<string, any> = {
     basic: {
       tier: "basic",

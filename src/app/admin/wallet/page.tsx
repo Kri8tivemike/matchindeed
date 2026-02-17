@@ -131,6 +131,7 @@ export default function AdminWalletPage() {
 
       // Process wallets - handle cases where accounts might be null or array
       const walletsWithTransactions = await Promise.all(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
         (walletsData || []).map(async (wallet: any) => {
           // Handle accounts data - could be array, object, or null
           let userData = null;

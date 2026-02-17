@@ -715,7 +715,11 @@ export default function Home() {
                   className="absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
                 >
                   {currencyOptions.map((opt) => (
-                    <li key={opt.value} role="option">
+                    <li
+                      key={opt.value}
+                      role="option"
+                      aria-selected={currency === opt.value}
+                    >
                       <button
                         type="button"
                         onClick={() => {

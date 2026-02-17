@@ -142,6 +142,7 @@ export async function POST(request: NextRequest) {
 
         // Get partner name
         const otherP = participants.find(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
           (p: any) => p.user_id !== participant.user_id
         );
         const { data: otherProfile } = await supabase
@@ -183,6 +184,7 @@ export async function POST(request: NextRequest) {
  * Get pending notifications that need to be sent
  * This endpoint should be called by a cron job
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(request: NextRequest) {
   try {
     const now = new Date();

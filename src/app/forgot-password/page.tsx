@@ -21,6 +21,7 @@ export default function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const handleTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), []);
 

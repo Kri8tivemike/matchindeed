@@ -200,10 +200,12 @@ export function reactivationApprovedPartnerNotificationTemplate(
   return baseEmailLayout("Match Reactivation Confirmed", body);
 }
 
-export default {
+const reactivationTemplates = {
   reactivationRequestReceivedTemplate,
   reactivationPartnerNotificationTemplate,
   reactivationApprovedTemplate,
   reactivationDeniedTemplate,
   reactivationApprovedPartnerNotificationTemplate,
 };
+
+export default reactivationTemplates;
