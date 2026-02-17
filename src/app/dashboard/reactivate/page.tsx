@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { ReactivationForm } from '@/components/profile/reactivation-form';
 
 interface ReactivationStatus {
@@ -15,7 +15,6 @@ interface ReactivationStatus {
 
 export default function ReactivatePage() {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<ReactivationStatus | null>(null);
   const [error, setError] = useState<string>('');

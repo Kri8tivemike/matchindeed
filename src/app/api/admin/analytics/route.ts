@@ -174,24 +174,28 @@ export async function GET(request: NextRequest) {
     let monthlyRevenue = 0;
 
     try {
+      // wallet_transactions: type (topup, credit_purchase, subscription_payment = revenue), amount_cents
+      const revenueTypes = ["topup", "credit_purchase", "subscription_payment"];
       const { data: allTx } = await supabase
         .from("wallet_transactions")
-        .select("amount, transaction_type")
-        .eq("transaction_type", "credit");
+        .select("amount_cents, type")
+        .in("type", revenueTypes);
 
       totalRevenue = (allTx || []).reduce(
-        (sum: number, t: any) => sum + (Number(t.amount) || 0),
+        (sum: number, t: { amount_cents?: number } & Record<string, unknown>) =>
+          sum + (Number(t.amount_cents) || 0),
         0
       );
 
       const { data: monthTx } = await supabase
         .from("wallet_transactions")
-        .select("amount")
-        .eq("transaction_type", "credit")
+        .select("amount_cents")
+        .in("type", revenueTypes)
         .gte("created_at", thisMonthStart);
 
       monthlyRevenue = (monthTx || []).reduce(
-        (sum: number, t: any) => sum + (Number(t.amount) || 0),
+        (sum: number, t: { amount_cents?: number } & Record<string, unknown>) =>
+          sum + (Number(t.amount_cents) || 0),
         0
       );
     } catch {

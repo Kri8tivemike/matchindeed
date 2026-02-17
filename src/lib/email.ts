@@ -395,3 +395,34 @@ export async function sendWelcomeEmail(
 export function isEmailServiceAvailable(): boolean {
   return isEmailConfigured;
 }
+
+/**
+ * Send an email with raw HTML content.
+ * Use for templates that generate HTML directly (e.g. reactivation emails).
+ */
+export async function sendRawHtmlEmail(
+  to: string,
+  subject: string,
+  html: string
+): Promise<SendEmailResult> {
+  try {
+    if (!client) {
+      console.log(`[Email] (Dev Mode) Would send raw HTML to ${to}:`, subject);
+      return { success: true, skipped: true };
+    }
+    const result = await client.sendEmail({
+      From: EMAIL_FROM,
+      To: to,
+      Subject: subject,
+      HtmlBody: html,
+      MessageStream: MESSAGE_STREAM,
+    });
+    if (result.ErrorCode !== 0) {
+      return { success: false, error: result.Message };
+    }
+    return { success: true, messageId: result.MessageID };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unexpected email error";
+    return { success: false, error: message };
+  }
+}

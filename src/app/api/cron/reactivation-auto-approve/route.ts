@@ -1,16 +1,20 @@
 /**
  * Cron Job: Auto-approve Reactivation Requests
+ *
+ * Approves reactivation requests that have been in "partner_notified" status
+ * for 7+ days with no partner objection.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import * as reactivationTemplates from "@/lib/email/reactivation-templates";
-import { sendEmail } from "@/lib/email";
+import { sendRawHtmlEmail } from "@/lib/email";
 
 function verifyCronSecret(request: NextRequest): boolean {
   const authHeader = request.headers.get("Authorization");
   const cronSecret = process.env.CRON_SECRET;
 
+  if (!cronSecret) {
     console.warn("CRON_SECRET not set - development mode");
     return true;
   }
@@ -20,6 +24,7 @@ function verifyCronSecret(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   try {
+    if (!verifyCronSecret(request)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -37,6 +42,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Database error" }, { status: 500 });
     }
 
+    if (!pendingRequests?.length) {
       return NextResponse.json({
         success: true,
         message: "No requests to auto-approve",
@@ -61,6 +67,7 @@ export async function GET(request: NextRequest) {
           .eq("id", req.matched_with_user_id)
           .single();
 
+        if (!userData || !partnerData) {
           failureCount++;
           continue;
         }
@@ -92,22 +99,22 @@ export async function GET(request: NextRequest) {
           "Auto-approved after 7 days with no objections from partner."
         );
 
-        await sendEmail({
-          to: userData.email,
-          subject: "Your Profile Reactivation Has Been Approved! 🎉",
-          html: approvalEmailHTML,
-        });
+        await sendRawHtmlEmail(
+          userData.email,
+          "Your Profile Reactivation Has Been Approved! 🎉",
+          approvalEmailHTML
+        );
 
         const partnerNotificationHTML = reactivationTemplates.reactivationApprovedPartnerNotificationTemplate(
           partnerName,
           userName
         );
 
-        await sendEmail({
-          to: partnerData.email,
-          subject: "Your Match Has Been Reactivated",
-          html: partnerNotificationHTML,
-        });
+        await sendRawHtmlEmail(
+          partnerData.email,
+          "Your Match Has Been Reactivated",
+          partnerNotificationHTML
+        );
 
         successCount++;
       } catch (error) {

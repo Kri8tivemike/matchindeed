@@ -137,17 +137,17 @@ export async function GET(request: NextRequest) {
         requester: requester
           ? {
               id: requester.user_id,
-              name: requester.accounts?.display_name || "Unknown",
-              email: requester.accounts?.email,
-              avatar: requester.accounts?.avatar_url,
+              name: (Array.isArray(requester.accounts) ? requester.accounts[0] : requester.accounts)?.display_name || "Unknown",
+              email: (Array.isArray(requester.accounts) ? requester.accounts[0] : requester.accounts)?.email,
+              avatar: (Array.isArray(requester.accounts) ? requester.accounts[0] : requester.accounts)?.avatar_url,
             }
           : null,
         accepter: accepter
           ? {
               id: accepter.user_id,
-              name: accepter.accounts?.display_name || "Unknown",
-              email: accepter.accounts?.email,
-              avatar: accepter.accounts?.avatar_url,
+              name: (Array.isArray(accepter.accounts) ? accepter.accounts[0] : accepter.accounts)?.display_name || "Unknown",
+              email: (Array.isArray(accepter.accounts) ? accepter.accounts[0] : accepter.accounts)?.email,
+              avatar: (Array.isArray(accepter.accounts) ? accepter.accounts[0] : accepter.accounts)?.avatar_url,
             }
           : null,
         report: meeting.host_meetings?.[0] || null,
