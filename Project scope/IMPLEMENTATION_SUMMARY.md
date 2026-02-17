@@ -94,10 +94,10 @@
 - [x] Age/restriction enforcement (18-23 rule — users aged 18–23 excluded from discover/search/top-picks)
 
 ### Phase 6: Integrations (Weeks 4-5)
-- [ ] SMS integration
-- [ ] Email integration
-- [ ] Social login (Google, Facebook, Apple)
-- [ ] Chat system
+- [ ] SMS integration (Twilio/Infobip/MSG91 — lib/sms.ts has Africa's Talking & Sinch)
+- [x] Email integration (Postmark)
+- [x] Social login — Google OAuth (Facebook, Apple pending)
+- [ ] Chat system (messages table exists)
 - [ ] File uploads
 
 ### Phase 7: Testing & QA (Week 5)

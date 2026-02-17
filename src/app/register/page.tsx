@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import CloudflareTurnstile from "@/components/CloudflareTurnstile";
+import { GoogleSignInButton } from "@/components/SocialAuthButtons";
 
 // ---------------------------------------------------------------
 // Password strength helper
@@ -216,6 +217,17 @@ export default function RegisterPage() {
 
           {/* Form Card */}
           <div className="rounded-2xl bg-white p-8 shadow-xl ring-1 ring-black/5">
+            {/* Social sign-up */}
+            <GoogleSignInButton />
+            <div className="relative my-5">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-200" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-white px-3 text-gray-400">Or sign up with email</span>
+              </div>
+            </div>
+
             <form onSubmit={handleRegister} className="space-y-4">
               {/* Error */}
               {error && (
