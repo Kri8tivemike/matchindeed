@@ -248,6 +248,6 @@ nextjs-portal:not([data-nextjs-dialog]) {
 /* Add bottom padding on mobile so content isn't hidden behind the bottom nav */
 @media (max-width: 767px) {
   .mobile-nav-spacing {
-    padding-bottom: 4.5rem; /* ~72px to clear the bottom nav */
+    padding-bottom: 7.25rem; /* clear two-row mobile nav + safe area */
   }
 }

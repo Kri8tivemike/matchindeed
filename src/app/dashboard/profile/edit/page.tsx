@@ -3,11 +3,49 @@ import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, X, Check, Loader2, ArrowUp, ArrowDown, Star } from "lucide-react";
+import { Camera, X, Check, Loader2, ArrowUp, ArrowDown, ArrowLeft, Star } from "lucide-react";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
 import { saveFormDraft, loadFormDraft, clearFormDraft, getDraftTimestamp } from "@/lib/form-autosave";
+import {
+  isValidFirstName,
+  normalizeFirstName,
+  sanitizeFirstNameInput,
+} from "@/lib/name";
+import {
+  isLikelyGoogleSuggestedLocation,
+  normalizeLocation,
+} from "@/lib/location";
+import {
+  calculateAge,
+  MINIMUM_PLATFORM_AGE,
+} from "@/lib/age-restrictions";
+import {
+  formatRelationshipStatusLabel,
+  PROFILE_RELATIONSHIP_STATUS_OPTIONS,
+  relationshipStatusToDbValue,
+} from "@/lib/relationship-status";
+import {
+  ALLOWED_PHOTO_TYPES,
+  ALLOWED_PHOTO_FORMATS_LABEL,
+  MAX_PHOTO_SIZE_BYTES,
+  MAX_PHOTOS,
+} from "@/lib/photo/validation";
+import {
+  PERSONALITY_PROMPT_CONFIGS,
+  PERSONALITY_PROMPT_MAX_LENGTH,
+  PERSONALITY_PROMPT_MIN_LENGTH,
+  PERSONALITY_PROMPT_REQUIRED_COUNT,
+  buildPersonalityPromptMap,
+  countCompletedPersonalityPrompts,
+  createEmptyPersonalityPromptMap,
+  getPersonalityPromptPreview,
+  parseStoredPersonalityPrompts,
+  serializeStoredPersonalityPrompts,
+  type PersonalityPromptEntry,
+  type PersonalityPromptId,
+} from "@/lib/profile/personality-prompts";
 
 type ProfileData = {
   birthday: string;
@@ -35,45 +73,373 @@ type ProfileData = {
   photos: File[];
 };
 
+type PhotoUploadResponse = {
+  success?: boolean;
+  code?: string;
+  error?: string;
+  errors?: string[];
+  uploaded?: number;
+  rejected?: number;
+  uploaded_urls?: string[];
+  approved_urls?: string[];
+};
+
+const PHOTO_UPLOAD_DEACTIVATED_MESSAGE =
+  "Your MatchIndeed account is currently deactivated. Reactivate your account to upload photos and continue your profile.";
+
+function displayBirthdayToIso(value: string) {
+  if (!value) return "";
+  const [monthRaw, dayRaw, yearRaw] = value.split("/");
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const year = Number(yearRaw);
+  if (
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(year)
+  ) {
+    return "";
+  }
+  const parsed = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return "";
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(
+    2,
+    "0"
+  )}-${String(day).padStart(2, "0")}`;
+}
+
+function getAdultMaxDateInputValue() {
+  const now = new Date();
+  const max = new Date(now.getFullYear() - MINIMUM_PLATFORM_AGE, now.getMonth(), now.getDate());
+  return `${max.getFullYear()}-${String(max.getMonth() + 1).padStart(2, "0")}-${String(max.getDate()).padStart(2, "0")}`;
+}
+
+function isRemotePhotoUrl(value: string) {
+  return value.startsWith("http://") || value.startsWith("https://");
+}
+
+function isFileValue(value: unknown): value is File {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+async function fetchApprovedPhotoUrls(userId: string, urls: string[]): Promise<Set<string>> {
+  const uniqueUrls = Array.from(
+    new Set(urls.filter((value): value is string => typeof value === "string" && value.trim().length > 0))
+  );
+
+  if (!userId || uniqueUrls.length === 0) {
+    return new Set<string>();
+  }
+
+  const { data, error } = await supabase
+    .from("photo_moderation")
+    .select("photo_url")
+    .eq("user_id", userId)
+    .eq("status", "approved")
+    .in("photo_url", uniqueUrls);
+
+  if (error) {
+    console.error("[profile/edit] failed to load approved photos:", error);
+    return new Set<string>();
+  }
+
+  const approvedUrls = Array.isArray(data)
+    ? data
+        .map((row) => (typeof row?.photo_url === "string" ? row.photo_url : ""))
+        .filter((value): value is string => value.trim().length > 0)
+    : [];
+
+  return new Set(approvedUrls);
+}
+
+const HUMAN_PHOTO_ONLY_MESSAGE =
+  "We couldn't approve this photo automatically. Please upload a clear, natural photo of yourself.";
+const MIN_ONBOARDING_PHOTOS = 2;
+const LEGACY_PERSONALITY_DEFAULTS = new Set(["usuw", "undefined", "null", "n/a", "na"]);
+const ABOUT_ME_MIN_LENGTH = 140;
+const ABOUT_ME_MAX_LENGTH = 4000;
+const ABOUT_ME_SAMPLES = [
+  {
+    label: "Honest & mature",
+    value: "I’m someone who values honesty, communication, and emotional maturity.",
+  },
+  {
+    label: "Calm & loyal",
+    value: "My friends describe me as calm, loyal, and family oriented.",
+  },
+  {
+    label: "Intentional dating",
+    value: "I’m intentional about dating and looking for someone who shares similar values.",
+  },
+  {
+    label: "Meaningful connection",
+    value: "I enjoy meaningful conversations, peaceful environments, and building real connections.",
+  },
+  {
+    label: "Serious relationship",
+    value: "I’m ready for a serious relationship and looking for someone who is too.",
+  },
+];
+
+const DEFAULT_PERSONALITY_PROMPT_ID = PERSONALITY_PROMPT_CONFIGS[0].id;
+
+function uploadSinglePhotoWithProgress(
+  file: File,
+  accessToken: string,
+  options?: {
+    standalone?: boolean;
+    onProgress?: (progress: number) => void;
+  }
+): Promise<{ status: number; result: PhotoUploadResponse | null }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/photo/upload");
+    xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      options?.onProgress?.(Math.round((event.loaded / event.total) * 100));
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Photo upload failed."));
+    };
+
+    xhr.onload = () => {
+      options?.onProgress?.(100);
+
+      let result: PhotoUploadResponse | null = null;
+      if (typeof xhr.responseText === "string" && xhr.responseText.trim()) {
+        try {
+          result = JSON.parse(xhr.responseText) as PhotoUploadResponse;
+        } catch {
+          result = null;
+        }
+      }
+
+      resolve({ status: xhr.status, result });
+    };
+
+    const formData = new FormData();
+    if (options?.standalone) {
+      formData.append("mode", "standalone");
+    }
+    formData.append("photos", file);
+    xhr.send(formData);
+  });
+}
+
+async function verifyUploadedPhotoUrls(
+  photoUrls: string[],
+  accessToken: string
+): Promise<{ status: number; result: PhotoUploadResponse | null }> {
+  const response = await fetch("/api/photo/upload", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ photo_urls: photoUrls }),
+  });
+
+  const result = (await response.json().catch(() => null)) as
+    | PhotoUploadResponse
+    | null;
+
+  return {
+    status: response.status,
+    result,
+  };
+}
+
+async function getAccessTokenOrThrow() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const accessToken = session?.access_token;
+  if (!accessToken) {
+    throw new Error("Your session has expired. Please log in again.");
+  }
+
+  return accessToken;
+}
+
+function handlePhotoUploadAccountBlock(
+  status: number,
+  result: PhotoUploadResponse | null,
+  toast: ReturnType<typeof useToast>["toast"],
+  router: ReturnType<typeof useRouter>
+) {
+  if (
+    status === 403 &&
+    (result?.code === "account_deactivated" ||
+      /deactivated/i.test(result?.error || ""))
+  ) {
+    toast.error(PHOTO_UPLOAD_DEACTIVATED_MESSAGE);
+    router.push("/dashboard/reactivate");
+    return true;
+  }
+
+  return false;
+}
+
+function sanitizePersonalityValue(value: string | null | undefined): string {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  if (LEGACY_PERSONALITY_DEFAULTS.has(trimmed.toLowerCase())) {
+    return "";
+  }
+
+  return trimmed;
+}
+
 export default function EditProfilePage() {
   const router = useRouter();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<ProfileData>({
-    birthday: "02/28/2003",
+    birthday: "",
     firstName: "",
     gender: "",
-    location: "Manchester, United Kingdom",
+    location: "",
     aboutYourself: "",
-    height: "6'4\" • 193 cm",
-    ethnicity: ["I'd rather not say"],
-    religion: "Protestant",
-    education: "High school",
+    height: "",
+    ethnicity: [],
+    religion: "",
+    education: "",
     languages: [],
-    relationshipStatus: "Single",
-    hasChildren: "Doesn't have kids but wants them",
-    wantsChildren: "Not sure",
-    smoking: "Smoke Smoke",
-    relocationPlan: "Not ready for relocation plan",
-    readyToMarry: "Get married yes, settle down no",
-    relationshipType: "Hangout",
-    careerStability: "Job Security",
-    longTermGoals: "Career & Professional Growth",
-    emotionalConnection: "Intellectual Emotional Connection",
-    loveLanguages: ["Words of Affirmation"],
+    relationshipStatus: "",
+    hasChildren: "",
+    wantsChildren: "",
+    smoking: "",
+    relocationPlan: "",
+    readyToMarry: "",
+    relationshipType: "",
+    careerStability: "",
+    longTermGoals: "",
+    emotionalConnection: "",
+    loveLanguages: [],
     personality: "",
     photos: [],
   });
 
   const [heightInches, setHeightInches] = useState(76); // 6'4" default
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const [locationPickedFromGoogle, setLocationPickedFromGoogle] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [wasProfileCompleted, setWasProfileCompleted] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | null>(null);
+  const [photoUploadProgress, setPhotoUploadProgress] = useState<number | null>(null);
+  const [savedPersonalityPrompts, setSavedPersonalityPrompts] = useState(
+    createEmptyPersonalityPromptMap
+  );
+  const [draftPersonalityPrompts, setDraftPersonalityPrompts] = useState(
+    createEmptyPersonalityPromptMap
+  );
+  const [expandedPersonalityPromptId, setExpandedPersonalityPromptId] =
+    useState<PersonalityPromptId | null>(DEFAULT_PERSONALITY_PROMPT_ID);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const galleryPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const selfiePhotoInputRef = useRef<HTMLInputElement | null>(null);
 
   const totalSteps = 23;
   const FORM_DRAFT_KEY = "profile_edit";
+
+  const initializePersonalityPrompts = (
+    storedValue: string | null | undefined
+  ) => {
+    const normalizedValue = sanitizePersonalityValue(storedValue);
+    const nextSavedPrompts = buildPersonalityPromptMap(normalizedValue);
+    const nextDraftPrompts = { ...nextSavedPrompts };
+    const parsedPrompts = parseStoredPersonalityPrompts(normalizedValue);
+
+    if (parsedPrompts.length === 0 && normalizedValue) {
+      nextDraftPrompts[DEFAULT_PERSONALITY_PROMPT_ID] = normalizedValue;
+    }
+
+    setSavedPersonalityPrompts(nextSavedPrompts);
+    setDraftPersonalityPrompts(nextDraftPrompts);
+
+    const firstIncompletePrompt = PERSONALITY_PROMPT_CONFIGS.find(
+      (config) => !nextSavedPrompts[config.id].trim()
+    );
+
+    setExpandedPersonalityPromptId(firstIncompletePrompt?.id || null);
+  };
+
+  const syncStoredPersonalityPrompts = (
+    nextSavedPrompts: Record<PersonalityPromptId, string>
+  ) => {
+    const nextEntries: PersonalityPromptEntry[] = PERSONALITY_PROMPT_CONFIGS.reduce<
+      PersonalityPromptEntry[]
+    >((acc, config) => {
+      const answer = nextSavedPrompts[config.id].trim();
+      if (!answer) return acc;
+      acc.push({
+        id: config.id,
+        title: config.title,
+        answer,
+      });
+      return acc;
+    }, []);
+
+    const serializedPrompts =
+      nextEntries.length > 0 ? serializeStoredPersonalityPrompts(nextEntries) : "";
+
+    setSavedPersonalityPrompts(nextSavedPrompts);
+    setFormData((prev) => ({ ...prev, personality: serializedPrompts }));
+  };
+
+  const handlePersonalityDraftChange = (
+    promptId: PersonalityPromptId,
+    value: string
+  ) => {
+    setDraftPersonalityPrompts((prev) => ({
+      ...prev,
+      [promptId]: value.slice(0, PERSONALITY_PROMPT_MAX_LENGTH),
+    }));
+  };
+
+  const handleSavePersonalityPrompt = (promptId: PersonalityPromptId) => {
+    const nextAnswer = draftPersonalityPrompts[promptId].trim();
+
+    if (nextAnswer.length < PERSONALITY_PROMPT_MIN_LENGTH) {
+      toast.warning(
+        `Each prompt answer must be at least ${PERSONALITY_PROMPT_MIN_LENGTH} characters.`
+      );
+      return;
+    }
+
+    if (nextAnswer.length > PERSONALITY_PROMPT_MAX_LENGTH) {
+      toast.warning(
+        `Each prompt answer must be ${PERSONALITY_PROMPT_MAX_LENGTH} characters or less.`
+      );
+      return;
+    }
+
+    const nextSavedPrompts = {
+      ...savedPersonalityPrompts,
+      [promptId]: nextAnswer,
+    };
+
+    syncStoredPersonalityPrompts(nextSavedPrompts);
+
+    const nextIncompletePrompt = PERSONALITY_PROMPT_CONFIGS.find(
+      (config) => !nextSavedPrompts[config.id].trim()
+    );
+    setExpandedPersonalityPromptId(nextIncompletePrompt?.id || null);
+  };
 
   // Load draft data first (before database)
   useEffect(() => {
@@ -82,30 +448,35 @@ export default function EditProfilePage() {
       if (draft) {
         // Restore form data from draft
         setFormData({
-          birthday: draft.birthday || "02/28/2003",
+          birthday: draft.birthday || "",
           firstName: draft.firstName || "",
           gender: draft.gender || "",
-          location: draft.location || "Manchester, United Kingdom",
+          location: draft.location || "",
           aboutYourself: draft.aboutYourself || "",
-          height: draft.height || "6'4\" • 193 cm",
-          ethnicity: draft.ethnicity || ["I'd rather not say"],
-          religion: draft.religion || "Protestant",
-          education: draft.education || "High school",
+          height: draft.height || "",
+          ethnicity: draft.ethnicity || [],
+          religion: draft.religion || "",
+          education: draft.education || "",
           languages: draft.languages || [],
-          relationshipStatus: draft.relationshipStatus || "Single",
-          hasChildren: draft.hasChildren || "Doesn't have kids but wants them",
-          wantsChildren: draft.wantsChildren || "Not sure",
-          smoking: draft.smoking || "Smoke Smoke",
-          relocationPlan: draft.relocationPlan || "Not ready for relocation plan",
-          readyToMarry: draft.readyToMarry || "Get married yes, settle down no",
-          relationshipType: draft.relationshipType || "Hangout",
-          careerStability: draft.careerStability || "Job Security",
-          longTermGoals: draft.longTermGoals || "Career & Professional Growth",
-          emotionalConnection: draft.emotionalConnection || "Intellectual Emotional Connection",
-          loveLanguages: draft.loveLanguages || ["Words of Affirmation"],
-          personality: draft.personality || "",
-          photos: draft.photos || [],
+          relationshipStatus: formatRelationshipStatusLabel(draft.relationshipStatus || ""),
+          hasChildren: draft.hasChildren || "",
+          wantsChildren: draft.wantsChildren || "",
+          smoking: draft.smoking || "",
+          relocationPlan: draft.relocationPlan || "",
+          readyToMarry: draft.readyToMarry || "",
+          relationshipType: draft.relationshipType || "",
+          careerStability: draft.careerStability || "",
+          longTermGoals: draft.longTermGoals || "",
+          emotionalConnection: draft.emotionalConnection || "",
+          loveLanguages: draft.loveLanguages || [],
+          personality: sanitizePersonalityValue(draft.personality),
+          // File objects cannot be serialized safely in localStorage drafts.
+          photos: [],
         });
+        initializePersonalityPrompts(draft.personality);
+        setLocationPickedFromGoogle(
+          isLikelyGoogleSuggestedLocation(draft.location || "")
+        );
         
         if (draft.heightInches) {
           setHeightInches(draft.heightInches);
@@ -147,6 +518,8 @@ export default function EditProfilePage() {
         // Save form data along with current step and height
         const draftData = {
           ...formData,
+          // File objects cannot be persisted in JSON drafts.
+          photos: [],
           heightInches,
           currentStep,
         };
@@ -205,20 +578,22 @@ export default function EditProfilePage() {
           .from("user_profiles")
           .select("*")
           .eq("user_id", user.id)
-          .single();
+          .maybeSingle();
 
         // If profile exists and is completed, load from database (overwrites draft)
         // If no profile or profile not completed, draft data (already loaded) takes precedence
         if (profile && profile.profile_completed) {
+          setWasProfileCompleted(true);
+
           // Format date of birth
-          let birthday = "02/28/2003";
+          let birthday = "";
           if (profile.date_of_birth) {
             const date = new Date(profile.date_of_birth);
             birthday = `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}/${date.getFullYear()}`;
           }
 
           // Format height
-          let height = "6'4\" • 193 cm";
+          let height = "";
           if (profile.height_cm) {
             const feet = Math.floor(profile.height_cm / 30.48);
             const inches = Math.round((profile.height_cm % 30.48) / 2.54);
@@ -242,33 +617,71 @@ export default function EditProfilePage() {
             birthday,
             firstName: profile.first_name || "",
             gender,
-            location: profile.location || "Manchester, United Kingdom",
+            location: profile.location || "",
             aboutYourself: profile.about_yourself || "",
             height,
-            ethnicity: profile.ethnicity ? profile.ethnicity.split(", ") : ["I'd rather not say"],
-            religion: profile.religion || "Protestant",
-            education: profile.education_level || "High school",
+            ethnicity: profile.ethnicity ? profile.ethnicity.split(", ") : [],
+            religion: profile.religion || "",
+            education: profile.education_level || "",
             languages: profile.languages || [],
-            relationshipStatus: profile.relationship_status ? profile.relationship_status.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase()) : "Single",
-            hasChildren: profile.have_children ? "Has kid(s) and wants more" : "Doesn't have kids but wants them",
-            wantsChildren: profile.want_children === "yes" ? "Want kids" : profile.want_children === "no" ? "Don't want kids" : "Not sure",
-            smoking: profile.smoking_habits ? profile.smoking_habits.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase()) : "Smoke Smoke",
-            relocationPlan: profile.willing_to_relocate || "Not ready for relocation plan",
-            readyToMarry: profile.ready_for_marriage || "Get married yes, settle down no",
-            relationshipType: profile.relationship_type || "Hangout",
-            careerStability: profile.career_stability || "Job Security",
-            longTermGoals: profile.long_term_goals || "Career & Professional Growth",
-            emotionalConnection: profile.emotional_connection || "Intellectual Emotional Connection",
-            loveLanguages: profile.love_languages || ["Words of Affirmation"],
-            personality: profile.personality_type || "",
+            relationshipStatus: formatRelationshipStatusLabel(profile.relationship_status || ""),
+            hasChildren: profile.have_children === true ? "Has kid(s) and wants more" : profile.have_children === false ? "Doesn't have kids but wants them" : "",
+            wantsChildren: profile.want_children === "yes" ? "Want kids" : profile.want_children === "no" ? "Don't want kids" : profile.want_children === "maybe" ? "Not sure" : "",
+            smoking: profile.smoking_habits === "never"
+              ? "Never"
+              : profile.smoking_habits === "occasionally"
+                ? "Smoke Socially"
+                : profile.smoking_habits === "regularly"
+                  ? "Regularly"
+                  : profile.smoking_habits === "trying_to_quit"
+                    ? "Trying to quit"
+                    : profile.smoking_habits
+                      ? profile.smoking_habits.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())
+                      : "",
+            relocationPlan: profile.willing_to_relocate === "yes"
+              ? "Ready for relocation plan"
+              : profile.willing_to_relocate === "no"
+                ? "Not ready to relocate"
+                : profile.willing_to_relocate === "maybe"
+                  ? "Maybe in the future"
+                  : "",
+            readyToMarry: profile.ready_for_marriage === "yes"
+              ? "Absolutely"
+              : profile.ready_for_marriage === "no"
+                ? "No way"
+                : profile.ready_for_marriage === "not_sure"
+                  ? "Get married yes, settle down no"
+                  : "",
+            relationshipType: profile.relationship_type || "",
+            careerStability: profile.career_stability || "",
+            longTermGoals: profile.long_term_goals || "",
+            emotionalConnection: profile.emotional_connection || "",
+            loveLanguages: profile.love_languages || [],
+            personality: sanitizePersonalityValue(profile.personality_type),
             photos: [],
           });
+          initializePersonalityPrompts(profile.personality_type);
+          setLocationPickedFromGoogle(
+            isLikelyGoogleSuggestedLocation(profile.location || "")
+          );
 
-          // Load photo previews if available
-          if (profile.photos && Array.isArray(profile.photos) && profile.photos.length > 0) {
-            setPhotoPreviews(profile.photos);
-          } else if (profile.profile_photo_url) {
-            setPhotoPreviews([profile.profile_photo_url]);
+          // Only keep photo URLs that are actually approved in moderation.
+          const rawProfilePhotos =
+            profile.photos && Array.isArray(profile.photos) && profile.photos.length > 0
+              ? profile.photos.filter((value: unknown): value is string => typeof value === "string")
+              : profile.profile_photo_url
+                ? [profile.profile_photo_url]
+                : [];
+
+          const approvedPhotoSet = await fetchApprovedPhotoUrls(user.id, rawProfilePhotos);
+          const approvedProfilePhotos = rawProfilePhotos.filter((url: string) =>
+            approvedPhotoSet.has(url)
+          );
+
+          if (approvedProfilePhotos.length > 0) {
+            setPhotoPreviews(approvedProfilePhotos);
+          } else {
+            setPhotoPreviews([]);
           }
         } else {
           // No profile exists - draft data (if any) was already loaded, just mark as loaded
@@ -285,18 +698,214 @@ export default function EditProfilePage() {
     loadProfileData();
   }, [router]);
 
+  const validateProfileStep = (step: number) => {
+    switch (step) {
+      case 1:
+        if (!formData.birthday.trim()) {
+          toast.warning("Please enter your birthday.");
+          return false;
+        }
+        {
+          const birthdayIso = displayBirthdayToIso(formData.birthday);
+          const age = calculateAge(birthdayIso || null);
+          if (!birthdayIso || age === null) {
+            toast.warning("Please enter a valid birthday.");
+            return false;
+          }
+          if (age < MINIMUM_PLATFORM_AGE) {
+            toast.warning(`You must be at least ${MINIMUM_PLATFORM_AGE} years old.`);
+            return false;
+          }
+        }
+        return true;
+      case 2: {
+        const normalizedFirstName = normalizeFirstName(formData.firstName);
+        if (!normalizedFirstName) {
+          toast.warning("Please enter your first name.");
+          return false;
+        }
+        if (!isValidFirstName(normalizedFirstName)) {
+          toast.warning("First name must contain only letters (2-50 characters).");
+          return false;
+        }
+        if (normalizedFirstName !== formData.firstName) {
+          setFormData((prev) => ({ ...prev, firstName: normalizedFirstName }));
+        }
+        return true;
+      }
+      case 3:
+        if (!formData.gender.trim()) {
+          toast.warning("Please select your gender.");
+          return false;
+        }
+        return true;
+      case 4: {
+        const normalizedLocation = normalizeLocation(formData.location);
+        if (!normalizedLocation) {
+          toast.warning("Please select your location.");
+          return false;
+        }
+        if (
+          !locationPickedFromGoogle ||
+          !isLikelyGoogleSuggestedLocation(normalizedLocation)
+        ) {
+          toast.warning("Please select your location from Google suggestions.");
+          return false;
+        }
+        if (normalizedLocation !== formData.location) {
+          setFormData((prev) => ({ ...prev, location: normalizedLocation }));
+        }
+        return true;
+      }
+      case 5: {
+        const aboutTextLength = formData.aboutYourself.trim().length;
+        if (!aboutTextLength) {
+          toast.warning("Please tell us about yourself.");
+          return false;
+        }
+        if (aboutTextLength < ABOUT_ME_MIN_LENGTH) {
+          toast.warning(
+            `Your About Me must be at least ${ABOUT_ME_MIN_LENGTH} characters.`
+          );
+          return false;
+        }
+        if (aboutTextLength > ABOUT_ME_MAX_LENGTH) {
+          toast.warning(
+            `Your About Me must be ${ABOUT_ME_MAX_LENGTH} characters or less.`
+          );
+          return false;
+        }
+        return true;
+      }
+      case 6:
+        if (!formData.height.trim()) {
+          toast.warning("Please select your height.");
+          return false;
+        }
+        return true;
+      case 7:
+        if (formData.ethnicity.length === 0) {
+          toast.warning("Please select your ethnicity.");
+          return false;
+        }
+        return true;
+      case 8:
+        if (!formData.religion.trim()) {
+          toast.warning("Please select your religion.");
+          return false;
+        }
+        return true;
+      case 9:
+        if (!formData.education.trim()) {
+          toast.warning("Please select your education level.");
+          return false;
+        }
+        return true;
+      case 10:
+        if (formData.languages.length === 0) {
+          toast.warning("Please select at least one language.");
+          return false;
+        }
+        return true;
+      case 11:
+        if (!formData.relationshipStatus.trim()) {
+          toast.warning("Please select your relationship status.");
+          return false;
+        }
+        return true;
+      case 12:
+        if (!formData.hasChildren.trim()) {
+          toast.warning("Please select your children status.");
+          return false;
+        }
+        return true;
+      case 13:
+        if (!formData.wantsChildren.trim()) {
+          toast.warning("Please select if you want children.");
+          return false;
+        }
+        return true;
+      case 14:
+        if (!formData.smoking.trim()) {
+          toast.warning("Please select your smoking preference.");
+          return false;
+        }
+        return true;
+      case 15:
+        if (!formData.relocationPlan.trim()) {
+          toast.warning("Please select your relocation plan.");
+          return false;
+        }
+        return true;
+      case 16:
+        if (!formData.readyToMarry.trim()) {
+          toast.warning("Please select your marriage readiness.");
+          return false;
+        }
+        return true;
+      case 17:
+        if (!formData.relationshipType.trim()) {
+          toast.warning("Please select your relationship type.");
+          return false;
+        }
+        return true;
+      case 18:
+        if (!formData.careerStability.trim()) {
+          toast.warning("Please select your career stability.");
+          return false;
+        }
+        return true;
+      case 19:
+        if (!formData.longTermGoals.trim()) {
+          toast.warning("Please select your long-term goal.");
+          return false;
+        }
+        return true;
+      case 20:
+        if (!formData.emotionalConnection.trim()) {
+          toast.warning("Please select your emotional connection.");
+          return false;
+        }
+        return true;
+      case 21:
+        if (formData.loveLanguages.length === 0) {
+          toast.warning("Please select at least one love language.");
+          return false;
+        }
+        return true;
+      case 22:
+        if (
+          countCompletedPersonalityPrompts(formData.personality) <
+          PERSONALITY_PROMPT_REQUIRED_COUNT
+        ) {
+          toast.warning(
+            `Please complete ${PERSONALITY_PROMPT_REQUIRED_COUNT} personality prompts.`
+          );
+          return false;
+        }
+        return true;
+      case 23:
+        {
+          const minimumRequiredPhotos = wasProfileCompleted
+            ? 1
+            : MIN_ONBOARDING_PHOTOS;
+          if (photoPreviews.length < minimumRequiredPhotos) {
+            toast.warning(
+              minimumRequiredPhotos === 1
+                ? "Please add at least one photo."
+                : `Please add at least ${minimumRequiredPhotos} photos.`
+            );
+            return false;
+          }
+        }
+        return true;
+      default:
+        return true;
+    }
+  };
+
   const handleNext = () => {
-    // Validate current step before proceeding
-    if (currentStep === 3 && !formData.gender) {
-      toast.warning("Please select your gender");
-      return;
-    }
-    if (currentStep === 2 && !formData.firstName.trim()) {
-      toast.warning("Please enter your first name");
-      return;
-    }
-    if (currentStep === 1 && !formData.birthday) {
-      toast.warning("Please enter your birthday");
+    if (!validateProfileStep(currentStep)) {
       return;
     }
 
@@ -308,9 +917,40 @@ export default function EditProfilePage() {
     }
   };
 
+  const handleBack = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
     try {
+      for (let step = 1; step <= totalSteps; step += 1) {
+        if (!validateProfileStep(step)) {
+          setCurrentStep(step);
+          setLoading(false);
+          return;
+        }
+      }
+
+      const normalizedFirstName = normalizeFirstName(formData.firstName);
+      if (!normalizedFirstName || !isValidFirstName(normalizedFirstName)) {
+        toast.error("First name must contain only letters (2-50 characters).");
+        setLoading(false);
+        return;
+      }
+
+      const normalizedLocation = normalizeLocation(formData.location);
+      if (
+        !locationPickedFromGoogle ||
+        !isLikelyGoogleSuggestedLocation(normalizedLocation)
+      ) {
+        toast.error("Please select a valid location from Google suggestions.");
+        setLoading(false);
+        return;
+      }
+
       // First try to refresh the session to ensure it's valid
       let finalUser = null;
       
@@ -358,104 +998,227 @@ export default function EditProfilePage() {
         return;
       }
 
-      // Parse birthday to date format
-      const [month, day, year] = formData.birthday.split("/");
-      const dateOfBirth = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+      // Parse birthday to ISO date format
+      const dateOfBirth = displayBirthdayToIso(formData.birthday);
+      if (!dateOfBirth) {
+        toast.error("Please enter a valid birthday.");
+        setLoading(false);
+        return;
+      }
 
       // Parse height to cm
       const heightMatch = formData.height.match(/(\d+)\s*cm/);
       const heightCm = heightMatch ? parseInt(heightMatch[1]) : null;
 
-      // Build final photo list: preserve existing URLs + upload new File objects
-      // photoPreviews contains the ordered list of all photos (URLs for existing, blob URLs for new)
-      const finalPhotoUrls: string[] = [];
+      // Build final photo list: preserve only already-approved URLs + upload new File objects
+      // through API moderation (AI/synthetic/random image checks).
       const uploadErrors: string[] = [];
+      let moderationRejected = false;
+      const existingRemotePhotoUrls = photoPreviews.filter(isRemotePhotoUrl);
+      let approvedExistingPhotoSet = await fetchApprovedPhotoUrls(
+        finalUser.id,
+        existingRemotePhotoUrls
+      );
+      const missingApprovedRemoteUrls = existingRemotePhotoUrls.filter(
+        (url) => !approvedExistingPhotoSet.has(url)
+      );
 
-      // Create a map from blob URL → File for newly added photos
-      const blobToFile = new Map<string, File>();
-      for (const file of formData.photos) {
-        // Each new file has a corresponding blob:// preview URL
-        const blobUrl = URL.createObjectURL(file);
-        blobToFile.set(blobUrl, file);
-        // We can't match by blob URL easily since createObjectURL returns different values
-        // Instead, track new files by their position
+      if (missingApprovedRemoteUrls.length > 0) {
+        const accessToken = await getAccessTokenOrThrow();
+        const { status, result } = await verifyUploadedPhotoUrls(
+          missingApprovedRemoteUrls,
+          accessToken
+        );
+
+        if (status === 401) {
+          throw new Error("Your session has expired. Please log in again.");
+        }
+
+        if (handlePhotoUploadAccountBlock(status, result, toast, router)) {
+          return;
+        }
+
+        const recoveredApprovedUrls = Array.isArray(result?.approved_urls)
+          ? result.approved_urls.filter(
+              (item): item is string => typeof item === "string"
+            )
+          : [];
+
+        if (recoveredApprovedUrls.length > 0) {
+          approvedExistingPhotoSet = new Set([
+            ...approvedExistingPhotoSet,
+            ...recoveredApprovedUrls,
+          ]);
+        }
+
+        const verificationErrors = Array.isArray(result?.errors)
+          ? result.errors.filter((item): item is string => typeof item === "string")
+          : [];
+        uploadErrors.push(...verificationErrors);
+        moderationRejected =
+          moderationRejected ||
+          verificationErrors.some((message) =>
+            /real human|human beings|photo of yourself|could not verify/i.test(
+              message
+            )
+          );
       }
 
-      // Determine which previews are existing URLs vs new files
-      // Existing photos start with http(s):// ; new files have blob:// URLs
-      const newFileQueue = [...formData.photos]; // new files in upload order
+      const staleExistingPhotoCount = existingRemotePhotoUrls.filter(
+        (url) => !approvedExistingPhotoSet.has(url)
+      ).length;
+      let finalPhotoUrls = existingRemotePhotoUrls.filter((url) =>
+        approvedExistingPhotoSet.has(url)
+      );
 
-      for (const preview of photoPreviews) {
-        if (preview.startsWith("http://") || preview.startsWith("https://")) {
-          // Existing photo URL — keep it as-is in the correct order
-          finalPhotoUrls.push(preview);
-        } else {
-          // This is a blob URL for a newly uploaded file — upload next file from queue
-          const file = newFileQueue.shift();
-          if (!file) continue;
+      const localPreviewCount = photoPreviews.filter(
+        (preview) => !isRemotePhotoUrl(preview)
+      ).length;
+      const draftFiles = formData.photos.filter(isFileValue);
+      if (draftFiles.length !== formData.photos.length) {
+        console.warn(
+          "[profile/edit] Removed non-File draft photo entries before upload."
+        );
+      }
+      if (draftFiles.length > 0 && localPreviewCount === 0) {
+        console.warn(
+          "[profile/edit] Ignoring stale draft photo files because all visible photos are already remote."
+        );
+      }
 
-          // Validate file size (5MB limit)
-          const maxSize = 5 * 1024 * 1024;
-          if (file.size > maxSize) {
-            uploadErrors.push(`Photo "${file.name}" is too large. Maximum size is 5MB.`);
+      const orderedNewFiles: File[] =
+        localPreviewCount > 0
+          ? (() => {
+              const nextOrderedFiles: File[] = [];
+              const newFileQueue = [...draftFiles];
+              for (const preview of photoPreviews) {
+                if (isRemotePhotoUrl(preview)) continue;
+                const nextFile = newFileQueue.shift();
+                if (nextFile) {
+                  nextOrderedFiles.push(nextFile);
+                }
+              }
+              return nextOrderedFiles;
+            })()
+          : [];
+
+      if (orderedNewFiles.length > 0) {
+        const {
+          data: { session: uploadSession },
+        } = await supabase.auth.getSession();
+        const accessToken = uploadSession?.access_token;
+
+        if (!accessToken) {
+          throw new Error("Your session has expired. Please log in again.");
+        }
+
+        const uploadedUrls: string[] = [];
+        setPhotoUploadProgress(0);
+
+        for (let index = 0; index < orderedNewFiles.length; index += 1) {
+          const file = orderedNewFiles[index];
+          const { status, result } = await uploadSinglePhotoWithProgress(file, accessToken, {
+            standalone: true,
+            onProgress: (progress) => {
+              const overallProgress = Math.round(
+                ((index + progress / 100) / orderedNewFiles.length) * 100
+              );
+              setPhotoUploadProgress(Math.min(100, overallProgress));
+            },
+          });
+
+          const serverErrors = Array.isArray(result?.errors)
+            ? result.errors.filter((item): item is string => typeof item === "string")
+            : [];
+          uploadErrors.push(...serverErrors);
+
+          const humanOnlyErrorDetected = serverErrors.some((message) =>
+            /real human|human beings|photo of yourself|could not verify/i.test(message)
+          );
+          moderationRejected =
+            moderationRejected ||
+            result?.code === "MODERATION_REJECTED" ||
+            humanOnlyErrorDetected;
+
+          if (status === 401) {
+            throw new Error("Your session has expired. Please log in again.");
+          }
+
+          if (handlePhotoUploadAccountBlock(status, result, toast, router)) {
+            return;
+          }
+
+          if (status < 200 || status >= 300 || result?.success === false) {
             continue;
           }
 
-          // Validate file type
-          const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-          if (!allowedTypes.includes(file.type)) {
-            uploadErrors.push(`Photo "${file.name}" has an invalid file type. Please use JPEG, PNG, WebP, or GIF.`);
-            continue;
-          }
+          const nextUploadedUrls = Array.isArray(result?.uploaded_urls)
+            ? result.uploaded_urls.filter((item): item is string => typeof item === "string")
+            : [];
+          uploadedUrls.push(...nextUploadedUrls);
+        }
 
-          const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg";
-          const timestamp = Date.now();
-          const idx = finalPhotoUrls.length;
-          const filePath = `${finalUser.id}/${timestamp}_${idx}.${fileExt}`;
+        const uploadedQueue = [...uploadedUrls];
+        const orderedUrls: string[] = [];
 
-          try {
-            const { error: uploadError } = await supabase.storage
-              .from("profile-images")
-              .upload(filePath, file, {
-                upsert: true,
-                contentType: file.type,
-                cacheControl: "3600",
-              });
-
-            if (uploadError) {
-              console.error("Photo upload error:", uploadError);
-              uploadErrors.push(`Failed to upload "${file.name}": ${uploadError.message || "Unknown error"}`);
+        for (const preview of photoPreviews) {
+          if (isRemotePhotoUrl(preview)) {
+            if (!approvedExistingPhotoSet.has(preview)) {
               continue;
             }
-
-            const { data: { publicUrl } } = supabase.storage
-              .from("profile-images")
-              .getPublicUrl(filePath);
-
-            if (publicUrl) {
-              finalPhotoUrls.push(publicUrl);
-            } else {
-              uploadErrors.push(`Failed to get URL for "${file.name}"`);
-            }
-          } catch (error: unknown) {
-            console.error("Photo upload exception:", error);
-            const message =
-              error instanceof Error ? error.message : "Unknown error";
-            uploadErrors.push(`Error uploading "${file.name}": ${message}`);
+            orderedUrls.push(preview);
+            continue;
+          }
+          const nextUploaded = uploadedQueue.shift();
+          if (nextUploaded) {
+            orderedUrls.push(nextUploaded);
           }
         }
+
+        finalPhotoUrls = orderedUrls;
       }
 
       // Show errors to user if any uploads failed
-      if (uploadErrors.length > 0) {
-        const errorMessage = uploadErrors.join("\n");
-        console.error("Photo upload errors:", errorMessage);
-
-        if (finalPhotoUrls.length === 0 && photoPreviews.length > 0) {
-          throw new Error(`Failed to upload photos:\n${errorMessage}`);
-        } else if (uploadErrors.length > 0 && finalPhotoUrls.length > 0) {
-          toast.warning(`Some photos failed to upload. Continuing with ${finalPhotoUrls.length} photo(s).`);
+      if (uploadErrors.length > 0 && finalPhotoUrls.length > 0) {
+        if (moderationRejected) {
+          toast.centerWarning(HUMAN_PHOTO_ONLY_MESSAGE);
+        } else {
+          toast.warning(
+            `Some photos were rejected by moderation. Continuing with ${finalPhotoUrls.length} approved photo(s).`
+          );
         }
+      }
+
+      if (staleExistingPhotoCount > 0) {
+        toast.warning(
+          staleExistingPhotoCount === 1
+            ? "One previously saved photo could not be kept because it was not approved by moderation."
+            : `${staleExistingPhotoCount} previously saved photos could not be kept because they were not approved by moderation.`
+        );
+      }
+
+      if (finalPhotoUrls.length === 0 && photoPreviews.length > 0) {
+        throw new Error(
+          moderationRejected
+            ? HUMAN_PHOTO_ONLY_MESSAGE
+            : uploadErrors[0] || "No approved photos were available. Please upload a clear, real photo of yourself."
+        );
+      }
+
+      const minimumRequiredPhotos = wasProfileCompleted
+        ? 1
+        : MIN_ONBOARDING_PHOTOS;
+      if (finalPhotoUrls.length < minimumRequiredPhotos) {
+        if (moderationRejected) {
+          throw new Error(
+            `At least ${MIN_ONBOARDING_PHOTOS} approved real-human photos are required to complete your profile.`
+          );
+        }
+        throw new Error(
+          minimumRequiredPhotos === 1
+            ? "Please add at least one photo."
+            : `Please upload at least ${minimumRequiredPhotos} photos to complete your profile.`
+        );
       }
 
       // Map form data to database fields (matching exact column names and constraints)
@@ -488,17 +1251,6 @@ export default function EditProfilePage() {
         return "never"; // default
       };
 
-      // Map relationship status to constraint values: 'single', 'divorced', 'widowed', 'separated'
-      const mapRelationshipStatus = (value: string): string | null => {
-        if (!value) return null;
-        const lower = value.toLowerCase();
-        if (lower.includes("single")) return "single";
-        if (lower.includes("divorced")) return "divorced";
-        if (lower.includes("widowed")) return "widowed";
-        if (lower.includes("separated")) return "separated";
-        return "single"; // default
-      };
-
       // Map gender to database constraint values: 'male', 'female', 'other', 'prefer_not_to_say'
       const mapGender = (value: string): string | null => {
         if (!value) return null;
@@ -512,17 +1264,17 @@ export default function EditProfilePage() {
 
       const profileUpdate: Record<string, unknown> = {
         user_id: finalUser.id,
-        first_name: formData.firstName || null,
+        first_name: normalizedFirstName,
         gender: mapGender(formData.gender),
         date_of_birth: dateOfBirth || null,
-        location: formData.location || null,
+        location: normalizedLocation || null,
         about_yourself: formData.aboutYourself || null,
         height_cm: heightCm || null,
         ethnicity: formData.ethnicity.length > 0 ? formData.ethnicity.join(", ") : null,
         religion: formData.religion || null,
         education_level: formData.education || null,
         languages: formData.languages.length > 0 ? formData.languages : null,
-        relationship_status: mapRelationshipStatus(formData.relationshipStatus),
+        relationship_status: relationshipStatusToDbValue(formData.relationshipStatus),
         have_children: formData.hasChildren ? formData.hasChildren.includes("Has kid") : null,
         want_children: formData.wantsChildren === "Want kids" ? "yes" : formData.wantsChildren === "Don't want kids" ? "no" : formData.wantsChildren === "Not sure" ? "maybe" : null,
         smoking_habits: mapSmokingHabits(formData.smoking),
@@ -533,7 +1285,8 @@ export default function EditProfilePage() {
         long_term_goals: formData.longTermGoals || null,
         emotional_connection: formData.emotionalConnection || null,
         love_languages: formData.loveLanguages.length > 0 ? formData.loveLanguages : null,
-        personality_type: formData.personality || null,
+        personality_type: sanitizePersonalityValue(formData.personality) || null,
+        profile_photo_url: finalPhotoUrls[0] || null,
         photos: finalPhotoUrls.length > 0 ? finalPhotoUrls : null,
         profile_completed: true,
       };
@@ -559,6 +1312,40 @@ export default function EditProfilePage() {
         console.error("Progress update error:", progressError);
       }
 
+      // Track initial profile completion for lifecycle onboarding (fire once on first completion).
+      if (!wasProfileCompleted) {
+        try {
+          const { data: { session: trackingSession } } = await supabase.auth.getSession();
+          const accessToken = trackingSession?.access_token;
+
+          if (accessToken) {
+            const lifecycleResponse = await fetch("/api/lifecycle/profile-progress", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({
+                step: "profile_completed",
+                event_data: {
+                  photos_count: finalPhotoUrls.length,
+                  location: formData.location || null,
+                },
+              }),
+            });
+
+            if (!lifecycleResponse.ok) {
+              console.warn(
+                "Profile completion lifecycle tracking failed:",
+                lifecycleResponse.status
+              );
+            }
+          }
+        } catch (lifecycleError) {
+          console.warn("Profile lifecycle tracking error:", lifecycleError);
+        }
+      }
+
       // Clear draft since form was successfully submitted
       clearFormDraft(FORM_DRAFT_KEY);
       setSaveStatus(null);
@@ -570,7 +1357,7 @@ export default function EditProfilePage() {
             .from("user_progress")
             .select("preferences_completed")
             .eq("user_id", finalUser.id)
-            .single();
+            .maybeSingle();
 
         if (progressCheckError) {
           console.error("Error checking preferences status:", progressCheckError);
@@ -636,71 +1423,201 @@ export default function EditProfilePage() {
         toast.error("Your session has expired. Please log in again.");
         router.push("/login");
       } else {
-        toast.error(errorMessage);
+        if (/real human|human beings|photo of yourself|could not verify/i.test(errorMessage)) {
+          toast.centerWarning(HUMAN_PHOTO_ONLY_MESSAGE);
+        } else {
+          toast.error(errorMessage);
+        }
       }
     } finally {
+      setPhotoUploadProgress(null);
       setLoading(false);
     }
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    
-    if (files.length === 0) {
-      return;
-    }
-    
-    // Check total photo count
-    if (files.length + formData.photos.length > 5) {
-      toast.warning("You can only upload up to 5 photos total. Please remove some photos first.");
-      e.target.value = ''; // Reset input
-      return;
-    }
-    
-    // Validate file types and sizes
-    const maxSize = 5 * 1024 * 1024; // 5MB
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    const validFiles: File[] = [];
-    const errors: string[] = [];
-    
-    files.forEach((file) => {
-      if (!allowedTypes.includes(file.type)) {
-        errors.push(`${file.name}: Invalid file type. Please use JPEG, PNG, WebP, or GIF.`);
-        return;
-      }
-      
-      if (file.size > maxSize) {
-        errors.push(`${file.name}: File too large. Maximum size is 5MB.`);
-        return;
-      }
-      
-      validFiles.push(file);
-    });
-    
-    // Show errors if any
-    if (errors.length > 0) {
-      toast.error(errors.length === 1 ? errors[0] : `Some files were rejected: ${errors.join("; ")}`);
-    }
-    
-    // Only add valid files
-    if (validFiles.length > 0) {
-      const newPhotos = [...formData.photos, ...validFiles];
-      setFormData({ ...formData, photos: newPhotos });
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
 
-      // Create previews for valid files
-      const newPreviews = validFiles.map((file) => URL.createObjectURL(file));
-      setPhotoPreviews([...photoPreviews, ...newPreviews]);
+    if (!file) {
+      return;
     }
-    
-    // Reset input to allow selecting the same file again if needed
-    e.target.value = '';
+
+    if ((e.target.files?.length || 0) > 1) {
+      toast.warning("Please upload one photo at a time.");
+    }
+
+    if (photoPreviews.length >= MAX_PHOTOS) {
+      toast.warning(
+        `You can only upload up to ${MAX_PHOTOS} photos total. Please remove some photos first.`
+      );
+      e.target.value = "";
+      return;
+    }
+
+    const maxSize = MAX_PHOTO_SIZE_BYTES;
+    const allowedTypes = ALLOWED_PHOTO_TYPES;
+
+    if (!allowedTypes.includes(file.type)) {
+      toast.error(
+        `${file.name}: Invalid file type. Please use ${ALLOWED_PHOTO_FORMATS_LABEL}.`
+      );
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > maxSize) {
+      toast.error(`${file.name}: File too large. Maximum size is 5MB.`);
+      e.target.value = "";
+      return;
+    }
+
+    e.target.value = "";
+
+    try {
+      setLoading(true);
+      setPhotoUploadProgress(0);
+
+      const accessToken = await getAccessTokenOrThrow();
+      const { status, result } = await uploadSinglePhotoWithProgress(file, accessToken, {
+        standalone: true,
+        onProgress: (progress) => setPhotoUploadProgress(progress),
+      });
+
+      const serverErrors = Array.isArray(result?.errors)
+        ? result.errors.filter((item): item is string => typeof item === "string")
+        : [];
+      const uploadedUrls = Array.isArray(result?.uploaded_urls)
+        ? result.uploaded_urls.filter((item): item is string => typeof item === "string")
+        : [];
+
+      if (status === 401) {
+        throw new Error("Your session has expired. Please log in again.");
+      }
+
+      if (handlePhotoUploadAccountBlock(status, result, toast, router)) {
+        return;
+      }
+
+      if (uploadedUrls.length > 0) {
+        setPhotoPreviews((prev) => [...prev, ...uploadedUrls].slice(0, MAX_PHOTOS));
+        setFormData((prev) => ({ ...prev, photos: [] }));
+        toast.success(
+          uploadedUrls.length === 1
+            ? "Photo approved and added."
+            : `${uploadedUrls.length} photos approved and added.`
+        );
+      }
+
+      if (serverErrors.length > 0) {
+        const humanOnlyErrorDetected = serverErrors.some((message) =>
+          /real human|human beings|photo of yourself|could not verify/i.test(message)
+        );
+        if (humanOnlyErrorDetected || result?.code === "MODERATION_REJECTED") {
+          toast.centerWarning(HUMAN_PHOTO_ONLY_MESSAGE);
+        } else {
+          toast.warning(serverErrors[0]);
+        }
+      }
+
+      if (status < 200 || status >= 300 || result?.success === false) {
+        if (!serverErrors.length) {
+          toast.error(result?.error || "Failed to upload photo. Please try again.");
+        }
+        return;
+      }
+    } catch (error) {
+      console.error("[profile/edit] immediate photo upload failed:", error);
+      const message =
+        error instanceof Error ? error.message : "Failed to upload photo. Please try again.";
+      if (/session|auth|unauthorized/i.test(message)) {
+        toast.error("Your session has expired. Please log in again.");
+        router.push("/login");
+      } else {
+        toast.error(message);
+      }
+    } finally {
+      setPhotoUploadProgress(null);
+      setLoading(false);
+    }
   };
 
-  const removePhoto = (index: number) => {
-    const newPhotos = formData.photos.filter((_, i) => i !== index);
+  const openGalleryPhotoPicker = () => {
+    galleryPhotoInputRef.current?.click();
+  };
+
+  const openSelfieCamera = () => {
+    selfiePhotoInputRef.current?.click();
+  };
+
+  const syncDraftPhotosWithPreviewOrder = (nextPreviews: string[]) => {
+    const currentDraftFiles = formData.photos.filter(isFileValue);
+    const currentBlobPreviewOrder = photoPreviews.filter(
+      (preview) => !isRemotePhotoUrl(preview)
+    );
+    const fileByBlobUrl = new Map<string, File>();
+
+    currentBlobPreviewOrder.forEach((blobUrl, index) => {
+      const file = currentDraftFiles[index];
+      if (file) {
+        fileByBlobUrl.set(blobUrl, file);
+      }
+    });
+
+    const nextDraftFiles: File[] = [];
+    nextPreviews.forEach((preview) => {
+      if (isRemotePhotoUrl(preview)) return;
+      const mappedFile = fileByBlobUrl.get(preview);
+      if (mappedFile) {
+        nextDraftFiles.push(mappedFile);
+      }
+    });
+
+    setFormData({ ...formData, photos: nextDraftFiles });
+  };
+
+  const removePhoto = async (index: number) => {
+    const removedPreview = photoPreviews[index];
+    if (!removedPreview) return;
+
+    if (isRemotePhotoUrl(removedPreview)) {
+      try {
+        setLoading(true);
+        const accessToken = await getAccessTokenOrThrow();
+        const response = await fetch("/api/photo/upload", {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ photo_url: removedPreview }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to remove photo.");
+        }
+      } catch (error) {
+        console.error("[profile/edit] remove photo failed:", error);
+        toast.error(
+          error instanceof Error ? error.message : "Failed to remove photo."
+        );
+        setLoading(false);
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (removedPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(removedPreview);
+    }
+
     const newPreviews = photoPreviews.filter((_, i) => i !== index);
-    setFormData({ ...formData, photos: newPhotos });
     setPhotoPreviews(newPreviews);
+    syncDraftPhotosWithPreviewOrder(newPreviews);
   };
 
   /** Move a photo up (towards index 0) in the display order */
@@ -709,12 +1626,7 @@ export default function EditProfilePage() {
     const newPreviews = [...photoPreviews];
     [newPreviews[index - 1], newPreviews[index]] = [newPreviews[index], newPreviews[index - 1]];
     setPhotoPreviews(newPreviews);
-
-    const newPhotos = [...formData.photos];
-    if (newPhotos.length > index) {
-      [newPhotos[index - 1], newPhotos[index]] = [newPhotos[index], newPhotos[index - 1]];
-      setFormData({ ...formData, photos: newPhotos });
-    }
+    syncDraftPhotosWithPreviewOrder(newPreviews);
   };
 
   /** Move a photo down (towards the end) in the display order */
@@ -723,12 +1635,7 @@ export default function EditProfilePage() {
     const newPreviews = [...photoPreviews];
     [newPreviews[index], newPreviews[index + 1]] = [newPreviews[index + 1], newPreviews[index]];
     setPhotoPreviews(newPreviews);
-
-    const newPhotos = [...formData.photos];
-    if (newPhotos.length > index + 1) {
-      [newPhotos[index], newPhotos[index + 1]] = [newPhotos[index + 1], newPhotos[index]];
-      setFormData({ ...formData, photos: newPhotos });
-    }
+    syncDraftPhotosWithPreviewOrder(newPreviews);
   };
 
   /** Set a specific photo as primary (move to index 0) */
@@ -738,13 +1645,7 @@ export default function EditProfilePage() {
     const [moved] = newPreviews.splice(index, 1);
     newPreviews.unshift(moved);
     setPhotoPreviews(newPreviews);
-
-    const newPhotos = [...formData.photos];
-    if (newPhotos.length > index) {
-      const [movedFile] = newPhotos.splice(index, 1);
-      newPhotos.unshift(movedFile);
-      setFormData({ ...formData, photos: newPhotos });
-    }
+    syncDraftPhotosWithPreviewOrder(newPreviews);
   };
 
   const nigerianEthnicities = [
@@ -870,6 +1771,7 @@ export default function EditProfilePage() {
               <input
                 type="date"
                 value={getDateInputValue()}
+                max={getAdultMaxDateInputValue()}
                 onChange={(e) => {
                   const formatted = formatDateForDisplay(e.target.value);
                   if (formatted) {
@@ -895,8 +1797,16 @@ export default function EditProfilePage() {
               <input
                 type="text"
                 value={formData.firstName}
-                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    firstName: sanitizeFirstNameInput(e.target.value),
+                  })
+                }
                 placeholder="First name"
+                maxLength={50}
+                autoComplete="given-name"
+                inputMode="text"
                 className="w-full bg-transparent border-0 border-b-2 border-gray-300/60 text-blue-100 text-center text-base sm:text-lg md:text-xl lg:text-2xl placeholder-blue-200/70 focus:border-blue-200 focus:text-white focus:outline-none pb-2 sm:pb-3 transition-colors"
               />
             </div>
@@ -935,7 +1845,11 @@ export default function EditProfilePage() {
             <div>
               <GooglePlacesAutocomplete
                 value={formData.location}
-                onChange={(value) => setFormData({ ...formData, location: value })}
+                onChange={(value, prediction) => {
+                  setFormData({ ...formData, location: normalizeLocation(value) });
+                  setLocationPickedFromGoogle(Boolean(prediction));
+                }}
+                requireSuggestion
                 placeholder="Manchester, United Kingdom"
                 className="w-full bg-transparent border-0 border-b-2 border-gray-300/60 text-blue-100 text-center text-base sm:text-lg md:text-xl lg:text-2xl placeholder-blue-200/70 focus:border-blue-200 focus:text-white focus:outline-none pb-2 sm:pb-3 transition-colors"
               />
@@ -943,23 +1857,65 @@ export default function EditProfilePage() {
           </div>
         );
 
-      case 5:
+      case 5: {
+        const aboutMeLength = formData.aboutYourself.trim().length;
+        const charactersRemaining = Math.max(ABOUT_ME_MIN_LENGTH - aboutMeLength, 0);
+        const showAboutMeSamples = aboutMeLength === 0;
+
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
             <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">Complete your profile and tell us about yourself.</h2>
+              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">Tell us about yourself and what you are looking for</h2>
+              <p className="mt-3 text-sm text-blue-100/85">
+                Write a short intro about your personality, values, and intentions.
+              </p>
             </div>
-            <div>
+            <div className="space-y-4">
               <textarea
                 value={formData.aboutYourself}
-                onChange={(e) => setFormData({ ...formData, aboutYourself: e.target.value })}
-                placeholder="Write about yourself..."
-                rows={6}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    aboutYourself: e.target.value.slice(0, ABOUT_ME_MAX_LENGTH),
+                  })
+                }
+                placeholder="Write a short intro about your personality, values, and intentions."
+                rows={7}
                 className="w-full bg-transparent border-0 border-b-2 border-gray-300/60 text-blue-100 text-center text-base sm:text-lg md:text-xl lg:text-2xl placeholder-blue-200/70 focus:border-blue-200 focus:text-white focus:outline-none pb-2 sm:pb-3 transition-colors"
               />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-blue-100/80">
+                <span>
+                  {aboutMeLength < ABOUT_ME_MIN_LENGTH
+                    ? `${charactersRemaining} more characters required`
+                    : "Looks good"}
+                </span>
+                <span>
+                  {aboutMeLength}/{ABOUT_ME_MAX_LENGTH}
+                </span>
+              </div>
             </div>
+            {showAboutMeSamples ? (
+              <div className="space-y-3 text-left">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-100/70">
+                  Samples (tap to insert)
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {ABOUT_ME_SAMPLES.map((sample) => (
+                    <button
+                      key={sample.label}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, aboutYourself: sample.value })}
+                      className="rounded-full border border-white/20 bg-white/10 px-3 py-2 text-center text-xs font-medium text-white/95 backdrop-blur-sm transition hover:bg-white/18"
+                    >
+                      {sample.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         );
+      }
 
       case 6:
         const formatHeight = (inches: number) => {
@@ -1202,16 +2158,16 @@ export default function EditProfilePage() {
               <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">What is your current relationship status?</h2>
             </div>
             <div className="space-y-3 sm:space-y-4">
-              {["Single", "Separated", "Widowed", "Married (non-monogamous)", "Divorced", "I'd rather not say"].map((option) => (
+              {PROFILE_RELATIONSHIP_STATUS_OPTIONS.map((option) => (
                 <button
-                  key={option}
+                  key={option.value}
                   type="button"
-                  onClick={() => setFormData({ ...formData, relationshipStatus: option })}
+                  onClick={() => setFormData({ ...formData, relationshipStatus: option.label })}
                   className={`w-full rounded-xl border-2 p-4 text-left transition-all duration-200 font-medium ${
-                    formData.relationshipStatus === option ? "border-[#1f419a] bg-[#1f419a] text-white shadow-lg shadow-[#1f419a]/30" : "border-gray-200/60 bg-white/90 text-gray-700 hover:border-gray-300 hover:bg-white hover:shadow-sm"
+                    formData.relationshipStatus === option.label ? "border-[#1f419a] bg-[#1f419a] text-white shadow-lg shadow-[#1f419a]/30" : "border-gray-200/60 bg-white/90 text-gray-700 hover:border-gray-300 hover:bg-white hover:shadow-sm"
                   }`}
                 >
-                  {option}
+                  {option.label}
                 </button>
               ))}
             </div>
@@ -1490,18 +2446,252 @@ export default function EditProfilePage() {
 
       case 22:
         return (
-          <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
-            <div>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">Reveal your personality</h2>
+          <div className="space-y-4 sm:space-y-6 md:space-y-8 text-left">
+            <div className="rounded-[1.75rem] border border-white/15 bg-[linear-gradient(135deg,rgba(255,255,255,0.16),rgba(255,255,255,0.05))] p-4 shadow-[0_20px_60px_rgba(15,23,42,0.22)] backdrop-blur-xl sm:rounded-[2rem] sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-50/90 sm:px-3 sm:text-[11px]">
+                  Personality prompts
+                </span>
+                <span className="inline-flex items-center rounded-full bg-emerald-400/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-50 ring-1 ring-emerald-200/20 sm:px-3 sm:text-xs">
+                  {PERSONALITY_PROMPT_REQUIRED_COUNT} required
+                </span>
+              </div>
+
+              <div className="mt-4 text-center sm:mt-5">
+                <h2 className="px-1 text-[clamp(1.8rem,7vw,3.5rem)] font-semibold leading-[1.06] text-white sm:px-2">
+                  Reveal your personality
+                </h2>
+                <p className="mx-auto mt-2.5 max-w-xl text-sm leading-6 text-blue-100/82 sm:mt-3 sm:text-base">
+                  Pick three prompts that best reflect your values, dating
+                  intentions, and the kind of connection you want to build.
+                </p>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:mt-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <div>
+                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-blue-100/72 sm:text-xs">
+                    <span>Prompts completed</span>
+                    <span>
+                      {countCompletedPersonalityPrompts(formData.personality)} /{" "}
+                      {PERSONALITY_PROMPT_REQUIRED_COUNT}
+                    </span>
+                  </div>
+                  <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-slate-950/25">
+                    <div
+                      className="h-full rounded-full bg-[linear-gradient(90deg,#f8fafc_0%,#bfdbfe_45%,#86efac_100%)] transition-all duration-300"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (countCompletedPersonalityPrompts(formData.personality) /
+                            PERSONALITY_PROMPT_REQUIRED_COUNT) *
+                            100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/15 bg-slate-950/20 px-3.5 py-2.5 text-left backdrop-blur-sm sm:px-4 sm:py-3 sm:text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-100/70 sm:text-[11px]">
+                    Status
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-white">
+                    {countCompletedPersonalityPrompts(formData.personality) >=
+                    PERSONALITY_PROMPT_REQUIRED_COUNT
+                      ? "Ready to continue"
+                      : "In progress"}
+                  </p>
+                </div>
+              </div>
             </div>
-            <div>
-              <textarea
-                value={formData.personality}
-                onChange={(e) => setFormData({ ...formData, personality: e.target.value })}
-                placeholder="Write about yourself..."
-                rows={8}
-                className="w-full bg-transparent border-0 border-b-2 border-gray-300/60 text-blue-100 text-center text-base sm:text-lg md:text-xl lg:text-2xl placeholder-blue-200/70 focus:border-blue-200 focus:text-white focus:outline-none pb-2 sm:pb-3 transition-colors"
-              />
+
+            <div className="space-y-3 sm:space-y-4">
+              {PERSONALITY_PROMPT_CONFIGS.map((prompt) => {
+                const savedAnswer = savedPersonalityPrompts[prompt.id].trim();
+                const draftAnswer = draftPersonalityPrompts[prompt.id];
+                const trimmedDraftAnswer = draftAnswer.trim();
+                const isExpanded = expandedPersonalityPromptId === prompt.id;
+                const isSaved = Boolean(savedAnswer);
+                const isDraftValid =
+                  trimmedDraftAnswer.length >= PERSONALITY_PROMPT_MIN_LENGTH &&
+                  trimmedDraftAnswer.length <= PERSONALITY_PROMPT_MAX_LENGTH;
+                const promptIndex =
+                  PERSONALITY_PROMPT_CONFIGS.findIndex(
+                    ({ id }) => id === prompt.id
+                  ) + 1;
+
+                return (
+                  <div
+                    key={prompt.id}
+                    className={`overflow-hidden rounded-[1.75rem] border shadow-[0_18px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl transition-all duration-200 sm:rounded-[2rem] ${
+                      isExpanded
+                        ? "border-white/20 bg-[linear-gradient(135deg,rgba(255,255,255,0.18),rgba(255,255,255,0.07))]"
+                        : "border-white/12 bg-[linear-gradient(135deg,rgba(255,255,255,0.12),rgba(255,255,255,0.05))] hover:border-white/20 hover:bg-[linear-gradient(135deg,rgba(255,255,255,0.16),rgba(255,255,255,0.07))]"
+                    }`}
+                  >
+                    {isExpanded ? (
+                      <div className="space-y-4 p-4 sm:space-y-5 sm:p-6">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-2.5">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-white text-sm font-semibold text-[#1f419a] shadow-sm sm:h-9 sm:w-9 sm:rounded-2xl">
+                                {String(promptIndex).padStart(2, "0")}
+                              </span>
+                              <span className="inline-flex items-center rounded-full border border-white/20 bg-white/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-100/72 sm:px-3 sm:text-[11px]">
+                                Prompt
+                              </span>
+                            </div>
+                            <h3 className="mt-1 text-base font-semibold text-white sm:text-xl">
+                              {prompt.title}
+                            </h3>
+                          </div>
+                          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end">
+                            {isSaved ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold text-emerald-100 ring-1 ring-emerald-300/25">
+                                <Check className="h-3.5 w-3.5" />
+                                Saved
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedPersonalityPromptId(null)}
+                              className="rounded-full border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/85 transition hover:bg-white/10"
+                            >
+                              Minimize
+                            </button>
+                          </div>
+                        </div>
+
+                        <textarea
+                          value={draftAnswer}
+                          onChange={(event) =>
+                            handlePersonalityDraftChange(prompt.id, event.target.value)
+                          }
+                          rows={4}
+                          placeholder="Write your answer in your own words."
+                          className="w-full rounded-[1.35rem] border border-white/15 bg-slate-950/18 px-4 py-3.5 text-sm leading-6 text-white placeholder:text-blue-100/45 focus:border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-200/40 sm:rounded-[1.75rem] sm:px-5 sm:py-4 sm:leading-7"
+                        />
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-blue-100/75">
+                          <span className="rounded-full border border-white/12 bg-white/6 px-3 py-1.5">
+                            {PERSONALITY_PROMPT_MIN_LENGTH}–{PERSONALITY_PROMPT_MAX_LENGTH} characters
+                          </span>
+                          <span
+                            className={`rounded-full px-3 py-1.5 font-medium ${
+                              trimmedDraftAnswer.length > PERSONALITY_PROMPT_MAX_LENGTH
+                                ? "bg-rose-500/20 text-rose-100 ring-1 ring-rose-300/25"
+                                : trimmedDraftAnswer.length >= PERSONALITY_PROMPT_MIN_LENGTH
+                                  ? "bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-300/25"
+                                  : "border border-white/12 bg-white/6 text-blue-100/75"
+                            }`}
+                          >
+                            {trimmedDraftAnswer.length}/{PERSONALITY_PROMPT_MAX_LENGTH}
+                          </span>
+                        </div>
+
+                        <div className="space-y-3 rounded-[1.35rem] border border-white/12 bg-slate-950/14 p-3.5 sm:rounded-[1.75rem] sm:p-4">
+                          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-100/70">
+                              Sample answers
+                            </p>
+                            <p className="text-xs text-blue-100/65">
+                              Tap one to insert, then personalize it.
+                            </p>
+                          </div>
+                          <div className="grid gap-2">
+                            {prompt.samples.map((sample) => (
+                              <button
+                                key={sample}
+                                type="button"
+                                onClick={() =>
+                                  handlePersonalityDraftChange(prompt.id, sample)
+                                }
+                                className="rounded-xl border border-white/12 bg-white/8 px-3 py-2.5 text-left text-sm leading-5 text-white/90 transition hover:border-white/20 hover:bg-white/14 sm:rounded-2xl sm:py-3 sm:leading-6"
+                              >
+                                {sample}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-white/10 pt-2">
+                          {isSaved ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDraftPersonalityPrompts((prev) => ({
+                                  ...prev,
+                                  [prompt.id]: savedAnswer,
+                                }))
+                              }
+                              className="rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
+                            >
+                              Reset
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => handleSavePersonalityPrompt(prompt.id)}
+                            disabled={!isDraftValid}
+                            className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-[#1f419a] shadow-lg shadow-slate-950/15 transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Save Prompt
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedPersonalityPromptId(prompt.id)}
+                        className="block w-full p-3.5 text-left transition hover:bg-white/5 sm:p-5"
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-white/95 text-sm font-semibold text-[#1f419a] shadow-sm sm:h-11 sm:w-11 sm:rounded-2xl">
+                              {String(promptIndex).padStart(2, "0")}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-100/70 sm:text-xs">
+                                Prompt
+                              </p>
+                              <h3 className="mt-1 text-[1.02rem] font-semibold leading-6 text-white sm:text-lg">
+                                {prompt.title}
+                              </h3>
+                              {isSaved ? (
+                                <p className="mt-1.5 line-clamp-2 text-sm leading-6 text-blue-100/85">
+                                  {getPersonalityPromptPreview(savedAnswer)}
+                                </p>
+                              ) : (
+                                <p className="mt-1.5 text-sm text-blue-100/70">
+                                  Add a thoughtful answer in your own words.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2 pl-[3.25rem] sm:flex-shrink-0 sm:justify-end sm:pl-0">
+                            {isSaved ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold text-emerald-100 ring-1 ring-emerald-300/25">
+                                <Check className="h-3.5 w-3.5" />
+                                Completed
+                              </span>
+                            ) : null}
+                            <div className="flex items-center gap-2 sm:flex-col sm:items-end">
+                              <span className="rounded-full border border-white/15 px-3 py-1.5 text-xs font-semibold text-white/85">
+                                {isSaved ? "Edit" : "Open"}
+                              </span>
+                              {!isSaved ? (
+                                <span className="text-[10px] uppercase tracking-[0.16em] text-blue-100/55 sm:text-[11px]">
+                                  {PERSONALITY_PROMPT_MIN_LENGTH}–{PERSONALITY_PROMPT_MAX_LENGTH}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -1509,9 +2699,40 @@ export default function EditProfilePage() {
       case 23:
         return (
           <div className="space-y-6 sm:space-y-8 md:space-y-10 text-center">
+            <input
+              ref={galleryPhotoInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoUpload}
+              className="hidden"
+            />
+            <input
+              ref={selfiePhotoInputRef}
+              type="file"
+              accept="image/*"
+              capture="user"
+              onChange={handlePhotoUpload}
+              className="hidden"
+            />
             <div>
               <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-semibold text-white text-center leading-tight px-2 sm:px-4">Add photo</h2>
-              <p className="mt-2 text-sm text-blue-100/80">Upload up to 5 photos to showcase yourself</p>
+              <p className="mt-2 text-sm text-blue-100/80">
+                Upload up to 5 photos to showcase yourself
+                {!wasProfileCompleted && (
+                  <span className="block">
+                    Add at least {MIN_ONBOARDING_PHOTOS} real photos of yourself to continue.
+                  </span>
+                )}
+              </p>
+              {!wasProfileCompleted && photoPreviews.length < MIN_ONBOARDING_PHOTOS && (
+                <p className="mt-2 text-xs font-medium text-amber-200">
+                  {MIN_ONBOARDING_PHOTOS - photoPreviews.length} more photo
+                  {MIN_ONBOARDING_PHOTOS - photoPreviews.length === 1 ? "" : "s"} required.
+                </p>
+              )}
+              <p className="mt-2 text-xs text-blue-100/80">
+                You can upload from gallery or take a selfie. Add one photo at a time.
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
               {photoPreviews.map((preview, index) => (
@@ -1581,17 +2802,35 @@ export default function EditProfilePage() {
                 </div>
               ))}
               {Array.from({ length: 5 - photoPreviews.length }).map((_, index) => (
-                <label
+                <button
                   key={index}
+                  type="button"
+                  onClick={openGalleryPhotoPicker}
                   className="flex h-32 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-white transition-colors hover:border-[#1f419a] hover:bg-gray-50"
                 >
-                  <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" multiple />
                   <div className="text-center">
                     <Camera className="mx-auto h-8 w-8 text-gray-400" />
                     <span className="mt-1 block text-xs text-gray-500">Add photo</span>
                   </div>
-                </label>
+                </button>
               ))}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={openSelfieCamera}
+                className="flex w-full items-center justify-center rounded-xl border border-white/30 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+              >
+                <Camera className="mr-2 h-4 w-4" />
+                Take selfie
+              </button>
+              <button
+                type="button"
+                onClick={openGalleryPhotoPicker}
+                className="flex w-full items-center justify-center rounded-xl border border-white/30 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+              >
+                Upload from gallery
+              </button>
             </div>
           </div>
         );
@@ -1600,6 +2839,20 @@ export default function EditProfilePage() {
         return null;
     }
   };
+
+  const showStatusIndicator =
+    (loading && photoUploadProgress !== null) || Boolean(saveStatus);
+  const statusToneClass =
+    loading && photoUploadProgress !== null
+      ? "bg-blue-500/80 text-white"
+      : saveStatus === "saving"
+        ? "bg-blue-500/80 text-white"
+        : "bg-green-500/80 text-white";
+  const completedPersonalityPromptCount = countCompletedPersonalityPrompts(
+    formData.personality
+  );
+  const canContinueFromPersonalityStep =
+    completedPersonalityPromptCount >= PERSONALITY_PROMPT_REQUIRED_COUNT;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -1618,14 +2871,15 @@ export default function EditProfilePage() {
           </div>
           
           {/* Auto-save Status Indicator */}
-          {saveStatus && (
+          {showStatusIndicator ? (
             <div className="absolute top-4 sm:top-6 left-4 sm:left-6">
-              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm ${
-                saveStatus === "saving" 
-                  ? "bg-blue-500/80 text-white" 
-                  : "bg-green-500/80 text-white"
-              }`}>
-                {saveStatus === "saving" ? (
+              <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium backdrop-blur-sm ${statusToneClass}`}>
+                {loading && photoUploadProgress !== null ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Uploading {photoUploadProgress}%</span>
+                  </>
+                ) : saveStatus === "saving" ? (
                   <>
                     <Loader2 className="h-3 w-3 animate-spin" />
                     <span>Saving...</span>
@@ -1638,7 +2892,7 @@ export default function EditProfilePage() {
                 )}
               </div>
             </div>
-          )}
+          ) : null}
           
           {/* Close Button */}
           <div className="absolute top-4 sm:top-6 right-4 sm:right-6">
@@ -1652,31 +2906,78 @@ export default function EditProfilePage() {
         </div>
 
         {/* Main Content - Centered */}
-        <main className="flex min-h-screen flex-col items-center justify-center px-4 py-6 sm:py-8 md:py-12 lg:py-16">
+        <main className="flex min-h-screen flex-col items-center justify-center px-4 py-6 sm:py-8 md:py-12 lg:py-16 pb-[calc(env(safe-area-inset-bottom)+6rem)]">
 
           {/* Step content */}
-          <div className="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl px-2 sm:px-4">
+          <div className="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl px-2 sm:px-4 [&_h2]:mx-auto [&_h2]:max-w-[95%] [&_h2]:!text-[clamp(1.6rem,6.2vw,3rem)] [&_h2]:break-words [&_h2]:[overflow-wrap:anywhere] [&_h2]:[text-wrap:balance]">
             {renderStep()}
           </div>
 
-          {/* Navigation button - Bottom Right */}
-          <div className="mt-8 sm:mt-10 md:mt-12 flex w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl justify-end px-2 sm:px-4">
+          {/* Navigation buttons */}
+          <div
+            className={`mt-6 flex w-full max-w-md gap-3 px-2 sm:mt-10 sm:max-w-lg sm:gap-4 sm:px-4 md:mt-12 md:max-w-xl lg:max-w-2xl ${
+              currentStep === 22
+                ? "items-stretch justify-between"
+                : "items-center justify-between"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={handleBack}
+              disabled={currentStep === 1 || loading}
+              className={`rounded-lg border-2 border-white/60 bg-white/10 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition-all hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white/10 ${
+                currentStep === 22 ? "shrink-0" : ""
+              }`}
+            >
+              <ArrowLeft className="mr-1 inline h-4 w-4" />
+              Back
+            </button>
             {currentStep < totalSteps ? (
               <button
                 type="button"
                 onClick={handleNext}
-                className="rounded-lg bg-white px-6 py-3 sm:px-8 sm:py-4 md:px-10 md:py-5 text-sm sm:text-base md:text-lg font-semibold text-[#1f419a] shadow-lg transition-all hover:shadow-xl hover:scale-105"
+                disabled={
+                  loading ||
+                  (currentStep === 22 && !canContinueFromPersonalityStep)
+                }
+                className={`rounded-lg bg-white px-6 py-3 text-sm font-semibold text-[#1f419a] shadow-lg transition-all hover:shadow-xl hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50 sm:px-8 sm:py-4 sm:text-base md:px-10 md:py-5 md:text-lg ${
+                  currentStep === 22 ? "min-w-0 flex-1 px-4 sm:flex-none sm:px-8" : ""
+                }`}
               >
-                  That&apos;s it
+                {currentStep === 22
+                  ? canContinueFromPersonalityStep
+                    ? "Continue"
+                    : `Complete ${PERSONALITY_PROMPT_REQUIRED_COUNT} prompts`
+                  : "That's it"}
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={loading}
+                disabled={
+                  loading ||
+                  photoPreviews.length <
+                    (wasProfileCompleted ? 1 : MIN_ONBOARDING_PHOTOS)
+                }
                 className="rounded-lg bg-white px-6 py-3 text-sm font-medium text-[#1f419a] shadow-lg transition-colors hover:bg-white/90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? "Saving..." : "That's it"}
+                {loading
+                  ? photoUploadProgress !== null
+                    ? `Uploading ${photoUploadProgress}%`
+                    : "Saving..."
+                  : photoPreviews.length <
+                      (wasProfileCompleted ? 1 : MIN_ONBOARDING_PHOTOS)
+                    ? `Add ${
+                        (wasProfileCompleted ? 1 : MIN_ONBOARDING_PHOTOS) -
+                        photoPreviews.length
+                      } more photo${
+                        (wasProfileCompleted ? 1 : MIN_ONBOARDING_PHOTOS) -
+                          photoPreviews.length ===
+                        1
+                          ? ""
+                          : "s"
+                      }`
+                    : "That's it"}
               </button>
             )}
           </div>

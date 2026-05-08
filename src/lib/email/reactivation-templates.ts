@@ -11,6 +11,8 @@ const BRAND = {
   gradient: "linear-gradient(135deg, #1f419a 0%, #2a44a3 100%)",
   footerText: "MatchIndeed — Video Dating, Done Right",
   supportEmail: "support@matchindeed.com",
+  lightLogoUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com"}/matchindeed-logo-white.png`,
+  darkLogoUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com"}/matchindeed-logo-black-font.png`,
 };
 
 function baseEmailLayout(title: string, bodyContent: string): string {
@@ -24,8 +26,10 @@ function baseEmailLayout(title: string, bodyContent: string): string {
     body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f7; }
     .container { max-width: 600px; margin: 0 auto; padding: 20px; }
     .card { background: #ffffff; border-radius: 16px; padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-    .header { text-align: center; padding-bottom: 24px; border-bottom: 1px solid #eee; margin-bottom: 24px; }
-    .logo { font-size: 24px; font-weight: 800; background: ${BRAND.gradient}; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .header { text-align: center; padding: 24px; border-bottom: 1px solid #e5e7eb; margin-bottom: 24px; background: linear-gradient(135deg, #1e2a78 0%, #2a44a3 100%); border-radius: 14px; }
+    .logo-mark { display: inline-block; }
+    .logo-mark img { display: block; width: 170px; max-width: 100%; height: auto; margin: 0 auto; }
+    .logo-mark .logo-dark { display: none; }
     h1 { color: #1a1a2e; font-size: 22px; margin: 0 0 8px 0; font-weight: 700; }
     h2 { color: #1a1a2e; font-size: 18px; margin: 16px 0 12px 0; font-weight: 600; }
     p { color: #4a4a6a; font-size: 15px; line-height: 1.6; margin: 12px 0; }
@@ -37,13 +41,35 @@ function baseEmailLayout(title: string, bodyContent: string): string {
     .info { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
     .footer { text-align: center; padding-top: 24px; border-top: 1px solid #eee; margin-top: 24px; font-size: 12px; color: #666; }
     .divider { border-top: 1px solid #eee; margin: 24px 0; }
+    @media (prefers-color-scheme: dark) {
+      body { background-color: #111827 !important; }
+      .card { background: #1f2937 !important; box-shadow: none !important; }
+      .header { background: #ffffff !important; border-bottom-color: #374151 !important; }
+      .logo-mark .logo-light { display: none !important; }
+      .logo-mark .logo-dark { display: block !important; }
+      h1, h2 { color: #f9fafb !important; }
+      p { color: #d1d5db !important; }
+      .highlight { background: #273449 !important; }
+      .success { background: #163227 !important; }
+      .danger { background: #3b1f25 !important; }
+      .info { background: #1f3558 !important; }
+      .footer { border-top-color: #374151 !important; color: #9ca3af !important; }
+    }
+    [data-ogsc] body { background-color: #111827 !important; }
+    [data-ogsc] .card { background: #1f2937 !important; box-shadow: none !important; }
+    [data-ogsc] .header { background: #ffffff !important; border-bottom-color: #374151 !important; }
+    [data-ogsc] .logo-mark .logo-light { display: none !important; }
+    [data-ogsc] .logo-mark .logo-dark { display: block !important; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="card">
       <div class="header">
-        <div class="logo">${BRAND.name}</div>
+        <div class="logo-mark">
+          <img class="logo-light" src="${BRAND.lightLogoUrl}" alt="${BRAND.name}" width="170" height="68" />
+          <img class="logo-dark" src="${BRAND.darkLogoUrl}" alt="${BRAND.name}" width="170" height="68" />
+        </div>
       </div>
       ${bodyContent}
       <div class="footer">
@@ -96,7 +122,9 @@ export function reactivationRequestReceivedTemplate(
 export function reactivationPartnerNotificationTemplate(
   partnerName: string,
   userName: string,
-  reason: string
+  reason: string,
+  responseUrl?: string,
+  responseDeadline?: string
 ): string {
   const body = `
     <h1>Someone Wants to Reactivate Your Match</h1>
@@ -115,6 +143,14 @@ export function reactivationPartnerNotificationTemplate(
       <li><strong>Not respond</strong> - We'll proceed with our review</li>
     </ul>
     
+    <p><strong>Response window:</strong> ${
+      responseDeadline || "7 days from now"
+    }</p>
+    ${
+      responseUrl
+        ? `<div style="text-align:center;"><a href="${responseUrl}" class="btn">Respond to Request</a></div>`
+        : ""
+    }
     <p style="margin-top: 20px;">Your privacy and preferences are important to us. This is completely optional, and either way, we'll handle it respectfully.</p>
     <p>Best regards,<br>The MatchIndeed Team</p>
   `;

@@ -3,9 +3,10 @@ ALTER TABLE subscription_pricing ADD COLUMN IF NOT EXISTS monthly_credits INTEGE
 ALTER TABLE subscription_pricing ADD COLUMN IF NOT EXISTS bonus_credits INTEGER DEFAULT 0;
 ALTER TABLE subscription_pricing ADD COLUMN IF NOT EXISTS credit_price NUMERIC(10, 2) DEFAULT 0;
 
-UPDATE subscription_pricing SET monthly_credits = 100, bonus_credits = 10, credit_price = 0.10 WHERE tier_id = 'basic';
-UPDATE subscription_pricing SET monthly_credits = 500, bonus_credits = 50, credit_price = 0.08 WHERE tier_id = 'standard';
-UPDATE subscription_pricing SET monthly_credits = 2000, bonus_credits = 200, credit_price = 0.05 WHERE tier_id = 'premium';
+UPDATE subscription_pricing SET monthly_credits = 5, bonus_credits = 20, credit_price = 150 WHERE tier_id = 'basic';
+UPDATE subscription_pricing SET monthly_credits = 10, bonus_credits = 40, credit_price = 200 WHERE tier_id = 'standard';
+UPDATE subscription_pricing SET monthly_credits = 30, bonus_credits = 80, credit_price = 250 WHERE tier_id = 'premium';
+UPDATE subscription_pricing SET monthly_credits = 999999, bonus_credits = 0, credit_price = 0 WHERE tier_id = 'vip';
 
 CREATE TABLE IF NOT EXISTS credit_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

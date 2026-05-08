@@ -20,17 +20,25 @@ import Image from "next/image";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getBlockedUserIds } from "@/lib/blocked-users";
+import { getActiveStatus } from "@/lib/active-status";
+import {
+  isTransientRequestError,
+  shouldSkipBackgroundRequest,
+} from "@/lib/request-errors";
+import {
+  isRealtimeFailureStatus,
+  noteRealtimeFailure,
+  noteRealtimeSubscribed,
+  removeRealtimeChannelSafely,
+  shouldUseRealtime,
+} from "@/lib/realtime-fallback";
 import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import {
   MessageCircle,
   Search,
   Loader2,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  Heart,
   ArrowRight,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  User,
   Inbox,
 } from "lucide-react";
 
@@ -43,6 +51,7 @@ type Conversation = {
   partner_name: string;
   partner_photo: string | null;
   partner_tier: string;
+  partner_last_active_at: string | null;
   matched_at: string;
   last_message_at: string | null;
   last_message_preview: string | null;
@@ -101,6 +110,10 @@ export default function MessagesPage() {
   // ---------------------------------------------------------------
   const fetchConversations = useCallback(async () => {
     try {
+      if (shouldSkipBackgroundRequest()) {
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { router.push("/login"); return; }
 
@@ -118,6 +131,12 @@ export default function MessagesPage() {
         setTotalUnread(data.total_unread || 0);
       }
     } catch (err) {
+      if (
+        (err instanceof DOMException && err.name === "AbortError") ||
+        isTransientRequestError(err)
+      ) {
+        return;
+      }
       console.error("Error fetching conversations:", err);
     } finally {
       setLoading(false);
@@ -137,15 +156,29 @@ export default function MessagesPage() {
   useEffect(() => {
     let msgChannel: ReturnType<typeof supabase.channel> | null = null;
     let presenceChannel: ReturnType<typeof supabase.channel> | null = null;
+    let disposed = false;
 
     const setup = async () => {
+      if (!shouldUseRealtime()) {
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user || disposed) return;
 
       msgChannel = supabase
         .channel("messages-list")
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => fetchConversations())
-        .subscribe();
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            noteRealtimeSubscribed();
+            return;
+          }
+
+          if (isRealtimeFailureStatus(status) && noteRealtimeFailure(status)) {
+            removeRealtimeChannelSafely(supabase, msgChannel);
+          }
+        });
 
       presenceChannel = supabase
         .channel("global-presence", { config: { presence: { key: user.id } } })
@@ -153,14 +186,23 @@ export default function MessagesPage() {
           setOnlineUsers(new Set(Object.keys(presenceChannel!.presenceState())));
         })
         .subscribe(async (status) => {
-          if (status === "SUBSCRIBED") await presenceChannel!.track({ online_at: new Date().toISOString() });
+          if (status === "SUBSCRIBED") {
+            noteRealtimeSubscribed();
+            await presenceChannel!.track({ online_at: new Date().toISOString() });
+            return;
+          }
+
+          if (isRealtimeFailureStatus(status) && noteRealtimeFailure(status)) {
+            removeRealtimeChannelSafely(supabase, presenceChannel);
+          }
         });
     };
 
     setup();
     return () => {
-      if (msgChannel) supabase.removeChannel(msgChannel);
-      if (presenceChannel) supabase.removeChannel(presenceChannel);
+      disposed = true;
+      removeRealtimeChannelSafely(supabase, msgChannel);
+      removeRealtimeChannelSafely(supabase, presenceChannel);
     };
   }, [fetchConversations]);
 
@@ -180,7 +222,7 @@ export default function MessagesPage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/dashboard">
-            <Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>
@@ -256,7 +298,8 @@ export default function MessagesPage() {
             <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/5">
               {filtered.map((convo, idx) => {
                 const isLast = idx === filtered.length - 1;
-                const isOnline = onlineUsers.has(convo.partner_id);
+                const activityStatus = getActiveStatus(convo.partner_last_active_at);
+                const isOnline = onlineUsers.has(convo.partner_id) || activityStatus.isOnline;
                 const hasUnread = convo.unread_count > 0;
 
                 return (
@@ -304,6 +347,18 @@ export default function MessagesPage() {
                       </div>
                       <p className={`mt-0.5 truncate text-sm ${hasUnread ? "font-medium text-gray-900" : "text-gray-500"}`}>
                         {convo.last_message_preview || "Start a conversation!"}
+                      </p>
+                      <p
+                        className={`mt-1 flex items-center gap-1.5 text-xs ${
+                          isOnline ? "text-emerald-600" : "text-gray-400"
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            isOnline ? "bg-emerald-500" : "bg-gray-300"
+                          }`}
+                        />
+                        {isOnline ? "Online" : "Offline"}
                       </p>
                     </div>
 

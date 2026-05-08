@@ -33,6 +33,32 @@ type ParticipantInfo = {
   tier: string;
 };
 
+type MeetingParticipantRow = {
+  user_id: string;
+  role: "host" | "guest";
+  user: {
+    id: string;
+    display_name: string | null;
+    tier: string | null;
+    email: string | null;
+  } | null;
+};
+
+type MeetingData = {
+  id: string;
+  host_id: string;
+  status: string;
+  scheduled_at: string;
+  completed_at?: string | null;
+  finalized_at: string | null;
+  outcome: string | null;
+  fault_determination: string | null;
+  charge_status: string | null;
+  host_notes: string | null;
+  type: string | null;
+  meeting_participants: MeetingParticipantRow[] | null;
+};
+
 /**
  * MeetingConcludePage - Host submits the meeting conclusion report.
  *
@@ -50,8 +76,7 @@ export default function MeetingConcludePage() {
   const meetingId = params.id as string;
 
   // Meeting & participant data
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [meeting, setMeeting] = useState<any>(null);
+  const [meeting, setMeeting] = useState<MeetingData | null>(null);
   const [participants, setParticipants] = useState<ParticipantInfo[]>([]);
   // Page states
   const [loading, setLoading] = useState(true);
@@ -113,6 +138,7 @@ export default function MeetingConcludePage() {
           setLoading(false);
           return;
         }
+        const typedMeetingData = meetingData as MeetingData;
 
         // Verify user is the host or an admin
         const { data: account } = await supabase
@@ -123,8 +149,8 @@ export default function MeetingConcludePage() {
 
         const isAdmin =
           account?.role &&
-          ["admin", "superadmin", "moderator"].includes(account.role);
-        const isHost = meetingData.host_id === user.id;
+          ["admin", "superadmin"].includes(account.role);
+        const isHost = typedMeetingData.host_id === user.id;
 
         if (!isHost && !isAdmin) {
           setError(
@@ -134,28 +160,34 @@ export default function MeetingConcludePage() {
           return;
         }
 
+        const effectiveFinalizedAt =
+          typedMeetingData.finalized_at || typedMeetingData.completed_at || null;
+
         // Check if already finalized
-        if (meetingData.finalized_at) {
+        if (effectiveFinalizedAt) {
           setAlreadyFinalized(true);
         }
 
         // Meeting must be confirmed or completed
         if (
-          !["confirmed", "completed"].includes(meetingData.status) &&
-          !meetingData.finalized_at
+          !["confirmed", "completed"].includes(typedMeetingData.status) &&
+          !effectiveFinalizedAt
         ) {
           setError(
-            `This meeting has status "${meetingData.status}" and cannot be concluded yet. The meeting must be confirmed or completed first.`
+            `This meeting has status "${typedMeetingData.status}" and cannot be concluded yet. The meeting must be confirmed or completed first.`
           );
           setLoading(false);
           return;
         }
 
-        setMeeting(meetingData);
+        setMeeting({
+          ...typedMeetingData,
+          finalized_at: effectiveFinalizedAt,
+        });
 
         // Build participant info
         const participantList: ParticipantInfo[] = [];
-        for (const p of meetingData.meeting_participants || []) {
+        for (const p of typedMeetingData.meeting_participants || []) {
           // Get profile details
           const { data: profile } = await supabase
             .from("user_profiles")
@@ -177,9 +209,8 @@ export default function MeetingConcludePage() {
         }
 
         setParticipants(participantList);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } catch (err: any) {
-        console.error("Error fetching meeting data:", err);
+      } catch (error: unknown) {
+        console.error("Error fetching meeting data:", error);
         setError("Failed to load meeting details.");
       } finally {
         setLoading(false);
@@ -251,9 +282,8 @@ export default function MeetingConcludePage() {
       setTimeout(() => {
         router.push("/dashboard/meetings");
       }, 3000);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      console.error("Error submitting conclusion:", err);
+    } catch (error: unknown) {
+      console.error("Error submitting conclusion:", error);
       setError("An error occurred. Please try again.");
     } finally {
       setSubmitting(false);
@@ -300,7 +330,7 @@ export default function MeetingConcludePage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/matchindeed.svg" alt="Matchindeed" width={140} height={36} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>
@@ -343,7 +373,7 @@ export default function MeetingConcludePage() {
               )}
 
               {/* ALREADY FINALIZED STATE */}
-              {alreadyFinalized && !submitted && (
+              {alreadyFinalized && !submitted && meeting && (
                 <div className="rounded-2xl bg-white shadow-lg ring-1 ring-black/5 overflow-hidden">
                   <div className="p-8 bg-gradient-to-r from-blue-50 to-indigo-50">
                     <div className="flex items-center gap-3 mb-4">
@@ -354,9 +384,9 @@ export default function MeetingConcludePage() {
                         </h2>
                         <p className="text-gray-500">
                           This meeting was finalized on{" "}
-                          {new Date(
-                            meeting.finalized_at
-                          ).toLocaleDateString()}
+                          {meeting.finalized_at
+                            ? new Date(meeting.finalized_at).toLocaleDateString()
+                            : "an unknown date"}
                         </p>
                       </div>
                     </div>

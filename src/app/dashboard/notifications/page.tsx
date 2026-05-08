@@ -31,17 +31,27 @@ import {
   MessageCircle,
   Star,
   UserCheck,
+  Eye,
   Loader2,
   ExternalLink,
   Filter,
   ChevronDown,
   Inbox,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  Cigarette,
 } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import { supabase } from "@/lib/supabase";
+import {
+  isTransientRequestError,
+  shouldSkipBackgroundRequest,
+} from "@/lib/request-errors";
+import {
+  isRealtimeFailureStatus,
+  noteRealtimeFailure,
+  noteRealtimeSubscribed,
+  removeRealtimeChannelSafely,
+  shouldUseRealtime,
+} from "@/lib/realtime-fallback";
 
 // ---------------------------------------------------------------
 // Types
@@ -52,8 +62,7 @@ type Notification = {
   type: string;
   title: string;
   message: string;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: Record<string, any> | null;
+  data: Record<string, unknown> | null;
   read: boolean;
   read_at: string | null;
   created_at: string;
@@ -89,6 +98,8 @@ function getNotificationStyle(type: string) {
       return { icon: <CreditCard className="h-5 w-5" />, bg: "bg-emerald-50", text: "text-emerald-600", ring: "ring-emerald-100", label: "Wallet" };
     case "profile_reactivated":
       return { icon: <UserCheck className="h-5 w-5" />, bg: "bg-teal-50", text: "text-teal-600", ring: "ring-teal-100", label: "Profile" };
+    case "profile_view":
+      return { icon: <Eye className="h-5 w-5" />, bg: "bg-indigo-50", text: "text-indigo-600", ring: "ring-indigo-100", label: "Views" };
     default:
       return { icon: <MessageCircle className="h-5 w-5" />, bg: "bg-gray-50", text: "text-gray-500", ring: "ring-gray-100", label: "General" };
   }
@@ -104,6 +115,7 @@ function getNotificationLink(n: Notification): string | null {
       return `/dashboard/meetings/${data.meeting_id}/response`;
     return "/dashboard/meetings";
   }
+  if (n.type === "profile_view") return "/dashboard/likes?tab=views";
   if (["like", "wink", "interested", "mutual_match", "match_created"].includes(n.type)) return "/dashboard/likes";
   return null;
 }
@@ -174,12 +186,22 @@ export default function NotificationsPage() {
   // Fetch
   // ---------------------------------------------------------------
   const fetchNotifications = useCallback(
-    async (append = false) => {
+    async ({
+      append = false,
+      startOffset = 0,
+    }: {
+      append?: boolean;
+      startOffset?: number;
+    } = {}) => {
+      if (shouldSkipBackgroundRequest()) {
+        return;
+      }
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) { router.push("/login"); return; }
 
-        const currentOffset = append ? offset : 0;
+        const currentOffset = append ? startOffset : 0;
         const params = new URLSearchParams({ limit: String(LIMIT), offset: String(currentOffset) });
         if (activeFilter === "unread") params.set("unread_only", "true");
 
@@ -203,21 +225,35 @@ export default function NotificationsPage() {
         setUnreadCount(data.unread_count || 0);
         setOffset(currentOffset + LIMIT);
       } catch (err) {
+        if (isTransientRequestError(err)) {
+          return;
+        }
         console.error("Error fetching notifications:", err);
       }
     },
-    [activeFilter, offset, router],
+    [activeFilter, router],
   );
 
   // Fetch on mount + filter change
   useEffect(() => {
     setLoading(true);
     setOffset(0);
-    fetchNotifications(false).finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFilter]);
+    fetchNotifications({ append: false, startOffset: 0 }).finally(() => setLoading(false));
+  }, [activeFilter, fetchNotifications]);
 
-  const loadMore = async () => { setLoadingMore(true); await fetchNotifications(true); setLoadingMore(false); };
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void fetchNotifications({ append: false, startOffset: 0 });
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    await fetchNotifications({ append: true, startOffset: offset });
+    setLoadingMore(false);
+  };
 
   // ---------------------------------------------------------------
   // Actions
@@ -278,9 +314,14 @@ export default function NotificationsPage() {
   // ---------------------------------------------------------------
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let disposed = false;
     const setup = async () => {
+      if (!shouldUseRealtime()) {
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user || disposed) return;
       channel = supabase
         .channel("notifications-page")
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` }, (payload) => {
@@ -289,10 +330,22 @@ export default function NotificationsPage() {
           setUnreadCount((c) => c + 1);
           setTotal((c) => c + 1);
         })
-        .subscribe();
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            noteRealtimeSubscribed();
+            return;
+          }
+
+          if (isRealtimeFailureStatus(status) && noteRealtimeFailure(status)) {
+            removeRealtimeChannelSafely(supabase, channel);
+          }
+        });
     };
     setup();
-    return () => { if (channel) supabase.removeChannel(channel); };
+    return () => {
+      disposed = true;
+      removeRealtimeChannelSafely(supabase, channel);
+    };
   }, []);
 
   // ---------------------------------------------------------------
@@ -326,7 +379,7 @@ export default function NotificationsPage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/dashboard">
-            <Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>

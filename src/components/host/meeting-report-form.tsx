@@ -9,6 +9,7 @@
 
 import { useCallback, useState } from "react";
 import { AlertCircle, CheckCircle, Loader2, Send } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface MeetingReportFormProps {
   meetingId?: string;
@@ -67,9 +68,22 @@ export function MeetingReportForm({
       setError(null);
 
       try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (sessionError || !session?.access_token) {
+          setError("Please log in again before submitting a report.");
+          return;
+        }
+
         const response = await fetch("/api/host/report", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
           body: JSON.stringify({
             ...formData,
             meeting_id: meetingId,

@@ -9,7 +9,7 @@
  * All business logic (token handling, session setup, resend) preserved.
  */
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
@@ -37,11 +37,11 @@ function BrandPanel() {
 
       <Link href="/" className="relative z-10">
         <Image
-          src="/matchindeed.svg"
+          src="/matchindeed-logo-black-font.png"
           alt="MatchIndeed"
           width={160}
           height={42}
-          className="brightness-0 invert"
+         
           style={{ width: "auto", height: "auto" }}
         />
       </Link>
@@ -134,6 +134,7 @@ function VerifyEmailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const redirectScheduledRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
@@ -142,6 +143,20 @@ function VerifyEmailContent() {
   >("verifying");
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [verifiedViaEmailLink, setVerifiedViaEmailLink] = useState(false);
+
+  const markEmailVerified = async (userId: string | null | undefined) => {
+    if (!userId) return;
+
+    try {
+      await supabase
+        .from("accounts")
+        .update({ email_verified: true })
+        .eq("id", userId);
+    } catch (verificationError) {
+      console.error("Failed to update accounts.email_verified:", verificationError);
+    }
+  };
 
   // ----- Verify on mount -----
   useEffect(() => {
@@ -149,6 +164,33 @@ function VerifyEmailContent() {
       try {
         const registered = searchParams.get("registered");
         const emailParam = searchParams.get("email");
+        const verifiedParam = searchParams.get("verified");
+
+        if (verifiedParam === "true") {
+          setEmail(emailParam);
+          setVerifiedViaEmailLink(true);
+          setStatus("success");
+          setLoading(false);
+          return;
+        }
+
+        if (verifiedParam === "expired") {
+          setEmail(emailParam);
+          setStatus("expired");
+          setLoading(false);
+          return;
+        }
+
+        if (verifiedParam === "error") {
+          setEmail(emailParam);
+          setStatus("error");
+          setError(
+            searchParams.get("error") ||
+              "Unable to verify your email. Please request a new link."
+          );
+          setLoading(false);
+          return;
+        }
 
         if (registered === "true" && emailParam) {
           setEmail(emailParam);
@@ -183,13 +225,7 @@ function VerifyEmailContent() {
               if (session?.user?.email_confirmed_at) {
                 setStatus("success");
                 setEmail(session.user.email || null);
-                if (session.user.id) {
-                  await supabase
-                    .from("accounts")
-                    .update({ email_verified: true })
-                    .eq("id", session.user.id)
-                }
-                setTimeout(() => router.push("/dashboard/profile"), 3000);
+                await markEmailVerified(session.user.id);
                 return;
               }
               setStatus("error");
@@ -200,11 +236,7 @@ function VerifyEmailContent() {
             if (sessionData.user) {
               setStatus("success");
               setEmail(sessionData.user.email || null);
-              if (sessionData.user.id) {
-                await supabase
-                  .from("accounts")
-              }
-              setTimeout(() => router.push("/dashboard/profile"), 3000);
+              await markEmailVerified(sessionData.user.id);
               return;
             }
           }
@@ -215,7 +247,7 @@ function VerifyEmailContent() {
           if (session?.user?.email_confirmed_at) {
             setStatus("success");
             setEmail(session.user.email || null);
-            setTimeout(() => router.push("/dashboard/profile"), 3000);
+            await markEmailVerified(session.user.id);
             return;
           }
 
@@ -228,6 +260,7 @@ function VerifyEmailContent() {
           if (session?.user?.email_confirmed_at) {
             setStatus("success");
             setEmail(session.user.email || null);
+            await markEmailVerified(session.user.id);
           } else {
             setStatus("error");
             setError("Invalid verification link");
@@ -247,6 +280,23 @@ function VerifyEmailContent() {
 
     verifyEmail();
   }, [router, searchParams]);
+
+  useEffect(() => {
+    if (
+      status !== "success" ||
+      verifiedViaEmailLink ||
+      redirectScheduledRef.current
+    ) {
+      return;
+    }
+
+    redirectScheduledRef.current = true;
+    const timeoutId = setTimeout(() => {
+      router.push("/dashboard/profile/edit");
+    }, 1500);
+
+    return () => clearTimeout(timeoutId);
+  }, [status, router, verifiedViaEmailLink]);
 
   // ----- Resend handler -----
   const handleResendVerification = async () => {
@@ -315,7 +365,7 @@ function VerifyEmailContent() {
             <div className="mb-8 text-center lg:hidden">
               <Link href="/" className="inline-block">
                 <Image
-                  src="/matchindeed.svg"
+                  src="/matchindeed-logo-black-font.png"
                   alt="MatchIndeed"
                   width={150}
                   height={40}
@@ -368,7 +418,7 @@ function VerifyEmailContent() {
           <div className="mb-8 text-center lg:hidden">
             <Link href="/" className="inline-block">
               <Image
-                src="/matchindeed.svg"
+                src="/matchindeed-logo-black-font.png"
                 alt="MatchIndeed"
                 width={150}
                 height={40}
@@ -395,14 +445,16 @@ function VerifyEmailContent() {
                   has been successfully verified.
                 </p>
                 <p className="text-xs text-gray-400">
-                  Redirecting to your profile...
+                  {verifiedViaEmailLink
+                    ? "You can now sign in to continue."
+                    : "Redirecting to your profile..."}
                 </p>
                 <div className="pt-2">
                   <Link
-                    href="/dashboard/profile"
+                    href={verifiedViaEmailLink ? "/login" : "/dashboard/profile/edit"}
                     className="inline-flex items-center gap-2 text-sm font-medium text-[#1f419a] hover:text-[#17357b]"
                   >
-                    Go to profile
+                    {verifiedViaEmailLink ? "Back to login" : "Go to profile setup"}
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </div>

@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { recordCreditTransaction } from "@/lib/credits/transactions";
+import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
+import { canAccessPaidFeatures } from "@/lib/subscription/permissions";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+const getErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
 
 /**
  * Manually add credits or wallet balance to a user's account
@@ -28,8 +34,7 @@ export async function POST(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) => {
                 cookieStore.set(name, value, options);
               });
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (error) {
+            } catch {
               // Ignore cookie setting errors in API routes
             }
           },
@@ -59,6 +64,18 @@ export async function POST(request: NextRequest) {
 
     // Handle wallet top-up
     if (type === "wallet_topup" && amountCents) {
+      const paidFeaturesAccess = await canAccessPaidFeatures(user.id);
+      if (!paidFeaturesAccess.allowed) {
+        return NextResponse.json(
+          {
+            error:
+              paidFeaturesAccess.message ||
+              "An active subscription plan is required to access paid features.",
+          },
+          { status: 403 }
+        );
+      }
+
       // CRITICAL: Check if transaction already exists FIRST to prevent duplicates
       // This MUST happen before any wallet balance updates
       if (sessionId) {
@@ -171,11 +188,55 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (!credits || credits <= 0) {
+    const parsedCredits =
+      typeof credits === "number" && Number.isInteger(credits) ? credits : NaN;
+
+    const paidFeaturesAccess = await canAccessPaidFeatures(user.id);
+    if (!paidFeaturesAccess.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            paidFeaturesAccess.message ||
+            "An active subscription plan is required to access paid features.",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (!Number.isInteger(parsedCredits) || parsedCredits <= 0) {
       return NextResponse.json(
         { error: "Invalid credits amount" },
         { status: 400 }
       );
+    }
+
+    const purchaseType =
+      typeof type === "string" && type.length > 0 ? type : "credit_purchase";
+
+    if (sessionId) {
+      const { data: existingTransaction } = await supabase
+        .from("wallet_transactions")
+        .select("id")
+        .eq("reference_id", sessionId)
+        .eq("type", purchaseType)
+        .maybeSingle();
+
+      if (existingTransaction) {
+        const { data: existingCredits } = await supabase
+          .from("credits")
+          .select("total")
+          .eq("user_id", userId)
+          .single();
+
+        return NextResponse.json({
+          success: true,
+          message: "Credits already processed",
+          creditsAdded: 0,
+          totalBefore: existingCredits?.total || 0,
+          totalAfter: existingCredits?.total || 0,
+          alreadyProcessed: true,
+        });
+      }
     }
 
     // Get current credits
@@ -194,19 +255,72 @@ export async function POST(request: NextRequest) {
     }
 
     const totalBefore = currentCredits?.total || 0;
-    const totalAfter = totalBefore + credits;
+    const totalAfter = totalBefore + parsedCredits;
 
     console.log("[add-credits] Processing credit purchase:", {
       userId,
-      credits,
+      credits: parsedCredits,
       totalBefore,
       totalAfter,
       sessionId,
     });
 
-    // Update credits
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { data: updatedCredits, error: updateError } = await supabase
+    let transactionId: string | null = null;
+    if (sessionId) {
+      const { data: currentWallet } = await supabase
+        .from("wallets")
+        .select("balance_cents")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      const walletBalance = currentWallet?.balance_cents || 0;
+      const purchaseAmountCents =
+        typeof amountCents === "number" && amountCents > 0 ? amountCents : 0;
+
+      const { data: newTransaction, error: transactionError } = await supabase
+        .from("wallet_transactions")
+        .insert({
+          user_id: userId,
+          type: purchaseType,
+          amount_cents: purchaseAmountCents > 0 ? -purchaseAmountCents : 0,
+          balance_before_cents: walletBalance,
+          balance_after_cents: walletBalance,
+          description: `Purchased ${parsedCredits} credit${parsedCredits !== 1 ? "s" : ""} (manual processing)`,
+          reference_id: sessionId,
+        })
+        .select("id")
+        .single();
+
+      if (transactionError) {
+        if (transactionError.code === "23505") {
+          const { data: existingCredits } = await supabase
+            .from("credits")
+            .select("total")
+            .eq("user_id", userId)
+            .single();
+
+          return NextResponse.json({
+            success: true,
+            message: "Credits already processed",
+            creditsAdded: 0,
+            totalBefore: existingCredits?.total || totalBefore,
+            totalAfter: existingCredits?.total || totalBefore,
+            alreadyProcessed: true,
+          });
+        }
+
+        console.error("[add-credits] Error creating transaction record:", transactionError);
+        return NextResponse.json(
+          { error: "Failed to create transaction record" },
+          { status: 500 }
+        );
+      }
+
+      transactionId = newTransaction?.id || null;
+    }
+
+    // Update credits after transaction reservation succeeds.
+    const { error: updateError } = await supabase
       .from("credits")
       .upsert({
         user_id: userId,
@@ -218,75 +332,48 @@ export async function POST(request: NextRequest) {
 
     if (updateError) {
       console.error("[add-credits] Error updating credits:", updateError);
+      if (transactionId) {
+        await supabase.from("wallet_transactions").delete().eq("id", transactionId);
+      }
       return NextResponse.json(
         { error: "Failed to update credits" },
         { status: 500 }
       );
     }
 
-    console.log("[add-credits] Successfully updated credits:", {
-      userId,
-      totalBefore,
-      totalAfter,
-      creditsAdded: credits,
-    });
-
-    // Check if transaction already exists (webhook might have processed it)
-    if (sessionId) {
-      const { data: existingTransaction } = await supabase
-        .from("wallet_transactions")
-        .select("id, type")
-        .eq("reference_id", sessionId)
-        .in("type", ["credit_purchase", type || "credit_purchase"])
-        .maybeSingle();
-
-      if (existingTransaction) {
-        console.log("[add-credits] Transaction already exists, webhook processed it");
-        // Verify credits were actually added by checking current total
-        const { data: currentCredits } = await supabase
-          .from("credits")
-          .select("total")
-          .eq("user_id", userId)
-          .single();
-        
-        return NextResponse.json({
-          success: true,
-          message: "Credits were already processed by webhook",
-          creditsAdded: 0,
-          totalBefore: currentCredits?.total || totalBefore,
-          totalAfter: currentCredits?.total || totalAfter,
-          alreadyProcessed: true,
-        });
-      }
-
-      // Create transaction record
-      const { error: transactionError } = await supabase.from("wallet_transactions").insert({
-        user_id: userId,
-        type: type || "credit_purchase",
-        amount_cents: 0, // Credits don't affect wallet balance
-        balance_before_cents: 0,
-        balance_after_cents: 0,
-        description: `Purchased ${credits} credit${credits !== 1 ? "s" : ""} (manual processing)`,
-        reference_id: sessionId,
+      console.log("[add-credits] Successfully updated credits:", {
+        userId,
+        totalBefore,
+        totalAfter,
+        creditsAdded: parsedCredits,
       });
 
-      if (transactionError) {
-        console.error("[add-credits] Error creating transaction record:", transactionError);
-        // Don't fail the whole operation if transaction record fails
-      }
-    }
+      await restoreCreditLockedProfileIfEligible(supabase, userId).catch(
+        (restoreError) => {
+          console.warn(
+            "[add-credits] Credit-locked profile restore skipped:",
+            restoreError
+          );
+        }
+      );
+
+      await recordCreditTransaction(supabase, {
+        userId,
+      amount: parsedCredits,
+      actionType: "credit_purchase_manual",
+      description: `Manual credit purchase processing for ${parsedCredits} credit(s).`,
+    });
 
     return NextResponse.json({
       success: true,
-      creditsAdded: credits,
+      creditsAdded: parsedCredits,
       totalBefore,
       totalAfter,
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error adding credits:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to add credits" },
+      { error: getErrorMessage(error, "Failed to add credits") },
       { status: 500 }
     );
   }

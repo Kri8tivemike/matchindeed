@@ -6,8 +6,6 @@ import {
   Bell,
   Check,
   CheckCheck,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  Trash2,
   X,
   Heart,
   Video,
@@ -22,6 +20,14 @@ import {
   Eye,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { isTransientRequestError, shouldSkipBackgroundRequest } from "@/lib/request-errors";
+import {
+  isRealtimeFailureStatus,
+  noteRealtimeFailure,
+  noteRealtimeSubscribed,
+  removeRealtimeChannelSafely,
+  shouldUseRealtime,
+} from "@/lib/realtime-fallback";
 
 /**
  * Notification item type matching the database schema
@@ -32,8 +38,7 @@ type Notification = {
   type: string;
   title: string;
   message: string;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: Record<string, any> | null;
+  data: Record<string, unknown> | null;
   read: boolean;
   read_at: string | null;
   created_at: string;
@@ -99,6 +104,12 @@ function getNotificationStyle(type: string): {
         bgColor: "bg-teal-100",
         textColor: "text-teal-600",
       };
+    case "profile_view":
+      return {
+        icon: <Eye className="h-4 w-4" />,
+        bgColor: "bg-indigo-100",
+        textColor: "text-indigo-600",
+      };
     default:
       return {
         icon: <MessageCircle className="h-4 w-4" />,
@@ -112,17 +123,22 @@ function getNotificationStyle(type: string): {
  * Get the link a notification should navigate to
  */
 function getNotificationLink(notif: Notification): string | null {
-  const data = notif.data || {};
+  const meetingId =
+    typeof notif.data?.meeting_id === "string" ? notif.data.meeting_id : null;
 
-  if (data.meeting_id) {
+  if (meetingId) {
     if (
       notif.type === "meeting_response_submitted" ||
       notif.type === "meeting_responses_complete" ||
       notif.type === "match_created"
     ) {
-      return `/dashboard/meetings/${data.meeting_id}/response`;
+      return `/dashboard/meetings/${meetingId}/response`;
     }
     return "/dashboard/meetings";
+  }
+
+  if (notif.type === "profile_view") {
+    return "/dashboard/likes?tab=views";
   }
 
   if (notif.type === "like" || notif.type === "wink" || notif.type === "interested") {
@@ -183,6 +199,10 @@ export default function NotificationBell() {
    * Fetch notifications from the API
    */
   const fetchNotifications = useCallback(async () => {
+    if (shouldSkipBackgroundRequest()) {
+      return;
+    }
+
     try {
       const {
         data: { session },
@@ -201,6 +221,9 @@ export default function NotificationBell() {
       setNotifications(data.notifications || []);
       setUnreadCount(data.unread_count || 0);
     } catch (err) {
+      if (isTransientRequestError(err)) {
+        return;
+      }
       console.error("Error fetching notifications:", err);
     }
   }, []);
@@ -210,12 +233,16 @@ export default function NotificationBell() {
    */
   const fetchUnreadCount = useCallback(async () => {
     try {
+      if (shouldSkipBackgroundRequest()) {
+        return;
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) return;
 
-      const res = await fetch("/api/notifications?limit=1&unread_only=true", {
+      const res = await fetch("/api/notifications?summary=true&unread_only=true", {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
@@ -225,8 +252,10 @@ export default function NotificationBell() {
 
       const data = await res.json();
       setUnreadCount(data.unread_count || 0);
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
+      if (isTransientRequestError(err)) {
+        return;
+      }
       // Silent fail for polling
     }
   }, []);
@@ -318,8 +347,8 @@ export default function NotificationBell() {
   useEffect(() => {
     fetchNotifications();
 
-    // Poll every 30 seconds for unread count
-    const interval = setInterval(fetchUnreadCount, 30000);
+    // Poll every 60 seconds for unread count as a fallback to realtime.
+    const interval = setInterval(fetchUnreadCount, 60000);
     return () => clearInterval(interval);
   }, [fetchNotifications, fetchUnreadCount]);
 
@@ -334,12 +363,18 @@ export default function NotificationBell() {
   // Set up Supabase Realtime subscription for instant updates
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let disposed = false;
 
     const setupRealtime = async () => {
+      if (!shouldUseRealtime()) {
+        return;
+      }
+
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user ?? null;
+      if (!user || disposed) return;
 
       channel = supabase
         .channel("user-notifications")
@@ -358,15 +393,23 @@ export default function NotificationBell() {
             setUnreadCount((prev) => prev + 1);
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            noteRealtimeSubscribed();
+            return;
+          }
+
+          if (isRealtimeFailureStatus(status) && noteRealtimeFailure(status)) {
+            removeRealtimeChannelSafely(supabase, channel);
+          }
+        });
     };
 
     setupRealtime();
 
     return () => {
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
+      disposed = true;
+      removeRealtimeChannelSafely(supabase, channel);
     };
   }, []);
 

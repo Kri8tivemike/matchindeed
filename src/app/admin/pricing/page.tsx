@@ -3,14 +3,10 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  DollarSign,
   Save,
   AlertCircle,
   CheckCircle,
   Loader2,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  Crown,
   RefreshCw,
   History,
 } from "lucide-react";
@@ -64,9 +60,9 @@ export default function AdminPricingPage() {
 
       // Create default pricing for missing tiers
       const defaultPricing: Record<string, { ngn: number; usd: number; gbp: number }> = {
-        basic: { ngn: 10000, usd: 7, gbp: 5.5 },
-        standard: { ngn: 31500, usd: 20, gbp: 16 },
-        premium: { ngn: 63000, usd: 43, gbp: 34 },
+        basic: { ngn: 7500, usd: 9.99, gbp: 7.99 },
+        standard: { ngn: 15000, usd: 19.99, gbp: 16.99 },
+        premium: { ngn: 27000, usd: 34.99, gbp: 29.99 },
         vip: { ngn: 1500000, usd: 1000, gbp: 800 },
       };
 
@@ -152,8 +148,6 @@ export default function AdminPricingPage() {
 
       // Log admin action
       if (user) {
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const originalTier = originalPricing.find(o => o.tier_id);
         await supabase.from("admin_logs").insert({
           admin_id: user.id,
           action: "pricing_update",
@@ -261,103 +255,105 @@ export default function AdminPricingPage() {
       )}
 
       {/* Pricing Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {pricing.map((tier) => {
-          const tierInfo = getTierInfo(tier.tier_id);
-          const original = originalPricing.find(o => o.tier_id === tier.tier_id);
-          
-          return (
-            <div
-              key={tier.tier_id}
-              className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"
-            >
-              {/* Tier Header */}
-              <div className="flex items-center gap-3 mb-6">
-                <span className="text-2xl">{tierInfo.icon}</span>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">{tierInfo.name}</h3>
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tierInfo.color}`}>
-                    {tier.tier_id.toUpperCase()}
-                  </span>
+      <div className="max-h-[62vh] overflow-auto pr-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {pricing.map((tier) => {
+            const tierInfo = getTierInfo(tier.tier_id);
+            const original = originalPricing.find(o => o.tier_id === tier.tier_id);
+            
+            return (
+              <div
+                key={tier.tier_id}
+                className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"
+              >
+                {/* Tier Header */}
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="text-2xl">{tierInfo.icon}</span>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">{tierInfo.name}</h3>
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tierInfo.color}`}>
+                      {tier.tier_id.toUpperCase()}
+                    </span>
+                  </div>
                 </div>
+
+                {/* Price Inputs */}
+                <div className="space-y-4">
+                  {/* NGN */}
+                  <div>
+                    <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
+                      <span>Nigerian Naira (₦)</span>
+                      {original && tier.price_ngn !== original.price_ngn && (
+                        <span className="text-xs text-amber-600">
+                          Changed from ₦{original.price_ngn.toLocaleString()}
+                        </span>
+                      )}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
+                      <input
+                        type="number"
+                        value={tier.price_ngn}
+                        onChange={(e) => updatePrice(tier.tier_id, "price_ngn", parseFloat(e.target.value) || 0)}
+                        className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* USD */}
+                  <div>
+                    <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
+                      <span>US Dollar ($)</span>
+                      {original && tier.price_usd !== original.price_usd && (
+                        <span className="text-xs text-amber-600">
+                          Changed from ${original.price_usd.toLocaleString()}
+                        </span>
+                      )}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <input
+                        type="number"
+                        value={tier.price_usd}
+                        onChange={(e) => updatePrice(tier.tier_id, "price_usd", parseFloat(e.target.value) || 0)}
+                        className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* GBP */}
+                  <div>
+                    <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
+                      <span>British Pound (£)</span>
+                      {original && tier.price_gbp !== original.price_gbp && (
+                        <span className="text-xs text-amber-600">
+                          Changed from £{original.price_gbp.toLocaleString()}
+                        </span>
+                      )}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">£</span>
+                      <input
+                        type="number"
+                        value={tier.price_gbp}
+                        onChange={(e) => updatePrice(tier.tier_id, "price_gbp", parseFloat(e.target.value) || 0)}
+                        className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Last Updated */}
+                {tier.updated_at && (
+                  <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-2 text-xs text-gray-500">
+                    <History className="h-3.5 w-3.5" />
+                    Last updated: {new Date(tier.updated_at).toLocaleString()}
+                  </div>
+                )}
               </div>
-
-              {/* Price Inputs */}
-              <div className="space-y-4">
-                {/* NGN */}
-                <div>
-                  <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
-                    <span>Nigerian Naira (₦)</span>
-                    {original && tier.price_ngn !== original.price_ngn && (
-                      <span className="text-xs text-amber-600">
-                        Changed from ₦{original.price_ngn.toLocaleString()}
-                      </span>
-                    )}
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
-                    <input
-                      type="number"
-                      value={tier.price_ngn}
-                      onChange={(e) => updatePrice(tier.tier_id, "price_ngn", parseFloat(e.target.value) || 0)}
-                      className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
-                    />
-                  </div>
-                </div>
-
-                {/* USD */}
-                <div>
-                  <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
-                    <span>US Dollar ($)</span>
-                    {original && tier.price_usd !== original.price_usd && (
-                      <span className="text-xs text-amber-600">
-                        Changed from ${original.price_usd.toLocaleString()}
-                      </span>
-                    )}
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-                    <input
-                      type="number"
-                      value={tier.price_usd}
-                      onChange={(e) => updatePrice(tier.tier_id, "price_usd", parseFloat(e.target.value) || 0)}
-                      className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
-                    />
-                  </div>
-                </div>
-
-                {/* GBP */}
-                <div>
-                  <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
-                    <span>British Pound (£)</span>
-                    {original && tier.price_gbp !== original.price_gbp && (
-                      <span className="text-xs text-amber-600">
-                        Changed from £{original.price_gbp.toLocaleString()}
-                      </span>
-                    )}
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">£</span>
-                    <input
-                      type="number"
-                      value={tier.price_gbp}
-                      onChange={(e) => updatePrice(tier.tier_id, "price_gbp", parseFloat(e.target.value) || 0)}
-                      className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Last Updated */}
-              {tier.updated_at && (
-                <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-2 text-xs text-gray-500">
-                  <History className="h-3.5 w-3.5" />
-                  Last updated: {new Date(tier.updated_at).toLocaleString()}
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       {/* Info Section */}

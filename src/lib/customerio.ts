@@ -135,4 +135,68 @@ export const CIO_EVENTS = {
   // Milestones
   TEN_MATCHES: "ten_matches",
   FIRST_MEETING_COMPLETED: "first_meeting_completed",
+  WALLET_FUNDED: "wallet_funded",
+  DATE_REQUEST_SENT: "date_request_sent",
+  DATE_REQUEST_ACCEPTED: "date_request_accepted",
+  MEETING_COMPLETED: "meeting_completed",
+  CREDITS_PURCHASED: "credits_purchased",
+  CHAT_UNLOCKED: "chat_unlocked",
+  AGREEMENT_SIGNED: "agreement_signed",
 } as const;
+
+type CustomerIdentifyAttributes = {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  subscription_tier?: string;
+  profile_completed?: boolean;
+  city?: string;
+  country?: string;
+  gender?: string;
+  age?: number;
+  created_at?: number;
+  [key: string]: unknown;
+};
+
+function isCustomerIoConfigured() {
+  return Boolean(process.env.CUSTOMERIO_SITE_ID && process.env.CUSTOMERIO_API_KEY);
+}
+
+/**
+ * Failure-tolerant wrapper for identify calls.
+ * Returns false when Customer.io is not configured or when the call fails.
+ */
+export async function identifyCustomerSafely(
+  userId: string,
+  attributes: CustomerIdentifyAttributes
+) {
+  if (!isCustomerIoConfigured()) {
+    return false;
+  }
+
+  const ok = await customerio.identify(userId, attributes);
+  if (!ok) {
+    console.warn(`[Customer.io] identify failed for user ${userId}`);
+  }
+  return ok;
+}
+
+/**
+ * Failure-tolerant wrapper for event tracking.
+ * Returns false when Customer.io is not configured or when the call fails.
+ */
+export async function trackCustomerEventSafely(
+  userId: string,
+  eventName: string,
+  data?: Record<string, unknown>
+) {
+  if (!isCustomerIoConfigured()) {
+    return false;
+  }
+
+  const ok = await customerio.track(userId, eventName, data);
+  if (!ok) {
+    console.warn(`[Customer.io] event failed: ${eventName}`);
+  }
+  return ok;
+}

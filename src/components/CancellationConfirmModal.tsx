@@ -21,8 +21,8 @@ type CancellationConfirmModalProps = {
   meetingId: string;
   /** Whether the meeting has been confirmed/approved */
   isConfirmed: boolean;
-  /** Cancellation fee in cents */
-  cancellationFeeCents: number;
+  /** Cancellation fee in credits */
+  cancellationFeeCredits: number;
   /** Whether credit will be refunded */
   creditRefunded: boolean;
   /** Callback on successful cancellation */
@@ -39,14 +39,14 @@ type CancellationConfirmModalProps = {
  * Per client requirements:
  * - Cancellation fee notice must be visible before cancellation
  * - Whoever cancels is responsible for charges
- * - No credit refund for confirmed (admin-approved) meetings
+ * - The affected non-cancelling booking user is refunded when applicable
  */
 export default function CancellationConfirmModal({
   isOpen,
   onClose,
   meetingId,
   isConfirmed,
-  cancellationFeeCents,
+  cancellationFeeCredits,
   creditRefunded,
   onCanceled,
 }: CancellationConfirmModalProps) {
@@ -57,11 +57,8 @@ export default function CancellationConfirmModal({
   // Error message
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * Format currency amount from cents for display
-   */
-  const formatFee = (cents: number): string => {
-    return (cents / 100).toFixed(2);
+  const formatFee = (credits: number): string => {
+    return `${credits} credit${credits === 1 ? "" : "s"}`;
   };
 
   /**
@@ -145,17 +142,17 @@ export default function CancellationConfirmModal({
                   Cancellation Charges Apply
                 </p>
 
-                {cancellationFeeCents > 0 && (
+                {cancellationFeeCredits > 0 && (
                   <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-white border border-amber-200">
                     <span className="text-sm text-gray-700">Cancellation fee:</span>
                     <span className="text-sm font-bold text-red-600">
-                      {formatFee(cancellationFeeCents)}
+                      {formatFee(cancellationFeeCredits)}
                     </span>
                   </div>
                 )}
 
                 <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-white border border-amber-200">
-                  <span className="text-sm text-gray-700">Credit refund:</span>
+                  <span className="text-sm text-gray-700">Other participant refund:</span>
                   <span className={`text-sm font-bold ${creditRefunded ? "text-green-600" : "text-red-600"}`}>
                     {creditRefunded ? "Yes" : "No refund"}
                   </span>
@@ -163,8 +160,12 @@ export default function CancellationConfirmModal({
 
                 <p className="text-xs text-amber-800">
                   {isConfirmed
-                    ? "This meeting has been confirmed. As the cancelling party, you will be charged the cancellation fee and no credits will be refunded."
-                    : "By cancelling, you agree to the charges above. The cancellation fee will be deducted from your wallet."}
+                    ? creditRefunded
+                      ? "This meeting has been confirmed. As the cancelling party, you will be charged the cancellation fee and the other participant will be refunded."
+                      : "This meeting has been confirmed. As the cancelling party, you will be charged the cancellation fee in credits and no refund will be issued."
+                    : creditRefunded
+                      ? "By cancelling, you agree to the charges above. The cancellation fee will be deducted from your credits balance and the other participant will be refunded."
+                      : "By cancelling, you agree to the charges above. The cancellation fee will be deducted from your credits balance."}
                 </p>
               </div>
             </div>
@@ -176,7 +177,8 @@ export default function CancellationConfirmModal({
               <Ban className="h-4 w-4 text-gray-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-gray-600">
                 <strong>Reminder:</strong> Per MatchIndeed policy, whoever cancels a meeting is responsible
-                for all charges. If you believe there are extenuating circumstances, contact support after
+                for all charges. Where the other participant already paid booking value, that value will be
+                returned to them. If you believe there are extenuating circumstances, contact support after
                 cancellation for review.
               </p>
             </div>

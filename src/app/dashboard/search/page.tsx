@@ -2,17 +2,33 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
-import { User, SlidersHorizontal, X, ChevronDown, Video, Calendar, Loader2, CheckCircle, ArrowUpDown, BadgeCheck } from "lucide-react";
+import { User, SlidersHorizontal, X, ChevronDown, Heart, Camera, Video, Loader2, CheckCircle, ArrowUpDown } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import ProfileCompletenessCard from "@/components/ProfileCompletenessCard";
 import { supabase } from "@/lib/supabase";
+import { calculateCompleteness } from "@/lib/profile-completeness";
 import { calculateMatchPercentage, type PartnerPreferences } from "@/lib/match-percentage";
 import { getBlockedUserIds } from "@/lib/blocked-users";
 import { isAgeRestrictedForMatching } from "@/lib/age-restrictions";
 import { getActiveStatus, isOnline } from "@/lib/active-status";
 import MeetingRequestModal from "@/components/MeetingRequestModal";
 import ProfileDetailModal from "@/components/ProfileDetailModal";
+import {
+  getMinimumRequestableMeetingStartIso,
+  hasRequestableMeetingAvailability,
+} from "@/lib/meetings/request-availability";
+import { toStateCountryLabel } from "@/lib/location";
+import {
+  matchesPartnerGenderPreference,
+  resolvePartnerGenderPreference,
+} from "@/lib/matching/interest-preference";
+import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
+import {
+  FILTER_RELATIONSHIP_STATUS_OPTIONS,
+  formatRelationshipStatusLabel,
+  relationshipStatusMatches,
+} from "@/lib/relationship-status";
 
 type CardProfile = {
   id: string;
@@ -21,6 +37,7 @@ type CardProfile = {
   age: number | null;
   city: string | null;
   imageUrl: string;
+  photoCount: number;
   verified?: boolean;
   heightCm?: number;
   hasCalendarSlots?: boolean;
@@ -76,8 +93,10 @@ type AccountRow = {
   id: string;
   tier: string | null;
   display_name: string | null;
+  account_status?: string | null;
   email_verified?: boolean | null;
   profile_visible?: boolean | null;
+  calendar_enabled?: boolean | null;
   last_active_at?: string | null;
 };
 
@@ -94,6 +113,9 @@ export default function SearchPage() {
   const [online, setOnline] = useState(false);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [selectedGender, setSelectedGender] = useState<string>("");
+  const [requiredPartnerGender, setRequiredPartnerGender] = useState<
+    "male" | "female" | null
+  >(null);
   const [selectedRelStatus, setSelectedRelStatus] = useState<string>("");
   const [heightMin, setHeightMin] = useState(140);
   const [heightMax, setHeightMax] = useState(220);
@@ -106,6 +128,7 @@ export default function SearchPage() {
   const [profiles, setProfiles] = useState<CardProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [profileCompletionPercentage, setProfileCompletionPercentage] = useState<number | null>(null);
 
   // Sort state: "match" (best match first), "newest", "age_asc", "age_desc", "name"
   const [sortBy, setSortBy] = useState<string>("match");
@@ -166,6 +189,14 @@ export default function SearchPage() {
   ];
   const fbIdx = useRef(0);
   const [cardSrcs, setCardSrcs] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!requiredPartnerGender) return;
+    const allowedFilter = requiredPartnerGender === "male" ? "Male" : "Female";
+    if (selectedGender && selectedGender !== allowedFilter) {
+      setSelectedGender("");
+    }
+  }, [requiredPartnerGender, selectedGender]);
   
   /**
    * Fetch profiles from database
@@ -186,13 +217,32 @@ export default function SearchPage() {
         // Fetch user's preferences (including blocked locations and partner preferences for match %)
         let blockedLocations: string[] = [];
         let partnerPrefs: PartnerPreferences | null = null;
+        let partnerGenderPreference: "male" | "female" | null = null;
+        let requesterGender: string | null = null;
         try {
-          const { data: prefsData } = await supabase
-            .from("user_preferences")
-            .select("*")
-            .eq("user_id", user.id)
-            .maybeSingle();
+          const [{ data: prefsData }, { data: requesterProfile }] = await Promise.all([
+            supabase
+              .from("user_preferences")
+              .select("*")
+              .eq("user_id", user.id)
+              .maybeSingle(),
+            supabase
+              .from("user_profiles")
+              .select("*")
+              .eq("user_id", user.id)
+              .maybeSingle(),
+          ]);
+          requesterGender = requesterProfile?.gender || null;
+          setProfileCompletionPercentage(
+            calculateCompleteness((requesterProfile as Record<string, unknown>) || {}).percentage
+          );
           blockedLocations = prefsData?.blocked_locations || [];
+          partnerGenderPreference = resolvePartnerGenderPreference({
+            partnerGenderPreference: prefsData?.partner_gender_preference || null,
+            legacyPartnerExperience: prefsData?.partner_experience || null,
+            requesterGender,
+          });
+          setRequiredPartnerGender(partnerGenderPreference);
           if (prefsData) {
             partnerPrefs = prefsData as PartnerPreferences;
           }
@@ -244,29 +294,27 @@ export default function SearchPage() {
         // Fetch account info (tier, display_name, visibility)
         const userIds = otherProfiles.map((p) => p.user_id);
 
-        // Try fetching with profile_visible; fall back if column doesn't exist
+        // Query only stable account fields to avoid runtime schema-cache errors.
         let accountsData: AccountRow[] | null = null;
 
-        const { data: accData, error: accErr } = await supabase
+        const { data: accData } = await supabase
           .from("accounts")
-          .select("id, tier, display_name, email_verified, profile_visible, last_active_at")
+          .select("id, tier, display_name, account_status, email_verified, profile_visible, calendar_enabled")
           .in("id", userIds);
 
-        if (accErr && accErr.code === "42703") {
-          // Columns don't exist yet — query without them
-          const { data: fallbackData } = await supabase
-            .from("accounts")
-            .select("id, tier, display_name, email_verified")
-            .in("id", userIds);
-          const fallbackRows = (fallbackData || []) as AccountRow[];
-          accountsData = fallbackRows.map((a) => ({ ...a, profile_visible: true, last_active_at: null }));
-        } else {
-          accountsData = (accData || null) as AccountRow[] | null;
-        }
+        accountsData = ((accData || []) as AccountRow[]).map((account) => ({
+          ...account,
+          profile_visible: account.profile_visible ?? true,
+          calendar_enabled: account.calendar_enabled ?? true,
+          last_active_at: account.last_active_at ?? null,
+        }));
 
-        // Filter out hidden profiles
+        // Filter out hidden or non-active profiles
         accountsData = (accountsData || []).filter(
-          (a) => a.profile_visible !== false
+          (a) =>
+            a.profile_visible !== false &&
+            a.calendar_enabled !== false &&
+            (a.account_status || "active") === "active"
         );
 
         // Check which users have calendar slots
@@ -274,7 +322,7 @@ export default function SearchPage() {
           .from("meeting_availability")
           .select("user_id")
           .in("user_id", userIds)
-          .gte("slot_date", new Date().toISOString().split("T")[0]);
+          .gte("scheduled_at_utc", getMinimumRequestableMeetingStartIso());
 
         const usersWithSlots = new Set(((availabilityData || []) as AvailabilityRow[]).map((a) => a.user_id));
         const accountsMap = new Map((accountsData || []).map((a) => [a.id, a]));
@@ -296,6 +344,20 @@ export default function SearchPage() {
 
           // Exclude users aged 18–23 (platform rule: no matching for this age range)
           if (isAgeRestrictedForMatching(p.date_of_birth)) return false;
+
+          if (
+            !evaluateGenderEligibility({
+              requesterGender,
+              targetGender: p.gender,
+            }).allowed
+          ) {
+            return false;
+          }
+
+          // Enforce discover/search eligibility based on saved partner gender preference.
+          if (!matchesPartnerGenderPreference(p.gender, partnerGenderPreference)) {
+            return false;
+          }
 
           return true;
         });
@@ -339,11 +401,15 @@ export default function SearchPage() {
             user_id: p.user_id,
             name: p.first_name || account?.display_name || "User",
             age,
-            city: p.location || null,
+            city: toStateCountryLabel(p.location) || null,
             imageUrl: primaryPhoto,
+            photoCount: p.photos && p.photos.length > 0 ? p.photos.length : 1,
             verified: account?.email_verified || false,
             heightCm: p.height_cm || undefined,
-            hasCalendarSlots: usersWithSlots.has(p.user_id),
+            hasCalendarSlots: hasRequestableMeetingAvailability(
+              account,
+              usersWithSlots.has(p.user_id)
+            ),
             tier: account?.tier || "basic",
             // Match percentage data
             matchScore: matchResult.percentage,
@@ -428,7 +494,11 @@ export default function SearchPage() {
       chips.push({ key: "gender", label: `${selectedGender}`, onClear: () => setSelectedGender("") });
     }
     if (selectedRelStatus) {
-      chips.push({ key: "relStatus", label: `${selectedRelStatus}`, onClear: () => setSelectedRelStatus("") });
+      chips.push({
+        key: "relStatus",
+        label: formatRelationshipStatusLabel(selectedRelStatus),
+        onClear: () => setSelectedRelStatus(""),
+      });
     }
     if (heightMin !== 140 || heightMax !== 220) {
       chips.push({ key: "height", label: `Height ${heightMin}–${heightMax}cm`, onClear: () => { setHeightMin(140); setHeightMax(220); } });
@@ -519,7 +589,7 @@ export default function SearchPage() {
 
         // Relationship status filter
         if (selectedRelStatus && p.relationship_status) {
-          if (p.relationship_status.toLowerCase() !== selectedRelStatus.toLowerCase()) {
+          if (!relationshipStatusMatches(p.relationship_status, selectedRelStatus)) {
             return false;
           }
         } else if (selectedRelStatus && !p.relationship_status) {
@@ -668,7 +738,17 @@ export default function SearchPage() {
   /**
    * Handle opening meeting request modal
    */
-  const handleRequestMeeting = async (userId: string, userName: string, userImage: string, userTier: string) => {
+  const handleRequestMeeting = async (
+    userId: string,
+    userName: string,
+    userImage: string,
+    userTier: string,
+    canRequestMeeting: boolean
+  ) => {
+    if (!canRequestMeeting) {
+      return;
+    }
+
     setSelectedUserForMeeting({
       id: userId,
       first_name: userName,
@@ -685,7 +765,7 @@ export default function SearchPage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/matchindeed.svg" alt="Matchindeed" width={140} height={36} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>
@@ -698,12 +778,29 @@ export default function SearchPage() {
         </aside>
 
         <section className="space-y-4">
-          <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#eef2ff] text-[#1f419a]"><User className="h-5 w-5"/></div>
-              <div className="text-sm text-gray-700">Complete your profile to get the best Matchindeed experience!</div>
-            </div>
-          </div>
+          {profileCompletionPercentage !== null && profileCompletionPercentage < 100 ? (
+            <Link
+              href="/dashboard/profile/edit"
+              className="flex items-center justify-between gap-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5 transition-colors hover:bg-[#f8faff]"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#eef2ff] text-[#1f419a]">
+                  <User className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-gray-800">
+                    Complete your profile to get the best MatchIndeed experience.
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {profileCompletionPercentage}% complete. Tap here to finish your profile.
+                  </div>
+                </div>
+              </div>
+              <span className="hidden rounded-full bg-[#eef2ff] px-3 py-1 text-xs font-semibold text-[#1f419a] sm:inline-flex">
+                Complete profile
+              </span>
+            </Link>
+          ) : null}
 
           <div className="rounded-3xl bg-white p-4 shadow-lg ring-1 ring-black/5">
             <div className="flex items-center justify-between">
@@ -840,105 +937,72 @@ export default function SearchPage() {
                   return (
                     <div
                       key={p.id}
-                      className="overflow-hidden rounded-3xl bg-white shadow ring-1 ring-black/5 hover:shadow-lg transition-shadow group cursor-pointer"
+                      className="group cursor-pointer"
                       onClick={() => setSelectedProfile(p)}
                     >
-                      <div className="relative">
-                        {/* Match label overlay for high matches */}
-                        {p.matchScore >= 50 && (
-                          <div className="absolute top-3 left-3 z-10">
-                            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold backdrop-blur-sm shadow-sm ${p.matchBgColor} ${p.matchColor}`}>
-                              {p.matchScore >= 70 ? "🔥" : "✨"} {p.matchLabel}
-                            </span>
-                          </div>
-                        )}
+                      <div className="relative aspect-[4/5] overflow-hidden rounded-[2rem] bg-slate-900 shadow-[0_16px_40px_rgba(15,23,42,0.16)] ring-1 ring-slate-900/10 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_24px_56px_rgba(15,23,42,0.24)]">
                         <Image
                           src={imageSrc}
                           alt={`${p.name} photo`}
                           width={1200}
-                          height={900}
+                          height={1500}
                           sizes="(min-width:1024px) 360px, (min-width:640px) 50vw, 100vw"
-                          className="h-60 w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                           onError={() => {
                             if (fbIdx.current < fallbacks.length) {
-                              setCardSrcs(prev => ({
+                              setCardSrcs((prev) => ({
                                 ...prev,
                                 [p.id]: fallbacks[fbIdx.current],
                               }));
                               fbIdx.current += 1;
                             } else {
-                              setCardSrcs(prev => ({
+                              setCardSrcs((prev) => ({
                                 ...prev,
                                 [p.id]: "/placeholder-profile.svg",
                               }));
                             }
                           }}
                         />
-                        <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                          {/* Request Video Meeting */}
-                          <button 
-                            type="button" 
-                            onClick={(e) => { e.stopPropagation(); handleRequestMeeting(p.user_id, p.name, p.imageUrl, p.tier || "basic"); }}
-                            className="rounded-full bg-white p-2 shadow ring-1 ring-black/5 hover:bg-blue-50 transition-colors"
-                            title="Request Video Meeting"
+
+                        <div className="absolute inset-0 bg-gradient-to-b from-slate-950/15 via-slate-950/0 to-slate-950/80" />
+
+                        <div className="absolute left-4 top-4 z-10 flex max-w-[72%] items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-[12px] font-medium text-white/90 backdrop-blur-md shadow-[0_8px_18px_rgba(15,23,42,0.16)]">
+                            <Camera className="h-3.5 w-3.5" />
+                            1/{p.photoCount}
+                          </span>
+                          {p.hasCalendarSlots && (
+                            <span className="inline-flex items-center rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-white/90 backdrop-blur-md shadow-[0_8px_18px_rgba(15,23,42,0.16)]">
+                              <Video className="h-3.5 w-3.5" />
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="absolute right-4 top-4 z-10">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedProfile(p);
+                            }}
+                            className="flex h-12 w-12 items-center justify-center rounded-full border border-[#1f419a]/35 bg-white/92 text-[#1f419a] shadow-[0_12px_24px_rgba(15,23,42,0.16)] backdrop-blur-sm transition-all hover:scale-105 hover:bg-white"
+                            title="View profile"
                           >
-                            <Video className="h-4 w-4 text-[#1f419a]"/>
+                            <Heart className="h-4.5 w-4.5" />
                           </button>
                         </div>
-                      </div>
-                      <div className="border-t bg-white p-4 space-y-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1 text-lg font-semibold text-gray-900">
-                              <span className="truncate">{p.name}</span>
-                              {p.verified && <BadgeCheck className="h-4.5 w-4.5 text-blue-500 flex-shrink-0" />}
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              {p.age !== null ? `Age ${p.age}` : ""}
-                              {p.age !== null && p.city ? ", " : ""}
-                              {p.city || ""}
-                            </div>
-                            {p.activeLabel && (
-                              <div className={`flex items-center gap-1 text-xs mt-0.5 ${p.activeColor || "text-gray-400"}`}>
-                                <span className={`inline-block h-1.5 w-1.5 rounded-full ${p.isUserOnline ? "bg-green-500" : "bg-gray-300"}`} />
-                                {p.activeLabel}
-                              </div>
-                            )}
-                          </div>
-                          {/* Match Badge */}
-                          {p.matchScore > 0 && (
-                            <div className={`flex-shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold ${p.matchBgColor} ${p.matchColor}`}>
-                              {p.matchScore >= 70 ? "🔥" : p.matchScore >= 50 ? "✨" : ""}
-                              {p.matchScore}%
-                            </div>
-                          )}
-                        </div>
 
-                        {/* Quick info tags */}
-                        <div className="flex flex-wrap gap-1">
-                          {p.ethnicity && (
-                            <span className="inline-flex items-center rounded-full bg-purple-50 border border-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 truncate max-w-[120px]">
-                              🌍 {p.ethnicity}
-                            </span>
-                          )}
-                          {p.religion && (
-                            <span className="inline-flex items-center rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
-                              🙏 {p.religion}
-                            </span>
-                          )}
-                          {p.education_level && (
-                            <span className="inline-flex items-center rounded-full bg-amber-50 border border-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                              🎓 {p.education_level}
-                            </span>
-                          )}
-                        </div>
-
-                        {p.hasCalendarSlots && (
-                          <div className="flex items-center gap-1 text-xs text-blue-600">
-                            <Calendar className="h-3 w-3" />
-                            <span>Has available slots</span>
+                        <div className="absolute inset-x-0 bottom-0 z-10 p-5">
+                          <div className="max-w-[82%]">
+                            <h3 className="truncate text-[2rem] font-semibold leading-none text-white drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)]">
+                              {p.name}
+                              {p.age !== null ? `, ${p.age}` : ""}
+                            </h3>
+                            <p className="mt-2 truncate text-[1.05rem] font-medium text-white/88 drop-shadow-[0_4px_14px_rgba(0,0,0,0.32)]">
+                              {p.city || "Location unavailable"}
+                            </p>
                           </div>
-                        )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -976,7 +1040,11 @@ export default function SearchPage() {
                     <User className="h-3.5 w-3.5" /> Gender
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {["", "Male", "Female", "Non-binary"].map((opt) => (
+                    {(
+                      requiredPartnerGender
+                        ? ["", requiredPartnerGender === "male" ? "Male" : "Female"]
+                        : ["", "Male", "Female", "Other"]
+                    ).map((opt) => (
                       <button
                         key={opt || "any"}
                         type="button"
@@ -991,6 +1059,12 @@ export default function SearchPage() {
                       </button>
                     ))}
                   </div>
+                  {requiredPartnerGender && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Based on your preference, search is limited to{" "}
+                      {requiredPartnerGender === "male" ? "men" : "women"}.
+                    </p>
+                  )}
                 </div>
 
                 {/* --- Age --- */}
@@ -1052,18 +1126,18 @@ export default function SearchPage() {
                 <div className="border-t border-gray-100 pt-4">
                   <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Relationship Status</div>
                   <div className="flex flex-wrap gap-2">
-                    {["", "Single", "Divorced", "Widowed", "Separated"].map((opt) => (
+                    {FILTER_RELATIONSHIP_STATUS_OPTIONS.map((option) => (
                       <button
-                        key={opt || "any"}
+                        key={option.value || "any"}
                         type="button"
-                        onClick={() => setSelectedRelStatus(opt)}
+                        onClick={() => setSelectedRelStatus(option.value)}
                         className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                          selectedRelStatus === opt
+                          selectedRelStatus === option.value
                             ? "border-[#1f419a] bg-[#1f419a] text-white shadow-sm"
                             : "border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
                         }`}
                       >
-                        {opt || "Any"}
+                        {option.label}
                       </button>
                     ))}
                   </div>
@@ -1297,8 +1371,17 @@ export default function SearchPage() {
         onRequestMeeting={(id) => {
           setSelectedProfile(null); // Close detail modal first
           const p = profiles.find((pr) => pr.user_id === id);
-          if (p) handleRequestMeeting(p.user_id, p.name, p.imageUrl, p.tier || "basic");
+          if (p) {
+            handleRequestMeeting(
+              p.user_id,
+              p.name,
+              p.imageUrl,
+              p.tier || "basic",
+              Boolean(p.hasCalendarSlots)
+            );
+          }
         }}
+        canRequestMeeting={Boolean(selectedProfile?.hasCalendarSlots)}
       />
 
       {/* Meeting Request Modal */}

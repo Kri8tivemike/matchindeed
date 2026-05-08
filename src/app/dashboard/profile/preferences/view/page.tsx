@@ -41,6 +41,7 @@ import { supabase } from "@/lib/supabase";
 // Types
 // ---------------------------------------------------------------
 type PreferencesData = {
+  partner_gender_preference: string | null;
   partner_location: string | null;
   partner_age_range: string | null;
   partner_height_min_cm: number | null;
@@ -146,6 +147,23 @@ export default function PreferencesViewPage() {
 
   if (prefs) {
     // Basics
+    const displayPartnerGender =
+      prefs.partner_gender_preference ||
+      (prefs.partner_experience === "male" || prefs.partner_experience === "female"
+        ? prefs.partner_experience
+        : null);
+    if (displayPartnerGender) {
+      basics.push({
+        icon: <Users className="h-4 w-4" />,
+        label: "Looking For",
+        value:
+          displayPartnerGender === "male"
+            ? "Men"
+            : displayPartnerGender === "female"
+            ? "Women"
+            : titleCase(displayPartnerGender),
+      });
+    }
     if (prefs.partner_location) basics.push({ icon: <MapPin className="h-4 w-4" />, label: "Location", value: prefs.partner_location });
     if (prefs.partner_age_range) basics.push({ icon: <CalendarRange className="h-4 w-4" />, label: "Age Range", value: prefs.partner_age_range });
     if (prefs.partner_height_min_cm || prefs.partner_height_max_cm) basics.push({ icon: <Ruler className="h-4 w-4" />, label: "Height", value: formatHeightRange(prefs.partner_height_min_cm, prefs.partner_height_max_cm) });
@@ -208,7 +226,7 @@ export default function PreferencesViewPage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/dashboard">
-            <Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendInvestigationNoticeEmail } from "@/lib/email";
+import { refundConsumedCredits } from "@/lib/credits/actions";
+import { evaluateFinalizationPolicy } from "@/lib/meetings/validation";
+import {
+  deriveWorkflowState,
+  requireMeetingStateTransition,
+} from "@/lib/meetings/state-machine";
+import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -68,7 +75,15 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { meeting_id, outcome, fault, notes, charge_decision } = body;
+    const {
+      meeting_id,
+      outcome,
+      fault,
+      notes,
+      charge_decision,
+      technical_fault_proven,
+      grace_period_waited_minutes,
+    } = body;
 
     // Validate required fields
     if (!meeting_id || !outcome || !fault || !charge_decision) {
@@ -140,7 +155,7 @@ export async function POST(request: NextRequest) {
 
     const isAdmin =
       account?.role &&
-      ["admin", "superadmin", "moderator"].includes(account.role);
+      ["admin", "superadmin"].includes(account.role);
     const isHost = meeting.host_id === user.id;
 
     if (!isHost && !isAdmin) {
@@ -176,14 +191,63 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const currentWorkflowState = deriveWorkflowState({
+      workflowState:
+        typeof meeting.workflow_state === "string" ? meeting.workflow_state : null,
+      status: meeting.status,
+    });
+    const transitionValidation = requireMeetingStateTransition({
+      from: currentWorkflowState,
+      to: "completed",
+    });
+    if (!transitionValidation.allowed) {
+      return NextResponse.json(
+        {
+          error: "invalid_state_transition",
+          message:
+            transitionValidation.message ||
+            "Meeting cannot be moved to completed state.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const finalizationPolicy = evaluateFinalizationPolicy({
+      outcome,
+      fault,
+      chargeDecision: charge_decision,
+      technicalFaultProven: !!technical_fault_proven,
+      gracePeriodWaitedMinutes:
+        typeof grace_period_waited_minutes === "number"
+          ? grace_period_waited_minutes
+          : null,
+      meetingMatched: !!meeting.matched,
+    });
+    if (!finalizationPolicy.allowed) {
+      return NextResponse.json(
+        {
+          error: finalizationPolicy.code || "finalization_blocked",
+          message:
+            finalizationPolicy.message ||
+            "Meeting finalization decision violates meeting rules.",
+        },
+        { status: finalizationPolicy.status }
+      );
+    }
+
     // ---------------------------------------------------------------
     // DETERMINE CHARGE STATUS BASED ON HOST DECISION
     // ---------------------------------------------------------------
 
     let newChargeStatus: string;
     let refundIssued = false;
+    const chargeDecision =
+      finalizationPolicy.shouldRefundRequester &&
+      finalizationPolicy.normalizedChargeDecision !== "refund"
+        ? "refund"
+        : finalizationPolicy.normalizedChargeDecision;
 
-    switch (charge_decision) {
+    switch (chargeDecision) {
       case "capture":
         // Charges are captured — requester paid, no refund
         newChargeStatus = "captured";
@@ -194,19 +258,18 @@ export async function POST(request: NextRequest) {
         newChargeStatus = "refunded";
         refundIssued = true;
 
-        // Refund the guest's credit
-        const { data: guestCredits } = await supabase
-          .from("credits")
-          .select("used")
-          .eq("user_id", guest.user_id)
-          .single();
-
-        if (guestCredits) {
-          await supabase
-            .from("credits")
-            .update({ used: Math.max(0, guestCredits.used - 1) })
-            .eq("user_id", guest.user_id);
-        }
+        await refundConsumedCredits(
+          supabase,
+          guest.user_id,
+          typeof meeting.requester_credit_cost === "number"
+            ? meeting.requester_credit_cost
+            : 1,
+          {
+            actionType: "meeting_finalize_refund",
+            description:
+              "Host finalized meeting with refund decision; returned requester credits.",
+          }
+        );
         break;
 
       case "pending_review":
@@ -222,21 +285,44 @@ export async function POST(request: NextRequest) {
     // UPDATE MEETING RECORD
     // ---------------------------------------------------------------
 
+    const finalizedAt = new Date().toISOString();
+    const fullUpdatePayload = {
+      status: "completed",
+      workflow_state: "completed",
+      charge_status: newChargeStatus,
+      completed_at: finalizedAt,
+      // Store host's finalization data when the schema supports it.
+      finalized_at: finalizedAt,
+      finalized_by: user.id,
+      outcome,
+      fault_determination: fault,
+      host_notes: notes || null,
+    };
+
     const { error: updateError } = await supabase
       .from("meetings")
-      .update({
-        status: "completed",
-        charge_status: newChargeStatus,
-        // Store host's finalization data
-        finalized_at: new Date().toISOString(),
-        finalized_by: user.id,
-        outcome,
-        fault_determination: fault,
-        host_notes: notes || null,
-      })
+      .update(fullUpdatePayload)
       .eq("id", meeting_id);
 
-    if (updateError) {
+    if (updateError?.code === "42703") {
+      const { error: fallbackUpdateError } = await supabase
+        .from("meetings")
+        .update({
+          status: "completed",
+          workflow_state: "completed",
+          charge_status: newChargeStatus,
+          completed_at: finalizedAt,
+        })
+        .eq("id", meeting_id);
+
+      if (fallbackUpdateError) {
+        console.error("Error finalizing meeting:", fallbackUpdateError);
+        return NextResponse.json(
+          { error: "Failed to finalize meeting" },
+          { status: 500 }
+        );
+      }
+    } else if (updateError) {
       console.error("Error finalizing meeting:", updateError);
       return NextResponse.json(
         { error: "Failed to finalize meeting" },
@@ -253,8 +339,7 @@ export async function POST(request: NextRequest) {
       const notificationMessage = buildNotificationMessage(
         outcome,
         fault,
-        charge_decision,
-        refundIssued
+        chargeDecision
       );
 
       // Get guest's name for the notification
@@ -276,13 +361,13 @@ export async function POST(request: NextRequest) {
           meeting_id,
           outcome,
           fault,
-          charge_decision,
+          charge_decision: chargeDecision,
           refund_issued: refundIssued,
         },
       });
 
       // If pending review, also notify admins
-      if (charge_decision === "pending_review") {
+      if (chargeDecision === "pending_review") {
         // Create admin notification
         await supabase.from("notifications").insert({
           user_id: host.user_id,
@@ -299,7 +384,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Investigation notice for fault cases (per client requirement)
-      if (fault !== "no_fault" && charge_decision === "pending_review") {
+      if (fault !== "no_fault" && chargeDecision === "pending_review") {
         // Send investigation notice to both parties
         const meetingDate = new Date(meeting.scheduled_at).toLocaleDateString();
         const investigationNotice = `In your previous video dating meeting held on ${meetingDate}, the meeting will be reviewed to determine if there is irregularity and inconsistency which determines the charges. This review may take 1-2 business days.`;
@@ -345,16 +430,37 @@ export async function POST(request: NextRequest) {
       // Don't fail finalization if notifications fail
     }
 
+    await Promise.allSettled([
+      trackCustomerEventSafely(guest.user_id, CIO_EVENTS.MEETING_COMPLETED, {
+        meeting_id,
+        role: "guest",
+        outcome,
+        fault,
+        charge_decision: chargeDecision,
+        charge_status: newChargeStatus,
+        refund_issued: refundIssued,
+      }),
+      trackCustomerEventSafely(host.user_id, CIO_EVENTS.MEETING_COMPLETED, {
+        meeting_id,
+        role: "host",
+        outcome,
+        fault,
+        charge_decision: chargeDecision,
+        charge_status: newChargeStatus,
+        refund_issued: refundIssued,
+      }),
+    ]);
+
     return NextResponse.json({
       success: true,
       message: "Meeting finalized successfully",
       charge_status: newChargeStatus,
+      charge_decision: chargeDecision,
       refund_issued: refundIssued,
       outcome,
       fault,
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error in POST /api/meetings/finalize:", error);
     return NextResponse.json(
       { error: "Internal server error" },
@@ -369,9 +475,7 @@ export async function POST(request: NextRequest) {
 function buildNotificationMessage(
   outcome: string,
   fault: string,
-  chargeDecision: string,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  refundIssued: boolean
+  chargeDecision: string
 ): string {
   let message = "";
 

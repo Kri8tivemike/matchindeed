@@ -36,9 +36,9 @@ CREATE POLICY "Allow service role to manage subscription pricing"
 -- Insert default pricing (can be overridden by admins)
 INSERT INTO subscription_pricing (tier_id, price_ngn, price_usd, price_gbp)
 VALUES
-  ('basic', 10000.00, 7.00, 5.50),
-  ('standard', 31500.00, 20.00, 16.00),
-  ('premium', 63000.00, 43.00, 34.00),
+  ('basic', 7500.00, 9.99, 7.99),
+  ('standard', 15000.00, 19.99, 16.99),
+  ('premium', 27000.00, 34.99, 29.99),
   ('vip', 1500000.00, 1000.00, 800.00)
 ON CONFLICT (tier_id) DO NOTHING;
 

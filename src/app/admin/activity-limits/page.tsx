@@ -30,6 +30,7 @@ import {
   Zap,
   Check,
   AlertCircle,
+  X,
   Infinity as InfinityIcon,
 } from "lucide-react";
 
@@ -146,10 +147,9 @@ export default function AdminActivityLimitsPage() {
     type: "success" | "error";
   } | null>(null);
 
-  // Show toast with auto-dismiss
+  // Show toast until the admin dismisses it manually
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
   };
 
   /**
@@ -331,7 +331,15 @@ export default function AdminActivityLimitsPage() {
           ) : (
             <AlertCircle className="h-4 w-4" />
           )}
-          {toast.message}
+          <span>{toast.message}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="ml-1 rounded-full p-1 text-gray-400 transition-colors hover:bg-white/70 hover:text-gray-600"
+            aria-label="Close alert"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
@@ -389,18 +397,19 @@ export default function AdminActivityLimitsPage() {
       </div>
 
       {/* Tier Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {limits.map((tierLimits) => {
-          const config = TIER_CONFIG[tierLimits.tier] || TIER_CONFIG.basic;
-          const isEditing = editingTier === tierLimits.tier;
-          const currentValues = isEditing ? editValues! : tierLimits;
+      <div className="max-h-[58vh] overflow-auto pr-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {limits.map((tierLimits) => {
+            const config = TIER_CONFIG[tierLimits.tier] || TIER_CONFIG.basic;
+            const isEditing = editingTier === tierLimits.tier;
+            const currentValues = isEditing ? editValues! : tierLimits;
 
-          return (
-            <div
-              key={tierLimits.tier}
-              className={`bg-white rounded-xl shadow-sm border ${config.border} overflow-hidden`}
-            >
-              {/* Tier Header */}
+            return (
+              <div
+                key={tierLimits.tier}
+                className={`bg-white rounded-xl shadow-sm border ${config.border} overflow-hidden`}
+              >
+                {/* Tier Header */}
               <div
                 className={`bg-gradient-to-r ${config.gradient} px-5 py-4 flex items-center justify-between border-b ${config.border}`}
               >
@@ -506,9 +515,10 @@ export default function AdminActivityLimitsPage() {
                   ))}
                 </div>
               </div>
-            </div>
-          );
-        })}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Quick Reference */}

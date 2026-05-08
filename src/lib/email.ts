@@ -1,16 +1,14 @@
 /**
  * Email Sending Utility for MatchIndeed
  *
- * Provides a centralized email sending service using Postmark.
- * Falls back gracefully when POSTMARK_SERVER_TOKEN is not configured (dev mode).
+ * Provides a centralized email sending service using Resend.
+ * Falls back gracefully when RESEND_API_KEY is not configured (dev mode).
  *
  * Environment variables:
- * - POSTMARK_SERVER_TOKEN: Server API token from postmarkapp.com
+ * - RESEND_API_KEY: API key from resend.com
  * - EMAIL_FROM: Sender email (default: noreply@matchindeed.com)
  * - NEXT_PUBLIC_APP_URL: Used for generating dashboard links in templates
  */
-
-import * as postmark from "postmark";
 import {
   generateEmail,
   type EmailTemplate,
@@ -22,26 +20,14 @@ import { shouldSendEmail } from "./notification-preferences";
 // CONFIGURATION
 // ---------------------------------------------------------------
 
-const POSTMARK_SERVER_TOKEN = process.env.POSTMARK_SERVER_TOKEN;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || "MatchIndeed <noreply@matchindeed.com>";
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
-
-/**
- * Use the "outbound" stream in production and the "broadcast" stream
- * in development so test emails go through Postmark's API (validating
- * your integration) but hit a separate stream you can easily monitor.
- * Set POSTMARK_MESSAGE_STREAM=outbound in production .env.
- */
-const MESSAGE_STREAM = process.env.POSTMARK_MESSAGE_STREAM || "outbound";
+const RESEND_API_BASE_URL = process.env.RESEND_API_BASE_URL || "https://api.resend.com";
 
 /** Whether email sending is available */
-const isEmailConfigured = !!POSTMARK_SERVER_TOKEN;
-
-/** Postmark client (only instantiated when configured) */
-const client = isEmailConfigured
-  ? new postmark.ServerClient(POSTMARK_SERVER_TOKEN!)
-  : null;
+const isEmailConfigured = !!RESEND_API_KEY;
 
 // ---------------------------------------------------------------
 // TYPES
@@ -70,7 +56,7 @@ export type SendEmailResult = {
   success: boolean;
   messageId?: string;
   error?: string;
-  /** True when email was skipped because Postmark is not configured */
+  /** True when email was skipped because email provider is not configured */
   skipped?: boolean;
 };
 
@@ -81,7 +67,7 @@ export type SendEmailResult = {
 /**
  * Send an email using a pre-defined template.
  *
- * In development (without POSTMARK_SERVER_TOKEN), logs the email to the console
+ * In development (without RESEND_API_KEY), logs the email to the console
  * instead of sending, to avoid errors and allow easy debugging.
  *
  * @param options - Email options including recipient, template, and template data
@@ -92,9 +78,13 @@ export type SendEmailResult = {
  * the preference system. Used to check if the user opted out.
  */
 const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
+  signup_confirmation: "signup_confirmation",
+  password_reset: "password_reset",
   meeting_request: "meeting_request",
   meeting_accepted: "meeting_accepted",
+  meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
+  profile_view: "profile_view",
   meeting_reminder: "meeting_reminder",
   meeting_completed: "meeting_completed",
   cancellation_charge: "meeting_cancelled",
@@ -105,6 +95,8 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   credit_refund: "credit_refund",
   welcome: "welcome", // Always sent (system)
   account_warning: "account_warning", // Always sent (system)
+  account_deactivated: "account_warning", // System lifecycle email
+  account_deletion_requested: "account_warning", // System lifecycle email
 };
 
 export async function sendEmail(
@@ -146,10 +138,10 @@ export async function sendEmail(
 
     const subject = options.subject || generatedSubject;
 
-    // If Postmark is not configured, log to console (dev mode)
-    if (!client) {
+    // If Resend is not configured, log to console (dev mode)
+    if (!RESEND_API_KEY) {
       console.log(
-        `[Email] (Dev Mode — No POSTMARK_SERVER_TOKEN) Would send email:`,
+        `[Email] (Dev Mode — No RESEND_API_KEY) Would send email:`,
         {
           to: options.to,
           subject,
@@ -160,26 +152,38 @@ export async function sendEmail(
       return { success: true, skipped: true };
     }
 
-    // Send via Postmark
-    const result = await client.sendEmail({
-      From: EMAIL_FROM,
-      To: options.to,
-      Subject: subject,
-      HtmlBody: html,
-      Cc: options.cc?.join(", ") || undefined,
-      ReplyTo: options.replyTo || undefined,
-      MessageStream: MESSAGE_STREAM,
+    // Send via Resend
+    const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: EMAIL_FROM,
+        to: options.to,
+        subject,
+        html,
+        cc: options.cc,
+        reply_to: options.replyTo,
+      }),
     });
 
-    if (result.ErrorCode !== 0) {
-      console.error("[Email] Postmark error:", result.Message);
-      return { success: false, error: result.Message };
+    const payload = await response.json().catch(() => ({} as Record<string, unknown>));
+    const messageId = typeof payload.id === "string" ? payload.id : undefined;
+    const errorMessage = typeof payload.message === "string"
+      ? payload.message
+      : `Resend API error (${response.status})`;
+
+    if (!response.ok) {
+      console.error("[Email] Resend error:", errorMessage);
+      return { success: false, error: errorMessage };
     }
 
     console.log(`[Email] Sent "${options.template}" to ${options.to}`, {
-      messageId: result.MessageID,
+      messageId,
     });
-    return { success: true, messageId: result.MessageID };
+    return { success: true, messageId };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unexpected email error";
     console.error("[Email] Unexpected error:", error);
@@ -204,6 +208,7 @@ export async function sendMeetingRequestEmail(
     requesterName: string;
     meetingDate: string;
     meetingTime: string;
+    meetingTimeZone?: string;
     meetingType?: string;
   },
   recipientUserId?: string
@@ -216,6 +221,70 @@ export async function sendMeetingRequestEmail(
   });
 }
 
+export async function sendSignupConfirmationEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    confirmationUrl: string;
+  }
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "signup_confirmation",
+    data,
+  });
+}
+
+export async function sendPasswordResetEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    resetUrl: string;
+  }
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "password_reset",
+    data,
+  });
+}
+
+export async function sendAccountDeactivatedEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    reactivateUrl?: string;
+  }
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "account_deactivated",
+    data: {
+      ...data,
+      dashboardUrl: `${APP_URL}/dashboard/profile/my-account`,
+      reactivateUrl:
+        data.reactivateUrl || `${APP_URL}/dashboard/profile/my-account`,
+    },
+  });
+}
+
+export async function sendAccountDeletionRequestedEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    requestedAt?: string;
+  }
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "account_deletion_requested",
+    data: {
+      ...data,
+      dashboardUrl: `${APP_URL}/contact-us`,
+    },
+  });
+}
+
 /** Send a meeting accepted notification email */
 export async function sendMeetingAcceptedEmail(
   recipientEmail: string,
@@ -224,6 +293,8 @@ export async function sendMeetingAcceptedEmail(
     partnerName: string;
     meetingDate: string;
     meetingTime: string;
+    meetingTimeZone?: string;
+    awaitingAdminApproval?: boolean;
   },
   recipientUserId?: string
 ) {
@@ -231,6 +302,46 @@ export async function sendMeetingAcceptedEmail(
     to: recipientEmail,
     template: "meeting_accepted",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/meetings` },
+    recipientUserId,
+  });
+}
+
+/** Send an admin-approved meeting notification email */
+export async function sendMeetingApprovedEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    partnerName: string;
+    meetingDate: string;
+    meetingTime: string;
+    meetingTimeZone?: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "meeting_approved",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/meetings` },
+    recipientUserId,
+  });
+}
+
+/** Send a profile view notification email */
+export async function sendProfileViewEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    partnerName: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "profile_view",
+    data: {
+      ...data,
+      dashboardUrl: `${APP_URL}/dashboard/likes?tab=views`,
+    },
     recipientUserId,
   });
 }
@@ -243,7 +354,9 @@ export async function sendMeetingCancelledEmail(
     meetingDate: string;
     cancelledBy: string;
     refundIssued?: boolean;
+    freePlanRestored?: boolean;
     chargeApplied?: boolean;
+    cancellationReason?: string;
   },
   recipientUserId?: string
 ) {
@@ -262,7 +375,7 @@ export async function sendCancellationChargeEmail(
     recipientName: string;
     meetingDate: string;
     meetingRef: string;
-    chargeAmount: string;
+    creditAmount: string;
     reason?: string;
   },
   recipientUserId?: string
@@ -362,6 +475,7 @@ export async function sendMeetingReminderEmail(
     partnerName: string;
     meetingDate: string;
     meetingTime: string;
+    meetingTimeZone?: string;
     timeUntil: string;
   },
   recipientUserId?: string
@@ -406,21 +520,36 @@ export async function sendRawHtmlEmail(
   html: string
 ): Promise<SendEmailResult> {
   try {
-    if (!client) {
+    if (!RESEND_API_KEY) {
       console.log(`[Email] (Dev Mode) Would send raw HTML to ${to}:`, subject);
       return { success: true, skipped: true };
     }
-    const result = await client.sendEmail({
-      From: EMAIL_FROM,
-      To: to,
-      Subject: subject,
-      HtmlBody: html,
-      MessageStream: MESSAGE_STREAM,
+
+    const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: EMAIL_FROM,
+        to,
+        subject,
+        html,
+      }),
     });
-    if (result.ErrorCode !== 0) {
-      return { success: false, error: result.Message };
+
+    const payload = await response.json().catch(() => ({} as Record<string, unknown>));
+    const messageId = typeof payload.id === "string" ? payload.id : undefined;
+    const errorMessage = typeof payload.message === "string"
+      ? payload.message
+      : `Resend API error (${response.status})`;
+
+    if (!response.ok) {
+      return { success: false, error: errorMessage };
     }
-    return { success: true, messageId: result.MessageID };
+
+    return { success: true, messageId };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unexpected email error";
     return { success: false, error: message };

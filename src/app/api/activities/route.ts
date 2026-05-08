@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
+import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
+import {
+  getAccountState,
+  isTargetInteractionUnavailable,
+  resolveOwnInteractionBlockMessage,
+  TARGET_ACCOUNT_INACTIVE_MESSAGE,
+} from "@/lib/account-interactions";
 
 /**
  * Activities API Route
@@ -19,6 +27,12 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
 type ActivityType = "wink" | "like" | "interested" | "rejected";
+type PositiveActivityType = Exclude<ActivityType, "rejected">;
+type ActivityBody = {
+  user_id?: string;
+  target_user_id?: string;
+  activity_type?: ActivityType;
+};
 
 /**
  * Check if user has reached their activity limit
@@ -94,14 +108,14 @@ async function checkActivityLimit(
 }
 
 /**
- * Check if mutual match exists
+ * Check if a mutual positive interaction exists.
  */
 async function checkMutualMatch(
   userId: string,
   targetUserId: string
 ): Promise<boolean> {
   try {
-    // Check if target user has liked/interested the current user
+    // Check if target user has already sent any positive activity to the current user.
     const { data: targetActivity } = await supabaseAdmin
       .from("user_activities")
       .select("activity_type")
@@ -123,7 +137,7 @@ async function checkMutualMatch(
 async function createNotification(
   userId: string,
   targetUserId: string,
-  activityType: ActivityType
+  activityType: PositiveActivityType
 ): Promise<void> {
   try {
     const activityLabels: Record<string, string> = {
@@ -144,17 +158,79 @@ async function createNotification(
         activity_type: activityType,
       },
     });
+
+    const senderName = await getUserDisplayName(userId);
+    const pushCopy: Record<PositiveActivityType, { title: string; message: string }> = {
+      like: {
+        title: `${senderName} liked you`,
+        message: "Open Likes to like back or pass.",
+      },
+      wink: {
+        title: `${senderName} winked at you`,
+        message: "See who noticed you on MatchIndeed.",
+      },
+      interested: {
+        title: `${senderName} is interested in you`,
+        message: "Open Likes to respond.",
+      },
+    };
+
+    await sendPushNotificationIfAllowed({
+      userId: targetUserId,
+      type: activityType,
+      title: pushCopy[activityType].title,
+      message: pushCopy[activityType].message,
+      url: "/dashboard/likes?tab=received",
+      data: {
+        from_user_id: userId,
+        activity_type: activityType,
+      },
+    });
   } catch (error) {
     console.error("Error creating notification:", error);
   }
+}
+
+async function getUserDisplayName(userId: string): Promise<string> {
+  const [{ data: account }, { data: profile }] = await Promise.all([
+    supabaseAdmin
+      .from("accounts")
+      .select("display_name, email")
+      .eq("id", userId)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("user_profiles")
+      .select("first_name")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+
+  return (
+    profile?.first_name ||
+    account?.display_name ||
+    account?.email?.split("@")[0] ||
+    "Someone"
+  );
+}
+
+async function getUserGender(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("user_profiles")
+    .select("gender")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  return typeof data?.gender === "string" ? data.gender : null;
 }
 
 /**
  * Helper to get authenticated user from request
  * For client-side calls, user_id is passed in body/query params and validated
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getAuthUser(request: NextRequest, body?: any): Promise<string | null> {
+async function getAuthUser(
+  request: NextRequest,
+  body?: ActivityBody
+): Promise<string | null> {
   // Check query params for user_id (for DELETE requests)
   const { searchParams } = new URL(request.url);
   const userIdParam = searchParams.get("user_id");
@@ -204,9 +280,8 @@ async function getAuthUser(request: NextRequest, body?: any): Promise<string | n
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { target_user_id, activity_type, user_id } = body;
+    const body = (await request.json()) as ActivityBody;
+    const { target_user_id, activity_type } = body;
 
     // Validate input
     if (!target_user_id || !activity_type) {
@@ -222,6 +297,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    const normalizedActivityType = activity_type as ActivityType;
 
     // Get authenticated user
     const userId = await getAuthUser(request, body);
@@ -230,12 +306,51 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const [requesterAccount, targetAccount] = await Promise.all([
+      getAccountState(supabaseAdmin, userId),
+      getAccountState(supabaseAdmin, target_user_id),
+    ]);
+
+    const requesterBlockedMessage = resolveOwnInteractionBlockMessage(requesterAccount);
+    if (requesterBlockedMessage) {
+      return NextResponse.json(
+        { error: requesterBlockedMessage, code: "account_deactivated" },
+        { status: 403 }
+      );
+    }
+
+    if (isTargetInteractionUnavailable(targetAccount)) {
+      return NextResponse.json(
+        { error: TARGET_ACCOUNT_INACTIVE_MESSAGE, code: "target_unavailable" },
+        { status: 403 }
+      );
+    }
+
     // Prevent self-interaction
     if (userId === target_user_id) {
       return NextResponse.json(
         { error: "Cannot interact with yourself" },
         { status: 400 }
       );
+    }
+
+    if (normalizedActivityType !== "rejected") {
+      const [requesterGender, targetGender] = await Promise.all([
+        getUserGender(userId),
+        getUserGender(target_user_id),
+      ]);
+
+      const genderEligibility = evaluateGenderEligibility({
+        requesterGender,
+        targetGender,
+      });
+
+      if (!genderEligibility.allowed) {
+        return NextResponse.json(
+          { error: genderEligibility.message, code: genderEligibility.code },
+          { status: 403 }
+        );
+      }
     }
 
     // Check if activity already exists (only for positive interactions)
@@ -280,10 +395,10 @@ export async function POST(request: NextRequest) {
     let weekCheck = { allowed: true, limit: Infinity, used: 0 };
     let monthCheck = { allowed: true, limit: Infinity, used: 0 };
     
-    if (activity_type !== "rejected") {
-      dayCheck = await checkActivityLimit(userId, activity_type as "wink" | "like" | "interested", "day");
-      weekCheck = await checkActivityLimit(userId, activity_type as "wink" | "like" | "interested", "week");
-      monthCheck = await checkActivityLimit(userId, activity_type as "wink" | "like" | "interested", "month");
+    if (normalizedActivityType !== "rejected") {
+      dayCheck = await checkActivityLimit(userId, normalizedActivityType as "wink" | "like" | "interested", "day");
+      weekCheck = await checkActivityLimit(userId, normalizedActivityType as "wink" | "like" | "interested", "week");
+      monthCheck = await checkActivityLimit(userId, normalizedActivityType as "wink" | "like" | "interested", "month");
     }
 
     if (!dayCheck.allowed) {
@@ -328,7 +443,7 @@ export async function POST(request: NextRequest) {
       .insert({
         user_id: userId,
         target_user_id,
-        activity_type,
+        activity_type: normalizedActivityType,
       })
       .select()
       .single();
@@ -341,16 +456,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for mutual match (only for like and interested, not for rejected)
+    // Check for mutual positive activity on any non-rejected action.
     let mutualMatch = false;
-    if (activity_type === "like" || activity_type === "interested") {
+    if (normalizedActivityType !== "rejected") {
       mutualMatch = await checkMutualMatch(userId, target_user_id);
     }
 
     // Create notification for target user (only for positive interactions)
     // Don't notify users when they're rejected
-    if (activity_type !== "rejected") {
-      await createNotification(userId, target_user_id, activity_type);
+    if (normalizedActivityType !== "rejected") {
+      await createNotification(userId, target_user_id, normalizedActivityType);
     }
 
     // If mutual match, create notification for both users
@@ -360,7 +475,7 @@ export async function POST(request: NextRequest) {
           user_id: userId,
           type: "mutual_match",
           title: "It's a Match!",
-          message: "You both like each other!",
+          message: "You both showed interest in each other!",
           data: {
             matched_user_id: target_user_id,
           },
@@ -369,11 +484,39 @@ export async function POST(request: NextRequest) {
           user_id: target_user_id,
           type: "mutual_match",
           title: "It's a Match!",
-          message: "You both like each other!",
+          message: "You both showed interest in each other!",
           data: {
             matched_user_id: userId,
           },
         },
+      ]);
+
+      const [actorName, targetName] = await Promise.all([
+        getUserDisplayName(userId),
+        getUserDisplayName(target_user_id),
+      ]);
+
+      await Promise.all([
+        sendPushNotificationIfAllowed({
+          userId,
+          type: "mutual_match",
+          title: "It's a Match!",
+          message: `You matched with ${targetName}. Say hello when you're ready.`,
+          url: "/dashboard/matches",
+          data: {
+            matched_user_id: target_user_id,
+          },
+        }),
+        sendPushNotificationIfAllowed({
+          userId: target_user_id,
+          type: "mutual_match",
+          title: "It's a Match!",
+          message: `You matched with ${actorName}. Say hello when you're ready.`,
+          url: "/dashboard/matches",
+          data: {
+            matched_user_id: userId,
+          },
+        }),
       ]);
     }
 
@@ -406,7 +549,9 @@ export async function GET(request: NextRequest) {
     const user_id_param = searchParams.get("user_id");
 
     // Get authenticated user
-    const userId = await getAuthUser(request, { user_id: user_id_param });
+    const userId = await getAuthUser(request, {
+      user_id: user_id_param ?? undefined,
+    });
     
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -74,6 +74,16 @@ type AnalyticsData = {
   };
   notifications: {
     total: number;
+    push: {
+      last_7_days: number;
+      sent: number;
+      skipped_preference: number;
+      quieted_recent_activity: number;
+      missing_config: number;
+      failed_provider: number;
+      error: number;
+      by_type: Record<string, number>;
+    };
   };
   trends: {
     signups_by_day: Record<string, number>;
@@ -415,6 +425,14 @@ export default function AdminAnalyticsPage() {
         )
       : 0;
 
+  const pushTypeChartData = Object.entries(data.notifications.push.by_type)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 6)
+    .map(([type, count]) => ({
+      label: type.replace(/_/g, " "),
+      value: count,
+    }));
+
   return (
     <div className="p-6 lg:p-8 space-y-6">
       {/* Header */}
@@ -495,8 +513,8 @@ export default function AdminAnalyticsPage() {
           color="#a855f7"
         />
         <StatCard
-          title="Notifications"
-          value={data.notifications.total.toLocaleString()}
+          title="Push Sent (7d)"
+          value={data.notifications.push.sent.toLocaleString()}
           icon={<Bell className="h-5 w-5" />}
           color="#64748b"
         />
@@ -642,6 +660,99 @@ export default function AdminAnalyticsPage() {
               {data.activities.today.toLocaleString()}
             </p>
             <p className="text-xs text-amber-600">Today&apos;s Activity</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Push Delivery Summary */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-2">
+              <Bell className="h-4 w-4 text-slate-500" />
+              Push Delivery (Last 7 Days)
+            </h2>
+            <p className="text-xs text-gray-500">
+              Sent, skipped, quieted, and failed OneSignal activity across the platform
+            </p>
+          </div>
+          <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            {data.notifications.push.last_7_days.toLocaleString()} logged events
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4">
+            <p className="text-xs text-emerald-700">Sent</p>
+            <p className="text-2xl font-bold text-emerald-800 mt-1">
+              {data.notifications.push.sent.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-xl bg-amber-50 border border-amber-100 p-4">
+            <p className="text-xs text-amber-700">Preference Skips</p>
+            <p className="text-2xl font-bold text-amber-800 mt-1">
+              {data.notifications.push.skipped_preference.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
+            <p className="text-xs text-blue-700">Quieted Active Users</p>
+            <p className="text-2xl font-bold text-blue-800 mt-1">
+              {data.notifications.push.quieted_recent_activity.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+            <p className="text-xs text-slate-700">Missing Config</p>
+            <p className="text-2xl font-bold text-slate-800 mt-1">
+              {data.notifications.push.missing_config.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-xl bg-rose-50 border border-rose-100 p-4">
+            <p className="text-xs text-rose-700">Provider Failures</p>
+            <p className="text-2xl font-bold text-rose-800 mt-1">
+              {data.notifications.push.failed_provider.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-xl bg-red-50 border border-red-100 p-4">
+            <p className="text-xs text-red-700">App Errors</p>
+            <p className="text-2xl font-bold text-red-800 mt-1">
+              {data.notifications.push.error.toLocaleString()}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">
+              Push by Type
+            </h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Most common push events recorded this week
+            </p>
+            {pushTypeChartData.length > 0 ? (
+              <MiniBarChart data={pushTypeChartData} color="#475569" />
+            ) : (
+              <p className="text-sm text-gray-400">No push delivery logs yet</p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900">
+              What This Tells You
+            </h3>
+            <div className="space-y-2 text-sm text-gray-600">
+              <p>
+                <span className="font-semibold text-gray-900">Preference skips</span>{" "}
+                mean users opted out of that category.
+              </p>
+              <p>
+                <span className="font-semibold text-gray-900">Quieted active users</span>{" "}
+                are healthy suppressions while the recipient is already engaged on-site.
+              </p>
+              <p>
+                <span className="font-semibold text-gray-900">Provider failures</span>{" "}
+                point to OneSignal delivery or payload issues worth investigating.
+              </p>
+            </div>
           </div>
         </div>
       </div>

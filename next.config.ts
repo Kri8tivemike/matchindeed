@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
+const PUBLIC_ADMIN_BASE_PATH = "/system1-console4";
+
 const nextConfig: NextConfig = {
   /* config options here */
   reactCompiler: true,
@@ -23,11 +25,33 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "szmkvcifwopbnatsdcmw.supabase.co",
       },
-      {
-        protocol: "https",
-        hostname: "ik.imagekit.io",
-      },
     ],
+  },
+  async rewrites() {
+    return [
+      {
+        source: PUBLIC_ADMIN_BASE_PATH,
+        destination: "/admin",
+      },
+      {
+        source: `${PUBLIC_ADMIN_BASE_PATH}/:path*`,
+        destination: "/admin/:path*",
+      },
+    ];
+  },
+  async redirects() {
+    return [
+      {
+        source: "/admin",
+        destination: "/login",
+        permanent: false,
+      },
+      {
+        source: "/admin/:path*",
+        destination: "/login",
+        permanent: false,
+      },
+    ];
   },
 };
 

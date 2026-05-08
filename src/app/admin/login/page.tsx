@@ -1,22 +1,32 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { Shield, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
+import { ADMIN_BASE_PATH, ADMIN_MFA_SETUP_PATH } from "@/lib/admin/path";
+import { COORDINATOR_LOGIN_PATH } from "@/lib/coordinator/path";
+import {
+  Shield,
+  Mail,
+  Lock,
+  AlertCircle,
+  Loader2,
+  Eye,
+  EyeOff,
+  KeyRound,
+  LifeBuoy,
+} from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
+import NextLink from "next/link";
+import CloudflareTurnstile from "@/components/CloudflareTurnstile";
 
-/**
- * AdminLoginPage - Login page for admin panel
- * 
- * Features:
- * - Email/password authentication
- * - Role verification (only admin roles can access)
- * - TOTP MFA challenge (if MFA is enrolled)
- * - MFA enrollment redirect (if admin has no MFA set up)
- * - Logout handling
- */
+type NextLinkProps = ComponentProps<typeof NextLink>;
+type MfaMode = "totp" | "recovery";
+
+function Link({ prefetch, ...props }: NextLinkProps) {
+  return <NextLink {...props} prefetch={prefetch ?? false} />;
+}
+
 export default function AdminLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -25,41 +35,77 @@ export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const unauthorizedQueryError =
-    searchParams.get("error") === "unauthorized"
-      ? "You don't have permission to access the admin panel."
-      : null;
-  const displayedError = error ?? unauthorizedQueryError;
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const handleTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), []);
 
-  // MFA state
   const [mfaStep, setMfaStep] = useState(false);
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
+  const [mfaMode, setMfaMode] = useState<MfaMode>("totp");
   const [totpCode, setTotpCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
 
-  // Handle logout if requested
+  const queryError = (() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam === "unauthorized") {
+      return "You don't have permission to access the admin panel.";
+    }
+    if (errorParam === "use_coordinator_login") {
+      return "This account is set up for coordinator access. Use the coordinator login page instead.";
+    }
+    return null;
+  })();
+  const displayedError = error ?? queryError;
+
   useEffect(() => {
     const handleLogout = async () => {
       if (searchParams.get("logout") === "true") {
         await supabase.auth.signOut();
       }
     };
+
     handleLogout();
   }, [searchParams]);
 
-  /**
-   * Handle login form submission
-   */
+  const resetMfaState = () => {
+    setMfaStep(false);
+    setMfaFactorId(null);
+    setMfaMode("totp");
+    setTotpCode("");
+    setRecoveryCode("");
+  };
+
+  const getAccessToken = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    return session?.access_token || null;
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
     try {
-      // Authenticate with Supabase
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) {
+        const verifyRes = await fetch("/api/auth/verify-turnstile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: turnstileToken }),
+        });
+        if (!verifyRes.ok) {
+          setError("Security check failed. Please try again.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
       if (authError) {
         setError(authError.message);
@@ -73,7 +119,6 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // Check if user has admin role
       const { data: account, error: accountError } = await supabase
         .from("accounts")
         .select("role")
@@ -87,8 +132,13 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // Verify admin role
-      const adminRoles = ["moderator", "admin", "superadmin"];
+      const adminRoles = ["admin", "superadmin"];
+      if (account.role === "coordinator") {
+        await supabase.auth.signOut();
+        router.replace(`${COORDINATOR_LOGIN_PATH}?error=use_coordinator_login`);
+        return;
+      }
+
       if (!adminRoles.includes(account.role)) {
         setError("You don't have permission to access the admin panel.");
         await supabase.auth.signOut();
@@ -96,51 +146,78 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // Skip MFA when ADMIN_MFA_REQUIRED=false (e.g. development, or MFA not yet enabled in Supabase)
       const mfaRequired = process.env.NEXT_PUBLIC_ADMIN_MFA_REQUIRED !== "false";
       if (!mfaRequired) {
-        router.push("/admin");
+        router.push(ADMIN_BASE_PATH);
         setLoading(false);
         return;
       }
 
-      // Check if MFA is enrolled
       const { data: mfaFactors } = await supabase.auth.mfa.listFactors();
-      const verifiedTOTP = mfaFactors?.totp?.find((f) => f.status === "verified");
+      const verifiedTOTP = mfaFactors?.totp?.find((factor) => factor.status === "verified");
 
       if (verifiedTOTP) {
-        // MFA is enrolled — show TOTP challenge
         setMfaFactorId(verifiedTOTP.id);
+        setMfaMode("totp");
         setMfaStep(true);
         setLoading(false);
         return;
       }
 
-      // No MFA enrolled — redirect to MFA setup page
-      router.push("/admin/mfa-setup");
-    } catch (err) {
-      console.error("Login error:", err);
+      router.push(ADMIN_MFA_SETUP_PATH);
+    } catch (loginError) {
+      console.error("Login error:", loginError);
       setError("An unexpected error occurred. Please try again.");
       setLoading(false);
     }
   };
 
-  /**
-   * Handle MFA TOTP verification
-   */
   const handleMfaVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
     try {
+      if (mfaMode === "recovery") {
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          setError("Your session expired. Please sign in again.");
+          resetMfaState();
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch("/api/admin/mfa/recovery-code/verify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ code: recoveryCode }),
+        });
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          setError(
+            typeof payload.error === "string"
+              ? payload.error
+              : "Recovery code verification failed."
+          );
+          setRecoveryCode("");
+          setLoading(false);
+          return;
+        }
+
+        router.push(`${ADMIN_MFA_SETUP_PATH}?recovered=true`);
+        return;
+      }
+
       if (!mfaFactorId) {
         setError("MFA factor not found. Please log in again.");
         setLoading(false);
         return;
       }
 
-      // Create a challenge
       const { data: challengeData, error: challengeError } =
         await supabase.auth.mfa.challenge({ factorId: mfaFactorId });
 
@@ -150,7 +227,6 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // Verify the TOTP code
       const { error: verifyError } = await supabase.auth.mfa.verify({
         factorId: mfaFactorId,
         challengeId: challengeData.id,
@@ -164,21 +240,20 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // MFA verified — redirect to admin dashboard
-      router.push("/admin");
-    } catch (err) {
-      console.error("MFA verification error:", err);
+      router.push(ADMIN_BASE_PATH);
+    } catch (verifyError) {
+      console.error("MFA verification error:", verifyError);
       setError("An unexpected error occurred. Please try again.");
       setLoading(false);
     }
   };
 
+  const recoveryMode = mfaMode === "recovery";
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1f419a] to-[#2a44a3] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Login Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          {/* Header */}
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#1f419a] to-[#2a44a3] mb-4">
               <Shield className="h-8 w-8 text-white" />
@@ -187,7 +262,6 @@ export default function AdminLoginPage() {
             <p className="text-gray-500 mt-1">Sign in to access the admin panel</p>
           </div>
 
-          {/* Error Message */}
           {displayedError && (
             <div className="mb-6 flex items-center gap-3 p-4 rounded-xl bg-red-50 text-red-700 border border-red-200">
               <AlertCircle className="h-5 w-5 flex-shrink-0" />
@@ -196,38 +270,60 @@ export default function AdminLoginPage() {
           )}
 
           {mfaStep ? (
-            /* MFA Verification Form */
             <form onSubmit={handleMfaVerify} className="space-y-5">
               <div className="text-center mb-4">
                 <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-50 mb-3">
-                  <KeyRound className="h-6 w-6 text-[#1f419a]" />
+                  {recoveryMode ? (
+                    <LifeBuoy className="h-6 w-6 text-[#1f419a]" />
+                  ) : (
+                    <KeyRound className="h-6 w-6 text-[#1f419a]" />
+                  )}
                 </div>
                 <p className="text-sm text-gray-600">
-                  Enter the 6-digit code from your authenticator app
+                  {recoveryMode
+                    ? "Use your one-time recovery code to regain access."
+                    : "Enter the 6-digit code from your authenticator app."}
                 </p>
               </div>
 
+              {recoveryMode && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  Using a recovery code will reset your current authenticator setup
+                  and send you to a fresh 2FA setup screen.
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Verification Code
+                  {recoveryMode ? "Recovery Code" : "Verification Code"}
                 </label>
                 <input
                   type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="000000"
+                  inputMode={recoveryMode ? "text" : "numeric"}
+                  autoComplete={recoveryMode ? "off" : "one-time-code"}
+                  maxLength={recoveryMode ? 32 : 6}
+                  value={recoveryMode ? recoveryCode : totpCode}
+                  onChange={(e) => {
+                    if (recoveryMode) {
+                      setRecoveryCode(e.target.value.toUpperCase());
+                    } else {
+                      setTotpCode(e.target.value.replace(/\D/g, ""));
+                    }
+                  }}
+                  placeholder={recoveryMode ? "MI-AB12-CD34-EF56-GH78" : "000000"}
                   required
                   autoFocus
-                  className="w-full text-center text-2xl tracking-[0.5em] py-3 rounded-xl border border-gray-300 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none transition-all font-mono"
+                  className={`w-full py-3 rounded-xl border border-gray-300 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none transition-all font-mono ${
+                    recoveryMode
+                      ? "px-4 text-center text-base tracking-[0.16em]"
+                      : "text-center text-2xl tracking-[0.5em]"
+                  }`}
                 />
               </div>
 
               <button
                 type="submit"
-                disabled={loading || totpCode.length !== 6}
+                disabled={loading || (!recoveryMode && totpCode.length !== 6) || (recoveryMode && recoveryCode.trim().length < 8)}
                 className="w-full py-3 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {loading ? (
@@ -235,6 +331,8 @@ export default function AdminLoginPage() {
                     <Loader2 className="h-5 w-5 animate-spin" />
                     Verifying...
                   </>
+                ) : recoveryMode ? (
+                  "Use Recovery Code"
                 ) : (
                   "Verify & Sign In"
                 )}
@@ -242,16 +340,32 @@ export default function AdminLoginPage() {
 
               <button
                 type="button"
-                onClick={() => { setMfaStep(false); setTotpCode(""); setError(null); }}
+                onClick={() => {
+                  setError(null);
+                  setTotpCode("");
+                  setRecoveryCode("");
+                  setMfaMode(recoveryMode ? "totp" : "recovery");
+                }}
+                className="w-full text-sm text-[#1f419a] hover:underline transition-colors"
+              >
+                {recoveryMode
+                  ? "Use authenticator code instead"
+                  : "Use a recovery code instead"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  resetMfaState();
+                }}
                 className="w-full text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
                 Back to login
               </button>
             </form>
           ) : (
-            /* Login Form */
             <form onSubmit={handleLogin} className="space-y-5">
-              {/* Email Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   Email Address
@@ -271,7 +385,6 @@ export default function AdminLoginPage() {
                 </div>
               </div>
 
-              {/* Password Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   Password
@@ -302,10 +415,11 @@ export default function AdminLoginPage() {
                 </div>
               </div>
 
-              {/* Submit Button */}
+              <CloudflareTurnstile onVerify={handleTurnstileVerify} onExpire={() => setTurnstileToken(null)} />
+
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !!(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}
                 className="w-full py-3 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {loading ? (
@@ -320,7 +434,6 @@ export default function AdminLoginPage() {
             </form>
           )}
 
-          {/* Footer */}
           <div className="mt-8 pt-6 border-t border-gray-200 text-center">
             <p className="text-sm text-gray-500">
               Only authorized administrators can access this panel.
@@ -334,14 +447,13 @@ export default function AdminLoginPage() {
           </div>
         </div>
 
-        {/* Logo */}
         <div className="mt-6 text-center">
           <Image
-            src="/matchindeed.svg"
-            alt="Matchindeed"
-            width={140}
-            height={36}
-            className="inline-block opacity-80"
+            src="/matchindeed-logo-white.png"
+            alt="MatchIndeed"
+            width={132}
+            height={34}
+            className="inline-block"
             style={{ width: "auto", height: "auto" }}
           />
         </div>

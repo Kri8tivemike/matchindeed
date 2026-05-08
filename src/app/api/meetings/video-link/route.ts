@@ -1,12 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createZoomMeeting, deleteZoomMeeting } from "@/lib/zoom";
+import { validateMeetingsAccess } from "@/middleware/subscription-check";
+import { MEETING_ETIQUETTE_CHECKLIST, getEtiquetteSummaryMessage } from "@/lib/meetings/etiquette";
+import { persistConfirmedMeetingVideoLinkIfMissing } from "@/lib/meetings/video-link";
+import {
+  deriveWorkflowState,
+  requireMeetingStateTransition,
+} from "@/lib/meetings/state-machine";
+import {
+  canAccessStarterTrialMeeting,
+  getStarterTrialState,
+} from "@/lib/starter-trial";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
+
+const MEETING_JOIN_EARLY_MINUTES = 10;
+const MEETING_JOIN_DURATION_MINUTES = 30;
 
 /**
  * Helper to get authenticated user from request
@@ -21,6 +35,16 @@ async function getAuthUser(request: NextRequest) {
     error,
   } = await supabase.auth.getUser(token);
   return error || !user ? null : user;
+}
+
+async function isAdminUser(userId: string): Promise<boolean> {
+  const { data: account } = await supabase
+    .from("accounts")
+    .select("role")
+    .eq("id", userId)
+    .single();
+
+  return !!account?.role && ["admin", "superadmin"].includes(account.role);
 }
 
 /**
@@ -47,19 +71,38 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Verify user is a participant
+    const isAdmin = await isAdminUser(user.id);
+
+    // Verify user is a participant unless they are an admin.
     const { data: participant } = await supabase
       .from("meeting_participants")
       .select("role")
       .eq("meeting_id", meetingId)
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
-    if (!participant) {
+    if (!participant && !isAdmin) {
       return NextResponse.json(
         { error: "You are not a participant in this meeting" },
         { status: 403 }
       );
+    }
+
+    const isAssignedCoordinator = participant?.role === "coordinator";
+    if (!isAdmin && !isAssignedCoordinator) {
+      const accessValidation = await validateMeetingsAccess(user.id);
+      if (!accessValidation.allowed) {
+        const starterTrialState = await getStarterTrialState(supabase, user.id, {
+          verifyActiveSlot: true,
+        });
+
+        if (!canAccessStarterTrialMeeting(starterTrialState, meetingId)) {
+          return NextResponse.json(
+            { error: "access_denied", message: accessValidation.message },
+            { status: 403 }
+          );
+        }
+      }
     }
 
     // Get the meeting
@@ -85,6 +128,79 @@ export async function GET(request: NextRequest) {
         },
         { status: 400 }
       );
+    }
+
+    // Require meeting etiquette acknowledgment before joining (participant side).
+    if (!isAdmin) {
+      const { data: ack } = await supabase
+        .from("meeting_rule_acknowledgments")
+        .select("acknowledged_at")
+        .eq("meeting_id", meetingId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!ack?.acknowledged_at) {
+        return NextResponse.json(
+          {
+            error: "rules_not_acknowledged",
+            message: getEtiquetteSummaryMessage(),
+            checklist: MEETING_ETIQUETTE_CHECKLIST,
+          },
+          { status: 428 }
+        );
+      }
+    }
+
+    const now = new Date();
+    const meetingStart = new Date(meeting.scheduled_at);
+    const joinWindowOpen = new Date(
+      meetingStart.getTime() - MEETING_JOIN_EARLY_MINUTES * 60 * 1000
+    );
+    const joinWindowClosed = new Date(
+      meetingStart.getTime() + MEETING_JOIN_DURATION_MINUTES * 60 * 1000
+    );
+    if (!isAdmin && now < joinWindowOpen) {
+      return NextResponse.json(
+        {
+          error: "meeting_window_not_open",
+          message: "This meeting can be joined 10 minutes before the scheduled time.",
+          scheduled_at: meeting.scheduled_at,
+        },
+        { status: 403 }
+      );
+    }
+    if (!isAdmin && now > joinWindowClosed) {
+      return NextResponse.json(
+        {
+          error: "meeting_window_closed",
+          message: "This meeting has passed and can no longer be joined.",
+          scheduled_at: meeting.scheduled_at,
+        },
+        { status: 403 }
+      );
+    }
+    const withinJoinWindow = now >= joinWindowOpen;
+    if (withinJoinWindow && meeting.status === "confirmed") {
+      const currentWorkflowState = deriveWorkflowState({
+        workflowState:
+          typeof meeting.workflow_state === "string"
+            ? meeting.workflow_state
+            : null,
+        status: meeting.status,
+      });
+      const transitionValidation = requireMeetingStateTransition({
+        from: currentWorkflowState,
+        to: "in_progress",
+      });
+      if (transitionValidation.allowed && currentWorkflowState !== "in_progress") {
+        await supabase
+          .from("meetings")
+          .update({
+            workflow_state: "in_progress",
+            in_progress_at: now.toISOString(),
+          })
+          .eq("id", meetingId);
+      }
     }
 
     // Check if link already exists
@@ -136,37 +252,57 @@ export async function GET(request: NextRequest) {
       guestName,
     });
 
-    if (!result.success) {
+    if (!result.success || result.is_fallback) {
       return NextResponse.json(
-        { error: result.error || "Failed to create video meeting link" },
+        {
+          error:
+            result.error ||
+            "Failed to create a live Zoom meeting link",
+        },
+        { status: 500 }
+      );
+    }
+    if (!result.join_url) {
+      return NextResponse.json(
+        { error: "Video meeting link was not returned by provider" },
         { status: 500 }
       );
     }
 
-    // Store the link in the database
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = {
-      video_link: result.join_url,
-      video_password: result.password || null,
-      video_link_is_fallback: result.is_fallback || false,
-    };
+    let persistedMeetingLink;
+    try {
+      persistedMeetingLink = await persistConfirmedMeetingVideoLinkIfMissing({
+        supabase,
+        meetingId,
+        zoomResult: result,
+      });
+    } catch (persistError) {
+      if (result.meeting_id) {
+        await deleteZoomMeeting(String(result.meeting_id)).catch((error) => {
+          console.error(
+            "[meetings/video-link][GET] failed to delete Zoom meeting after persist error:",
+            error
+          );
+        });
+      }
 
-    if (result.meeting_id) {
-      updateData.zoom_meeting_id = String(result.meeting_id);
+      console.error(
+        "[meetings/video-link][GET] failed to persist generated meeting link:",
+        persistError
+      );
+      return NextResponse.json(
+        { error: "Failed to save the generated video meeting link" },
+        { status: 500 }
+      );
     }
-
-    await supabase
-      .from("meetings")
-      .update(updateData)
-      .eq("id", meetingId);
 
     return NextResponse.json({
       meeting_id: meetingId,
-      video_link: result.join_url,
-      video_password: result.password || null,
-      zoom_meeting_id: result.meeting_id || null,
-      scheduled_at: meeting.scheduled_at,
-      is_fallback: result.is_fallback || false,
+      video_link: persistedMeetingLink.video_link,
+      video_password: persistedMeetingLink.video_password,
+      zoom_meeting_id: persistedMeetingLink.zoom_meeting_id,
+      scheduled_at: persistedMeetingLink.scheduled_at || meeting.scheduled_at,
+      is_fallback: persistedMeetingLink.is_fallback,
     });
   } catch (error) {
     console.error("Error in GET /api/meetings/video-link:", error);
@@ -203,6 +339,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const isAdmin = await isAdminUser(user.id);
+    if (!isAdmin) {
+      const accessValidation = await validateMeetingsAccess(user.id);
+      if (!accessValidation.allowed) {
+        const starterTrialState = await getStarterTrialState(supabase, user.id, {
+          verifyActiveSlot: true,
+        });
+
+        if (!canAccessStarterTrialMeeting(starterTrialState, meeting_id)) {
+          return NextResponse.json(
+            { error: "access_denied", message: accessValidation.message },
+            { status: 403 }
+          );
+        }
+      }
+    }
+
     // Get the meeting
     const { data: meeting } = await supabase
       .from("meetings")
@@ -217,6 +370,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (meeting.status !== "confirmed" && meeting.status !== "completed") {
+      return NextResponse.json(
+        {
+          error: "Meeting must be confirmed before generating a video link",
+          status: meeting.status,
+        },
+        { status: 400 }
+      );
+    }
+
     // Only host or admin can regenerate
     const { data: participant } = await supabase
       .from("meeting_participants")
@@ -224,16 +387,6 @@ export async function POST(request: NextRequest) {
       .eq("meeting_id", meeting_id)
       .eq("user_id", user.id)
       .single();
-
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    const isAdmin =
-      account?.role &&
-      ["admin", "superadmin", "moderator"].includes(account.role);
 
     if (!isAdmin && participant?.role !== "host") {
       return NextResponse.json(
@@ -277,16 +430,29 @@ export async function POST(request: NextRequest) {
       guestName: guestProfile?.first_name,
     });
 
-    if (!result.success) {
+    if (!result.success || result.is_fallback) {
       return NextResponse.json(
-        { error: result.error || "Failed to create video meeting" },
+        {
+          error:
+            result.error || "Failed to create a live Zoom meeting",
+        },
+        { status: 500 }
+      );
+    }
+    if (!result.join_url) {
+      return NextResponse.json(
+        { error: "Video meeting link was not returned by provider" },
         { status: 500 }
       );
     }
 
     // Update database
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = {
+    const updateData: {
+      video_link: string;
+      video_password: string | null;
+      video_link_is_fallback: boolean;
+      zoom_meeting_id?: string;
+    } = {
       video_link: result.join_url,
       video_password: result.password || null,
       video_link_is_fallback: result.is_fallback || false,
@@ -296,10 +462,27 @@ export async function POST(request: NextRequest) {
       updateData.zoom_meeting_id = String(result.meeting_id);
     }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from("meetings")
       .update(updateData)
       .eq("id", meeting_id);
+
+    if (updateError) {
+      if (result.meeting_id) {
+        await deleteZoomMeeting(String(result.meeting_id)).catch((error) => {
+          console.error(
+            "[meetings/video-link][POST] failed to delete Zoom meeting after update error:",
+            error
+          );
+        });
+      }
+
+      console.error("[meetings/video-link][POST] update error:", updateError);
+      return NextResponse.json(
+        { error: "Failed to save the generated video meeting link" },
+        { status: 500 }
+      );
+    }
 
     // Notify participants about the new meeting link
     for (const p of participants || []) {

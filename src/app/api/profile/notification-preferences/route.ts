@@ -33,16 +33,88 @@ const DEFAULTS = {
   meetings_email: true,
   meetings_push: true,
   views_inapp: true,
-  views_email: false,
-  views_push: false,
+  views_email: true,
+  views_push: true,
   system_inapp: true,
   system_email: true,
   system_push: true,
-  marketing_email: false,
+  marketing_email: true,
 };
 
 /** Allowed preference field names (for validation) */
 const ALLOWED_FIELDS = new Set(Object.keys(DEFAULTS));
+
+type PreferenceMap = Record<string, boolean>;
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function toPreferences(source: unknown): PreferenceMap {
+  const preferences: PreferenceMap = { ...DEFAULTS };
+  if (!isObject(source)) return preferences;
+
+  for (const [key, defaultValue] of Object.entries(DEFAULTS)) {
+    const value = source[key];
+    preferences[key] = typeof value === "boolean" ? value : defaultValue;
+  }
+
+  return preferences;
+}
+
+function isMissingModernTableError(error: unknown): boolean {
+  if (!isObject(error)) return false;
+  const code = String(error.code ?? "");
+  const message = String(error.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code.startsWith("PGRST20") ||
+    message.includes("notification_preferences")
+  );
+}
+
+async function readLegacyPreferences(userId: string): Promise<PreferenceMap> {
+  const { data, error } = await supabaseAdmin
+    .from("notification_prefs")
+    .select("prefs")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error fetching legacy notification preferences:", error);
+    return { ...DEFAULTS };
+  }
+
+  return toPreferences(data?.prefs);
+}
+
+async function writeLegacyPreferences(
+  userId: string,
+  updates: PreferenceMap
+): Promise<{ preferences: PreferenceMap; error: unknown }> {
+  const existing = await readLegacyPreferences(userId);
+  const nextPrefs = toPreferences({ ...existing, ...updates });
+
+  const { data, error } = await supabaseAdmin
+    .from("notification_prefs")
+    .upsert(
+      {
+        user_id: userId,
+        prefs: nextPrefs,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    )
+    .select("prefs")
+    .single();
+
+  if (error) {
+    return { preferences: nextPrefs, error };
+  }
+
+  return { preferences: toPreferences(data?.prefs), error: null };
+}
 
 // ---------------------------------------------------------------
 // Auth helper
@@ -77,31 +149,16 @@ export async function GET(req: NextRequest) {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    // If table doesn't exist yet (migration not run), return defaults
-    if (error && (error.code === "42P01" || error.code === "42703")) {
-      return NextResponse.json({ preferences: DEFAULTS });
+    if (!error && data) {
+      return NextResponse.json({ preferences: toPreferences(data) });
     }
 
-    if (error) {
+    if (error && !isMissingModernTableError(error)) {
       console.error("Error fetching notification preferences:", error);
-      return NextResponse.json({ preferences: DEFAULTS });
     }
 
-    // If no row exists, return defaults
-    if (!data) {
-      return NextResponse.json({ preferences: DEFAULTS });
-    }
-
-    // Build response from row data, filling in defaults for any missing fields
-    const preferences: Record<string, boolean> = {};
-    for (const [key, defaultValue] of Object.entries(DEFAULTS)) {
-      preferences[key] =
-        data[key] !== undefined && data[key] !== null
-          ? data[key]
-          : defaultValue;
-    }
-
-    return NextResponse.json({ preferences });
+    const legacyPreferences = await readLegacyPreferences(user.id);
+    return NextResponse.json({ preferences: legacyPreferences });
   } catch {
     return NextResponse.json({ preferences: DEFAULTS });
   }
@@ -149,33 +206,38 @@ export async function PATCH(req: NextRequest) {
       .select()
       .single();
 
-    // If table doesn't exist yet, return success silently
-    if (error && (error.code === "42P01" || error.code === "42703")) {
+    if (!error) {
       return NextResponse.json({
         success: true,
-        preferences: { ...DEFAULTS, ...updates },
-        note: "Migration not yet applied — preferences saved in memory only",
+        preferences: toPreferences(data),
       });
     }
 
-    if (error) {
-      console.error("Error updating notification preferences:", error);
-      return NextResponse.json(
-        { error: "Failed to update preferences" },
-        { status: 500 }
-      );
+    // Legacy fallback: environments that still use notification_prefs JSONB
+    if (isMissingModernTableError(error)) {
+      const legacyWrite = await writeLegacyPreferences(user.id, updates);
+      if (legacyWrite.error) {
+        console.error(
+          "Error updating notification preferences (legacy):",
+          legacyWrite.error
+        );
+        return NextResponse.json(
+          { error: "Failed to update preferences" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        preferences: legacyWrite.preferences,
+      });
     }
 
-    // Build response
-    const preferences: Record<string, boolean> = {};
-    for (const [key, defaultValue] of Object.entries(DEFAULTS)) {
-      preferences[key] =
-        data[key] !== undefined && data[key] !== null
-          ? data[key]
-          : defaultValue;
-    }
-
-    return NextResponse.json({ success: true, preferences });
+    console.error("Error updating notification preferences:", error);
+    return NextResponse.json(
+      { error: "Failed to update preferences" },
+      { status: 500 }
+    );
   } catch {
     return NextResponse.json(
       { error: "Failed to update preferences" },

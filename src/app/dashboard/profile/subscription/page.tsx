@@ -13,19 +13,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Check,
   Crown,
   Star,
   Zap,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  X,
   Loader2,
   Wallet,
   ArrowRight,
-  ExternalLink,
   Sparkles,
 } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
@@ -33,6 +30,20 @@ import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserSafe } from "@/lib/auth-helpers";
+import {
+  resolveSubscriptionActivationResult,
+  type SubscriptionActivationSnapshot,
+} from "@/lib/subscription/checkout-verification";
+
+function shouldCenterCheckoutError(message: string): boolean {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("too low to process") ||
+    normalized.includes("minimum amount") ||
+    normalized.includes("minimum top-up amount")
+  );
+}
 
 // ---------------------------------------------------------------
 // Types
@@ -53,8 +64,15 @@ type SubscriptionTier = {
   icon: React.ReactNode;
   gradient: string;
   iconBg: string;
-  vipExtraCredits?: number;
-  vipExtraChargePerCredit?: Pricing;
+};
+
+type VerifySubscriptionResult = {
+  success: boolean;
+  alreadyProcessed?: boolean;
+  retryable?: boolean;
+  message?: string;
+  error?: string;
+  tier?: string;
 };
 
 // ---------------------------------------------------------------
@@ -64,7 +82,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
   {
     id: "basic",
     name: "Basic",
-    pricing: { ngn: 10000, usd: 7, gbp: 5.5 },
+    pricing: { ngn: 7500, usd: 9.99, gbp: 7.99 },
     priceId: "",
     credits: 5,
     calendarDays: 5,
@@ -73,20 +91,19 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
     gradient: "from-blue-500 to-blue-600",
     iconBg: "bg-blue-100 text-blue-600",
     features: [
-      "5 day calendar slot for outgoing meetings",
-      "Free incoming requests from Standard, Premium & VIP",
-      "No preferred location setting",
-      "Group meeting time set by MatchIndeed",
-      "No credit roll over",
-      "Buy extra credits anytime",
+      "5 credits per month (Group only)",
+      "Send requests to Basic users only",
+      "Receive requests from all tiers",
+      "One-on-one meetings not included",
+      "Extra group meetings via paid add-on",
     ],
   },
   {
     id: "standard",
     name: "Standard",
-    pricing: { ngn: 31500, usd: 20, gbp: 16 },
+    pricing: { ngn: 15000, usd: 19.99, gbp: 16.99 },
     priceId: process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID || "",
-    credits: 15,
+    credits: 10,
     calendarDays: 15,
     customDates: 5,
     icon: <Star className="h-5 w-5" />,
@@ -94,19 +111,18 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
     iconBg: "bg-purple-100 text-purple-600",
     popular: true,
     features: [
-      "15 day calendar slots",
-      "Unlimited incoming requests",
-      "5 private custom slots",
-      "Preferred location setting",
-      "Invite to private & group meetings",
-      "No credit roll over",
-      "Buy extra credits anytime",
+      "10 credits per month",
+      "Send requests to Basic & Standard",
+      "Receive requests from all tiers",
+      "One-on-one meetings via paid add-on",
+      "3 group credits included monthly",
+      "Extra group meetings via paid add-on",
     ],
   },
   {
     id: "premium",
     name: "Premium",
-    pricing: { ngn: 63000, usd: 43, gbp: 34 },
+    pricing: { ngn: 27000, usd: 34.99, gbp: 29.99 },
     priceId: process.env.NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID || "",
     credits: 30,
     calendarDays: 30,
@@ -115,23 +131,19 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
     gradient: "from-amber-500 to-orange-500",
     iconBg: "bg-amber-100 text-amber-600",
     features: [
-      "30 day calendar slots",
-      "Unlimited incoming requests",
-      "30 custom date slots",
-      "+10 VIP contact credits/month",
-      "Private 1-on-1 meetings",
-      "Control group & private settings",
-      "Preferred location setting",
-      "Buy extra credits anytime",
+      "30 credits per month",
+      "Send requests to Basic, Standard & Premium",
+      "Receive requests from all tiers",
+      "One-on-one meetings via paid add-on",
+      "Multi-booking: 3x/month (free)",
+      "Anonymous mode + Hide location",
     ],
-    vipExtraCredits: 10,
-    vipExtraChargePerCredit: { ngn: 5000, usd: 3.45, gbp: 2.75 },
   },
   {
     id: "vip",
     name: "VIP",
     pricing: { ngn: 1500000, usd: 1000, gbp: 800 },
-    priceId: "",
+    priceId: process.env.NEXT_PUBLIC_STRIPE_VIP_PRICE_ID || "",
     credits: 0,
     calendarDays: 0,
     customDates: 0,
@@ -139,12 +151,13 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
     gradient: "from-pink-500 to-rose-600",
     iconBg: "bg-pink-100 text-pink-600",
     features: [
-      "Unlimited everything",
-      "Full control over scheduling",
-      "Custom meeting conditions",
-      "Video recording & saved access",
+      "Unlimited credits",
+      "Send requests to all tiers (including VIP)",
+      "Receive requests from all tiers",
+      "Top match queue + Visibility boost (free)",
+      "Faster scheduling (free)",
+      "Match retry: 3x/month (free)",
       "Priority support",
-      "Dedicated account manager",
     ],
   },
 ];
@@ -193,12 +206,47 @@ function getPrice(tier: SubscriptionTier, currency: Currency): number {
   return tier.pricing.usd;
 }
 
+async function redirectToStripeCheckout(
+  url: string | null | undefined
+) {
+  if (!url) {
+    throw new Error("Unable to start payment checkout right now. Please try again.");
+  }
+
+  const isFramed = (() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
+    }
+  })();
+
+  if (isFramed) {
+    // Stripe Checkout must be opened as a top-level page, not inside an iframe.
+    try {
+      if (window.top) {
+        window.top.location.href = url;
+        return;
+      }
+    } catch {
+      // Ignore and fallback below.
+    }
+
+    const popup = window.open(url, "_blank", "noopener,noreferrer");
+    if (popup) return;
+  }
+
+  window.location.assign(url);
+}
+
 // ---------------------------------------------------------------
 // Inner component (uses useSearchParams)
 // ---------------------------------------------------------------
 function SubscriptionContent() {
-  const { toast } = useToast();
+  const { toast, dismissAll } = useToast();
   const searchParams = useSearchParams();
+  const processedSubscriptionSessionsRef = useRef<Set<string>>(new Set());
+  const handledCancelRef = useRef(false);
 
   const [currentTier, setCurrentTier] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -206,6 +254,11 @@ function SubscriptionContent() {
   const [currency, setCurrency] = useState<Currency>("USD");
   const [subscriptionTiers, setSubscriptionTiers] = useState(baseSubscriptionTiers);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [walletAccessEnabled, setWalletAccessEnabled] = useState(false);
+  const [subscriptionActivationState, setSubscriptionActivationState] = useState<
+    "idle" | "processing" | "success" | "error"
+  >("idle");
+  const [subscriptionActivationMessage, setSubscriptionActivationMessage] = useState("");
 
   // Wallet-pay confirmation modal
   const [walletPayModal, setWalletPayModal] = useState<{
@@ -236,92 +289,243 @@ function SubscriptionContent() {
       .catch(() => {});
   }, []);
 
-  const fetchCurrentTier = async () => {
+  const fetchSubscriptionState = useCallback(async (): Promise<SubscriptionActivationSnapshot> => {
     try {
       const user = await getCurrentUserSafe();
       if (!user) {
+        setCurrentTier(null);
+        setWalletBalance(0);
+        setWalletAccessEnabled(false);
         setLoading(false);
-        return;
+        return {
+          activeTier: null,
+          hasActiveMembership: false,
+        };
       }
-      const { data: account } = await supabase
-        .from("accounts")
-        .select("tier")
-        .eq("id", user.id)
-        .single();
-      if (account) setCurrentTier(account.tier || "basic");
+
+      const { data: membership } = await supabase
+        .from("memberships")
+        .select("tier, status, expires_at, price_cents")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const hasPaidMembership =
+        Boolean(membership) && Number(membership?.price_cents || 0) > 0;
+      const hasActiveMembership =
+        Boolean(membership) &&
+        membership?.status === "active" &&
+        (!membership?.expires_at || new Date(membership.expires_at) > new Date());
+
+      setWalletAccessEnabled(hasPaidMembership);
+      setCurrentTier(hasActiveMembership && membership?.tier ? membership.tier : null);
+
+      if (hasPaidMembership) {
+        const { data: wallet } = await supabase
+          .from("wallets")
+          .select("balance_cents")
+          .eq("user_id", user.id)
+          .single();
+        setWalletBalance(wallet?.balance_cents || 0);
+      } else {
+        setWalletBalance(0);
+      }
+
+      return {
+        activeTier: hasActiveMembership && membership?.tier ? membership.tier : null,
+        hasActiveMembership,
+      };
     } catch {
       // Not logged in — fine
+      return {
+        activeTier: null,
+        hasActiveMembership: false,
+      };
     } finally {
       setLoading(false);
     }
-  };
-
-  const fetchWalletBalance = async () => {
-    try {
-      const user = await getCurrentUserSafe();
-      if (!user) return;
-      const { data } = await supabase
-        .from("wallets")
-        .select("balance_cents")
-        .eq("user_id", user.id)
-        .single();
-      setWalletBalance(data?.balance_cents || 0);
-    } catch {
-      // Non-critical
-    }
-  };
-
-  useEffect(() => {
-    fetchCurrentTier();
-    fetchWalletBalance();
   }, []);
 
-  // Stripe redirect handling
   useEffect(() => {
-    const sessionId = searchParams.get("session_id");
-    if (searchParams.get("success") === "true" && sessionId) {
-      toast.success("Payment successful! Activating your subscription...");
-      verifyAndProcessSubscription(sessionId);
-      fetchCurrentTier();
-      const t = setTimeout(() => {
-        window.location.href = "/dashboard/profile/my-account";
-      }, 3000);
-      return () => clearTimeout(t);
-    }
-    if (searchParams.get("canceled") === "true") {
-      toast.warning("Payment was canceled. You can try again anytime.");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+    fetchSubscriptionState();
+  }, [fetchSubscriptionState]);
 
-  const verifyAndProcessSubscription = async (sessionId: string) => {
+  const verifyAndProcessSubscription = useCallback(async (
+    sessionId: string
+  ): Promise<VerifySubscriptionResult> => {
     try {
-      await new Promise((r) => setTimeout(r, 2000));
       const res = await fetch("/api/verify-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && !data.alreadyProcessed) {
-          await fetchCurrentTier();
-        }
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        return {
+          success: false,
+          message:
+            data.error ||
+            data.message ||
+            "We couldn't verify your subscription right now.",
+        };
       }
+
+      const activationSnapshot = await fetchSubscriptionState();
+      const resolvedResult = resolveSubscriptionActivationResult(
+        {
+          success: Boolean(data.success),
+          retryable: Boolean(data.retryable),
+          message:
+            data.message ||
+            (data.success
+              ? "Subscription activated successfully."
+              : "Subscription verification is still processing."),
+          tier: typeof data.tier === "string" ? data.tier : undefined,
+        },
+        activationSnapshot
+      );
+
+      return {
+        success: resolvedResult.success,
+        alreadyProcessed: Boolean(data.alreadyProcessed),
+        retryable: resolvedResult.retryable,
+        message: resolvedResult.message,
+        tier: typeof data.tier === "string" ? data.tier : undefined,
+      };
     } catch {
-      // Webhook will eventually handle it
+      return {
+        success: false,
+        retryable: true,
+        message:
+          "We're still waiting for Stripe to confirm your subscription. Please hold on for a moment.",
+      };
     }
-  };
+  }, [fetchSubscriptionState]);
+
+  // Stripe redirect handling
+  const successParam = searchParams.get("success");
+  const canceledParam = searchParams.get("canceled");
+  const sessionIdParam = searchParams.get("session_id");
+
+  useEffect(() => {
+    const clearCheckoutParams = () => {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      url.searchParams.delete("success");
+      url.searchParams.delete("session_id");
+      url.searchParams.delete("canceled");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+    };
+
+    if (successParam === "true" && sessionIdParam) {
+      if (processedSubscriptionSessionsRef.current.has(sessionIdParam)) {
+        return;
+      }
+      processedSubscriptionSessionsRef.current.add(sessionIdParam);
+      let cancelled = false;
+      let redirectTimer: ReturnType<typeof setTimeout> | null = null;
+
+      setSubscriptionActivationState("processing");
+      setSubscriptionActivationMessage(
+        "We received your payment and are activating your subscription now."
+      );
+      dismissAll();
+      toast.info("Payment received. We're activating your subscription now.");
+
+      const runVerification = async () => {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const result = await verifyAndProcessSubscription(sessionIdParam);
+
+          if (cancelled) return;
+
+          if (result.success) {
+            await fetchSubscriptionState();
+            setSubscriptionActivationState("success");
+            setSubscriptionActivationMessage(
+              "Your subscription is active. Redirecting to your account..."
+            );
+            clearCheckoutParams();
+            dismissAll();
+            toast.success("Subscription activated successfully.");
+            redirectTimer = setTimeout(() => {
+              window.location.href = "/dashboard/profile/my-account";
+            }, 1800);
+            return;
+          }
+
+          if (!result.retryable) {
+            setSubscriptionActivationState("error");
+            setSubscriptionActivationMessage(
+              result.message ||
+                "We couldn't confirm your subscription yet. Please try again or contact support."
+            );
+            clearCheckoutParams();
+            dismissAll();
+            toast.centerError(
+              result.message ||
+                "We couldn't confirm your subscription yet. Please refresh this page or contact support.",
+              undefined,
+              "Subscription Pending"
+            );
+            return;
+          }
+
+          setSubscriptionActivationMessage(
+            result.message || "Still waiting for payment confirmation..."
+          );
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+
+        if (cancelled) return;
+
+        await fetchSubscriptionState();
+        setSubscriptionActivationState("error");
+        setSubscriptionActivationMessage(
+          "Your payment is still processing. Please refresh this page in a few moments."
+        );
+        clearCheckoutParams();
+        dismissAll();
+        toast.centerError(
+          "Your payment is still processing. If the subscription does not appear shortly, please refresh this page or contact support.",
+          undefined,
+          "Subscription Pending"
+        );
+      };
+
+      runVerification();
+
+      return () => {
+        cancelled = true;
+        if (redirectTimer) {
+          clearTimeout(redirectTimer);
+        }
+      };
+    }
+    if (canceledParam === "true" && !handledCancelRef.current) {
+      handledCancelRef.current = true;
+      setSubscriptionActivationState("idle");
+      setSubscriptionActivationMessage("");
+      dismissAll();
+      toast.warning("Payment was canceled. You can try again anytime.");
+      clearCheckoutParams();
+    }
+  }, [
+    successParam,
+    canceledParam,
+    sessionIdParam,
+    toast,
+    dismissAll,
+    verifyAndProcessSubscription,
+    fetchSubscriptionState,
+  ]);
 
   // ---------------------------------------------------------------
   // Subscribe
   // ---------------------------------------------------------------
   const handleSubscribe = async (tier: SubscriptionTier, useWallet = false) => {
-    if (tier.id === "vip") {
-      window.location.href = "mailto:support@matchindeed.com?subject=VIP Subscription Inquiry";
-      return;
-    }
-
     try {
       setProcessing(tier.id);
       const user = await getCurrentUserSafe();
@@ -336,6 +540,13 @@ function SubscriptionContent() {
 
       // If user chose wallet pay
       if (useWallet) {
+        if (!walletAccessEnabled) {
+          toast.error(
+            "Wallet access unlocks after your first successful paid subscription. New signups can still use one free starter slot."
+          );
+          return;
+        }
+
         const res = await fetch("/api/use-wallet-balance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -343,7 +554,7 @@ function SubscriptionContent() {
         });
         if (res.ok) {
           toast.success(`Subscribed to ${tier.name} plan from wallet!`);
-          fetchCurrentTier();
+          fetchSubscriptionState();
           setTimeout(() => {
             window.location.href = "/dashboard/profile/my-account";
           }, 2000);
@@ -358,7 +569,7 @@ function SubscriptionContent() {
       }
 
       // Check if wallet can cover it (show modal instead of confirm())
-      if (!useWallet) {
+      if (!useWallet && walletAccessEnabled) {
         const { data: wallet } = await supabase
           .from("wallets")
           .select("balance_cents")
@@ -388,13 +599,15 @@ function SubscriptionContent() {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(err.error || "Checkout failed");
       }
-      const { url, sessionId } = await res.json();
-      if (url) window.location.href = url;
-      else if (sessionId) window.location.href = `https://checkout.stripe.com/c/pay/${sessionId}`;
-      else throw new Error("No checkout URL");
+      const { url } = await res.json();
+      await redirectToStripeCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
-      toast.error(msg);
+      if (shouldCenterCheckoutError(msg)) {
+        toast.centerError(msg, undefined, "Unable to Continue");
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setProcessing(null);
     }
@@ -423,7 +636,7 @@ function SubscriptionContent() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/dashboard">
-            <Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>
@@ -449,10 +662,14 @@ function SubscriptionContent() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              {currentTier && (
+              {currentTier ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-[#eef2ff] px-3 py-1 text-xs font-semibold text-[#1f419a]">
                   <Check className="h-3 w-3" />
                   Current: {currentTier.charAt(0).toUpperCase() + currentTier.slice(1)}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                  No Active Paid Plan
                 </span>
               )}
               <span className="rounded-full bg-gray-100 px-3 py-1 text-[10px] font-medium text-gray-500">
@@ -461,6 +678,12 @@ function SubscriptionContent() {
             </div>
           </div>
 
+          {!walletAccessEnabled && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              No paid plan is active yet. New signups can still host one free starter slot, and wallet access unlocks after your first successful subscription payment.
+            </div>
+          )}
+
           {/* ---- Plan cards ---- */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {subscriptionTiers.map((tier) => {
@@ -468,7 +691,10 @@ function SubscriptionContent() {
               const isProc = processing === tier.id;
               const price = getPrice(tier, currency);
               const priceCents = Math.round(price * 100);
-              const canWallet = walletBalance !== null && walletBalance >= priceCents;
+              const canWallet =
+                walletAccessEnabled &&
+                walletBalance !== null &&
+                walletBalance >= priceCents;
 
               return (
                 <div
@@ -508,16 +734,10 @@ function SubscriptionContent() {
 
                     {/* Price */}
                     <div className="mt-4">
-                      {tier.id === "vip" ? (
-                        <p className="text-2xl font-bold text-gray-900">Custom</p>
-                      ) : (
-                        <>
-                          <p className="text-2xl font-bold text-gray-900">
-                            {formatPrice(price, currency)}
-                          </p>
-                          <p className="text-xs text-gray-400">per month</p>
-                        </>
-                      )}
+                      <p className="text-2xl font-bold text-gray-900">
+                        {formatPrice(price, currency)}
+                      </p>
+                      <p className="text-xs text-gray-400">per month</p>
                     </div>
 
                     {/* Key stats */}
@@ -558,26 +778,8 @@ function SubscriptionContent() {
                       ))}
                     </ul>
 
-                    {/* VIP extra */}
-                    {tier.vipExtraCredits && tier.vipExtraChargePerCredit && (
-                      <div className="mt-3 rounded-lg bg-amber-50 p-2">
-                        <p className="text-[10px] font-semibold text-amber-700">
-                          +{tier.vipExtraCredits} VIP contact credits @{" "}
-                          {formatPrice(
-                            currency === "NGN"
-                              ? tier.vipExtraChargePerCredit.ngn
-                              : currency === "GBP"
-                                ? tier.vipExtraChargePerCredit.gbp
-                                : tier.vipExtraChargePerCredit.usd,
-                            currency
-                          )}
-                          /credit
-                        </p>
-                      </div>
-                    )}
-
                     {/* Wallet hint */}
-                    {canWallet && !isCurrent && tier.id !== "vip" && (
+                    {canWallet && !isCurrent && (
                       <div className="mt-2 rounded-lg bg-green-50 p-1.5 text-center">
                         <p className="text-[10px] text-green-700">
                           Wallet balance covers this plan
@@ -604,10 +806,6 @@ function SubscriptionContent() {
                         </>
                       ) : isCurrent ? (
                         "Current Plan"
-                      ) : tier.id === "vip" ? (
-                        <>
-                          Contact Us <ExternalLink className="h-3.5 w-3.5" />
-                        </>
                       ) : (
                         <>
                           Subscribe <ArrowRight className="h-3.5 w-3.5" />
@@ -629,12 +827,12 @@ function SubscriptionContent() {
                   Our team can help you find the perfect plan.
                 </p>
               </div>
-              <a
-                href="mailto:support@matchindeed.com"
+              <Link
+                href="/contact-us"
                 className="inline-flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-[#1f419a] transition-colors hover:bg-gray-50"
               >
                 Contact Support
-              </a>
+              </Link>
             </div>
           </div>
         </main>
@@ -653,9 +851,30 @@ function SubscriptionContent() {
                   <h3 className="font-bold text-gray-900">Pay from Wallet?</h3>
                   <p className="text-xs text-gray-500">
                     You have sufficient wallet balance.
-                  </p>
-                </div>
-              </div>
+              </p>
+            </div>
+          </div>
+
+          {subscriptionActivationState !== "idle" && (
+            <div
+              className={`rounded-2xl border px-4 py-3 shadow-sm ${
+                subscriptionActivationState === "processing"
+                  ? "border-blue-200 bg-blue-50 text-blue-900"
+                  : subscriptionActivationState === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border-amber-200 bg-amber-50 text-amber-900"
+              }`}
+            >
+              <p className="text-sm font-semibold">
+                {subscriptionActivationState === "processing"
+                  ? "Activating Subscription"
+                  : subscriptionActivationState === "success"
+                    ? "Subscription Active"
+                    : "Subscription Pending"}
+              </p>
+              <p className="mt-1 text-sm">{subscriptionActivationMessage}</p>
+            </div>
+          )}
             </div>
 
             <div className="space-y-3 p-4">

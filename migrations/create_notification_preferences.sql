@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
 
   -- ---- Profile view notifications ----
   views_inapp       BOOLEAN DEFAULT TRUE,   -- Profile views
-  views_email       BOOLEAN DEFAULT FALSE,  -- Off by default (can be noisy)
-  views_push        BOOLEAN DEFAULT FALSE,
+  views_email       BOOLEAN DEFAULT TRUE,
+  views_push        BOOLEAN DEFAULT TRUE,
 
   -- ---- System / Account notifications ----
   system_inapp      BOOLEAN DEFAULT TRUE,   -- Account warnings, investigations, refunds
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
   system_push       BOOLEAN DEFAULT TRUE,
 
   -- ---- Marketing / Promotional ----
-  marketing_email   BOOLEAN DEFAULT FALSE,  -- Off by default (opt-in)
+  marketing_email   BOOLEAN DEFAULT TRUE,
 
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW(),

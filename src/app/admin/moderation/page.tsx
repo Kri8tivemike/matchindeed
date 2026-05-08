@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
 import Image from "next/image";
@@ -33,6 +33,25 @@ type PhotoModerationItem = {
   } | null;
 };
 
+type PhotoModerationQueryRow = {
+  id: string;
+  user_id: string;
+  photo_url: string;
+  status: "pending" | "approved" | "rejected";
+  review_reason: string | null;
+  created_at: string;
+  accounts:
+    | {
+        email: string;
+        display_name: string | null;
+      }
+    | {
+        email: string;
+        display_name: string | null;
+      }[]
+    | null;
+};
+
 /**
  * AdminModerationPage - Photo moderation queue
  * 
@@ -46,19 +65,74 @@ export default function AdminModerationPage() {
   const [photos, setPhotos] = useState<PhotoModerationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
+  const [statusFilter, setStatusFilter] = useState<"approved" | "rejected" | "all">("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoModerationItem | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [brokenPhotoIds, setBrokenPhotoIds] = useState<string[]>([]);
 
   const pageSize = 12;
   const totalPages = Math.ceil(totalItems / pageSize);
+  const queueDescriptions: Record<
+    "approved" | "rejected" | "all",
+    string
+  > = {
+    approved: "Approved photos stay here as moderation history.",
+    rejected:
+      "Rejected photos stay here as moderation history and are not visible on user profiles.",
+    all: "This view combines pending, approved, and rejected moderation history.",
+  };
+
+  const applyModerationResult = useCallback(
+    (
+      photoId: string,
+      nextStatus: "approved" | "rejected",
+      nextReason?: string | null
+    ) => {
+      setPhotos((prev) => {
+        const nextItems = prev
+          .map((item) =>
+            item.id === photoId
+              ? {
+                  ...item,
+                  status: nextStatus,
+                  review_reason:
+                    nextStatus === "rejected"
+                      ? nextReason || item.review_reason
+                      : item.review_reason,
+                }
+              : item
+          )
+          .filter((item) => statusFilter === "all" || item.status === statusFilter);
+
+        return nextItems;
+      });
+
+      if (statusFilter !== "all" && statusFilter !== nextStatus) {
+        setTotalItems((prev) => Math.max(0, prev - 1));
+      }
+
+      setSelectedPhoto((prev) =>
+        prev?.id === photoId
+          ? {
+              ...prev,
+              status: nextStatus,
+              review_reason:
+                nextStatus === "rejected"
+                  ? nextReason || prev.review_reason
+                  : prev.review_reason,
+            }
+          : prev
+      );
+    },
+    [statusFilter]
+  );
 
   /**
    * Fetch photos from moderation queue
    */
-  const fetchPhotos = async () => {
+  const fetchPhotos = useCallback(async () => {
     setLoading(true);
     try {
       let query = supabase
@@ -94,30 +168,33 @@ export default function AdminModerationPage() {
         return;
       }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const transformedData: PhotoModerationItem[] = (data || []).map((item: any) => ({
+      const transformedData: PhotoModerationItem[] = ((data as PhotoModerationQueryRow[] | null) || []).map((item) => ({
         id: item.id,
         user_id: item.user_id,
         photo_url: item.photo_url,
         status: item.status,
         review_reason: item.review_reason,
         created_at: item.created_at,
-        user: item.accounts,
+        user: Array.isArray(item.accounts) ? item.accounts[0] || null : item.accounts,
       }));
 
       setPhotos(transformedData);
       setTotalItems(count || 0);
+      setBrokenPhotoIds([]);
     } catch (error) {
       console.error("Error:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, currentPage]);
+
+  const markPhotoBroken = useCallback((photoId: string) => {
+    setBrokenPhotoIds((prev) => (prev.includes(photoId) ? prev : [...prev, photoId]));
+  }, []);
 
   useEffect(() => {
     fetchPhotos();
-// eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, currentPage]);
+  }, [fetchPhotos]);
 
   /**
    * Handle photo approval
@@ -126,6 +203,9 @@ export default function AdminModerationPage() {
     setActionLoading(photoId);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error("Your admin session expired. Please log in again.");
+      }
 
       const { error } = await supabase
         .from("photo_moderation")
@@ -139,18 +219,20 @@ export default function AdminModerationPage() {
       if (error) throw error;
 
       // Log admin action
-      if (user) {
-        await supabase.from("admin_logs").insert({
-          admin_id: user.id,
-          action: "photo_approved",
-          meta: { photo_id: photoId },
-        });
-      }
+      await supabase.from("admin_logs").insert({
+        admin_id: user.id,
+        action: "photo_approved",
+        meta: { photo_id: photoId },
+      });
 
-      fetchPhotos();
+      applyModerationResult(photoId, "approved");
+      toast.success("Photo approved successfully.");
       setSelectedPhoto(null);
     } catch (error) {
       console.error("Error approving photo:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to approve photo."
+      );
     } finally {
       setActionLoading(null);
     }
@@ -168,6 +250,9 @@ export default function AdminModerationPage() {
     setActionLoading(photoId);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error("Your admin session expired. Please log in again.");
+      }
 
       const { error } = await supabase
         .from("photo_moderation")
@@ -182,19 +267,21 @@ export default function AdminModerationPage() {
       if (error) throw error;
 
       // Log admin action
-      if (user) {
-        await supabase.from("admin_logs").insert({
-          admin_id: user.id,
-          action: "photo_rejected",
-          meta: { photo_id: photoId, reason: rejectReason },
-        });
-      }
+      await supabase.from("admin_logs").insert({
+        admin_id: user.id,
+        action: "photo_rejected",
+        meta: { photo_id: photoId, reason: rejectReason },
+      });
 
-      fetchPhotos();
+      applyModerationResult(photoId, "rejected", rejectReason);
+      toast.success("Photo rejected successfully.");
       setSelectedPhoto(null);
       setRejectReason("");
     } catch (error) {
       console.error("Error rejecting photo:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to reject photo."
+      );
     } finally {
       setActionLoading(null);
     }
@@ -236,7 +323,7 @@ export default function AdminModerationPage() {
       {/* Status Filter */}
       <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mb-6">
         <div className="flex flex-wrap gap-2">
-          {(["pending", "approved", "rejected", "all"] as const).map((status) => (
+          {(["approved", "rejected", "all"] as const).map((status) => (
             <button
               key={status}
               onClick={() => {
@@ -253,6 +340,9 @@ export default function AdminModerationPage() {
             </button>
           ))}
         </div>
+        <p className="mt-3 text-sm text-gray-500">
+          {queueDescriptions[statusFilter]}
+        </p>
       </div>
 
       {/* Photo Grid */}
@@ -267,28 +357,42 @@ export default function AdminModerationPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="max-h-[68vh] overflow-auto pr-2">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4 md:gap-5">
             {photos.map((photo) => (
               <div
                 key={photo.id}
-                className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 group"
+                className="mx-auto w-full max-w-sm overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm group"
               >
                 {/* Photo */}
-                <div className="relative aspect-square bg-gray-100">
-                  <Image
-                    src={photo.photo_url}
-                    alt="User photo"
-                    fill
-                    className="w-full h-full object-cover"
-                    sizes="(max-width: 1024px) 50vw, 25vw"
-                    unoptimized
-                  />
+                <div className="relative h-56 bg-gray-100 sm:h-64 lg:h-72">
+                  {brokenPhotoIds.includes(photo.id) ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-100 p-4 text-center">
+                      <ImageIcon className="h-8 w-8 text-gray-400" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-700">Image unavailable</p>
+                        <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                          This older moderation record no longer has a retrievable image file.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <Image
+                      src={photo.photo_url}
+                      alt="User photo"
+                      fill
+                      className="w-full h-full object-cover"
+                      sizes="(max-width: 640px) 100vw, (max-width: 1200px) 50vw, 280px"
+                      unoptimized
+                      onError={() => markPhotoBroken(photo.id)}
+                    />
+                  )}
                   
                   {/* Overlay */}
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                  <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/45 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                     <button
                       onClick={() => setSelectedPhoto(photo)}
-                      className="p-2 rounded-full bg-white/90 text-gray-700 hover:bg-white"
+                      className="rounded-full bg-white/90 p-2 text-gray-700 hover:bg-white"
                     >
                       <Eye className="h-5 w-5" />
                     </button>
@@ -297,14 +401,14 @@ export default function AdminModerationPage() {
                         <button
                           onClick={() => handleApprove(photo.id)}
                           disabled={actionLoading === photo.id}
-                          className="p-2 rounded-full bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
+                          className="rounded-full bg-green-500 p-2 text-white hover:bg-green-600 disabled:opacity-50"
                         >
                           <Check className="h-5 w-5" />
                         </button>
                         <button
                           onClick={() => setSelectedPhoto(photo)}
                           disabled={actionLoading === photo.id}
-                          className="p-2 rounded-full bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+                          className="rounded-full bg-red-500 p-2 text-white hover:bg-red-600 disabled:opacity-50"
                         >
                           <X className="h-5 w-5" />
                         </button>
@@ -313,49 +417,74 @@ export default function AdminModerationPage() {
                   </div>
 
                   {/* Status Badge */}
-                  <div className={`absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(photo.status)}`}>
+                  <div className={`absolute right-2 top-2 rounded-full px-2 py-1 text-xs font-medium ${getStatusBadge(photo.status)}`}>
                     {photo.status}
                   </div>
                 </div>
 
                 {/* Info */}
-                <div className="p-3">
+                <div className="p-3 sm:p-4">
                   <p className="text-sm font-medium text-gray-900 truncate">
                     {photo.user?.display_name || photo.user?.email || "Unknown user"}
                   </p>
-                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                  <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
                     <Clock className="h-3 w-3" />
                     {new Date(photo.created_at).toLocaleDateString()}
                   </p>
+                  {photo.review_reason ? (
+                    <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-gray-500">
+                      {photo.review_reason}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
+          </div>
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-6 pt-6 border-t border-gray-100">
+            <div className="mt-6 flex flex-col gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-gray-500">
                 Showing {(currentPage - 1) * pageSize + 1} to{" "}
                 {Math.min(currentPage * pageSize, totalItems)} of {totalItems}
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                   disabled={currentPage === 1}
-                  className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <ChevronLeft className="h-5 w-5" />
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
                 </button>
-                <span className="text-sm text-gray-700">
-                  Page {currentPage} of {totalPages}
-                </span>
+                <label className="sr-only" htmlFor="moderation-page-select">
+                  Select moderation page
+                </label>
+                <select
+                  id="moderation-page-select"
+                  value={currentPage}
+                  onChange={(event) => setCurrentPage(Number(event.target.value))}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20"
+                >
+                  {Array.from({ length: totalPages }, (_, index) => {
+                    const pageNumber = index + 1;
+                    return (
+                      <option key={pageNumber} value={pageNumber}>
+                        Page {pageNumber} of {totalPages}
+                      </option>
+                    );
+                  })}
+                </select>
                 <button
+                  type="button"
                   onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                   disabled={currentPage === totalPages}
-                  className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <ChevronRight className="h-5 w-5" />
+                  Next
+                  <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -369,14 +498,27 @@ export default function AdminModerationPage() {
           <div className="bg-white rounded-2xl max-w-lg w-full overflow-hidden">
             {/* Photo */}
             <div className="relative aspect-square bg-gray-100">
-              <Image
-                src={selectedPhoto.photo_url}
-                alt="User photo"
-                fill
-                className="w-full h-full object-cover"
-                sizes="(max-width: 1024px) 90vw, 600px"
-                unoptimized
-              />
+              {brokenPhotoIds.includes(selectedPhoto.id) ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-100 p-6 text-center">
+                  <ImageIcon className="h-10 w-10 text-gray-400" />
+                  <div>
+                    <p className="text-base font-medium text-gray-700">Image unavailable</p>
+                    <p className="mt-2 text-sm leading-relaxed text-gray-500">
+                      This moderation record exists, but the stored image file is no longer available to preview.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <Image
+                  src={selectedPhoto.photo_url}
+                  alt="User photo"
+                  fill
+                  className="w-full h-full object-cover"
+                  sizes="(max-width: 1024px) 90vw, 600px"
+                  unoptimized
+                  onError={() => markPhotoBroken(selectedPhoto.id)}
+                />
+              )}
             </div>
 
             {/* Info */}

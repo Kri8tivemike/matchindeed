@@ -18,6 +18,10 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+type AdminAccountRow = {
+  id: string;
+};
+
 // Valid report reasons
 const VALID_REASONS = [
   "fake_profile",
@@ -185,8 +189,7 @@ export async function POST(request: NextRequest) {
         .in("role", ["admin", "superadmin"]);
 
       if (admins && admins.length > 0) {
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const adminNotifications = admins.map((admin: any) => ({
+        const adminNotifications = (admins as AdminAccountRow[]).map((admin) => ({
           user_id: admin.id,
           type: "admin_report",
           title: "New User Report",

@@ -142,6 +142,15 @@ export async function createZoomMeeting(options: {
   // FALLBACK: If Zoom is not configured, return a placeholder
   // -------------------------------------------------------
   if (!isZoomConfigured) {
+    if (process.env.NODE_ENV === "production") {
+      console.error("[Zoom] Missing production Zoom configuration.");
+      return {
+        success: false,
+        error: "Zoom is not configured for production.",
+        is_fallback: false,
+      };
+    }
+
     console.log(
       "[Zoom] Not configured — generating fallback meeting link.",
       { topic, startTime }

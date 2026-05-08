@@ -1,7 +1,7 @@
 /**
  * Test Email Endpoint (Development Only)
  *
- * Sends a test email using the Postmark integration to verify
+ * Sends a test email using the Resend integration to verify
  * the connection is working. Disabled in production.
  *
  * GET  /api/test-email              → sends a test "welcome" email to the admin
@@ -40,15 +40,15 @@ export async function GET() {
     to: adminEmail,
     template: "welcome",
     data: { recipientName: "Admin (Test)" },
-    subject: "[TEST] Postmark Integration — Welcome Email",
+    subject: "[TEST] Resend Integration — Welcome Email",
   });
 
   return NextResponse.json({
-    postmarkConfigured: configured,
+    emailConfigured: configured,
     result,
     note: configured
-      ? "Email sent via Postmark — check your inbox and Postmark Activity dashboard."
-      : "POSTMARK_SERVER_TOKEN not set — email was logged to console instead (dev mode).",
+      ? "Email sent via Resend — check your inbox and Resend dashboard."
+      : "RESEND_API_KEY not set — email was logged to console instead (dev mode).",
   });
 }
 
@@ -99,11 +99,11 @@ export async function POST(request: Request) {
         warningMessage: "This is a test warning message",
         timeUntil: "in 30 minutes",
       },
-      subject: `[TEST] Postmark — ${template} template`,
+      subject: `[TEST] Resend — ${template} template`,
     });
 
     return NextResponse.json({
-      postmarkConfigured: configured,
+      emailConfigured: configured,
       template,
       to,
       result,

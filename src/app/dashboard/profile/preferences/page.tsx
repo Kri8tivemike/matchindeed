@@ -7,6 +7,17 @@ import { useToast } from "@/components/ToastProvider";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
 import { supabase } from "@/lib/supabase";
 import { saveFormDraft, loadFormDraft, clearFormDraft, getDraftTimestamp } from "@/lib/form-autosave";
+import {
+  isLikelyGoogleSuggestedLocation,
+  normalizeLocation,
+} from "@/lib/location";
+import {
+  getLookingForFromGenders,
+  getTargetGenderFromLookingFor,
+  LOOKING_FOR_OPTIONS,
+  normalizeLookingForOption,
+  normalizePartnerGenderPreference,
+} from "@/lib/matching/interest-preference";
 
 type PreferenceData = {
   lookingFor: string;
@@ -42,6 +53,9 @@ function PreferencesPageContent() {
   const [initialized, setInitialized] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [wasPreferencesCompleted, setWasPreferencesCompleted] = useState(false);
+  const [partnerLocationPickedFromGoogle, setPartnerLocationPickedFromGoogle] =
+    useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const FORM_DRAFT_KEY = "preferences_edit";
@@ -66,6 +80,20 @@ function PreferencesPageContent() {
           return;
         }
 
+        const { data: progress } = await supabase
+          .from("user_progress")
+          .select("preferences_completed")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (progress?.preferences_completed && !editMode) {
+          setWasPreferencesCompleted(true);
+          clearFormDraft(FORM_DRAFT_KEY);
+          setCurrentStep(16);
+          setInitialized(true);
+          return;
+        }
+
         // Check if draft exists - if it does, skip database load (draft takes precedence)
         const hasDraft = loadFormDraft(FORM_DRAFT_KEY);
         if (hasDraft && !editMode) {
@@ -73,6 +101,25 @@ function PreferencesPageContent() {
           setInitialized(true);
           return;
         }
+
+        const landingLookingFor = (() => {
+          if (typeof window === "undefined") return null;
+          const raw = sessionStorage.getItem("searchPreferences");
+          if (!raw) return null;
+
+          try {
+            const parsed = JSON.parse(raw) as { seeking?: string };
+            return normalizeLookingForOption(parsed?.seeking || "");
+          } catch {
+            return null;
+          }
+        })();
+
+        const { data: profileData } = await supabase
+          .from("user_profiles")
+          .select("gender")
+          .eq("user_id", user.id)
+          .maybeSingle();
 
         // Load existing preferences from user_preferences table
         // Use maybeSingle() to handle case where preferences don't exist yet
@@ -90,7 +137,7 @@ function PreferencesPageContent() {
         if (preferencesData) {
           // Load existing preferences into form data
           const formatHeight = (minCm: number | null, maxCm: number | null) => {
-            if (!minCm || !maxCm) return "Open to any height";
+            if (!minCm || !maxCm) return "";
             const avgCm = Math.round((minCm + maxCm) / 2);
             const inches = Math.round(avgCm / 2.54);
             const feet = Math.floor(inches / 12);
@@ -121,73 +168,105 @@ function PreferencesPageContent() {
           const mapHaveChildren = (value: string | null): string => {
             if (value === "yes") return "Has kids";
             if (value === "no") return "Doesn't have kids";
-            return "No preference";
+            if (value === "doesnt_matter") return "No preference";
+            return "";
           };
 
           const mapWantChildren = (value: string | null): string => {
             if (value === "yes") return "Wants kids";
             if (value === "no") return "Doesn't want kids";
-            return "No preference";
+            if (value === "doesnt_matter") return "No preference";
+            return "";
           };
 
           const mapSmoking = (value: string | null): string => {
             if (value === "no") return "Never";
             if (value === "yes") return "Smoke Smoke";
-            return "No preference";
+            if (value === "doesnt_matter") return "No preference";
+            return "";
           };
 
           const mapDrinking = (value: string | null): string => {
             if (value === "no") return "Doesn't drink";
             if (value === "yes") return "Drinks often";
-            return "I'd rather not say";
+            if (value === "doesnt_matter") return "I'd rather not say";
+            return "";
           };
 
           const mapPets = (value: string | null): string => {
             if (value === "no") return "Doesn't have pet(s)";
             if (value === "yes") return "Has dog(s)";
-            return "Doesn't have pet(s)";
+            return "";
           };
 
+          const mapEmploymentFromDb = (value: string | null): string => {
+            if (!value || value === "any") return "";
+            if (value === "full_time") return "Full-time Employed";
+            if (value === "part_time") return "Part-time";
+            if (value === "self_employed") return "Self-employed";
+            if (value === "retired") return "Retired";
+            if (value === "student") return "Unemployed";
+            return value;
+          };
+
+          const mapDietFromDb = (value: string | null): string => {
+            if (!value || value === "any") return "";
+            if (value === "vegetarian") return "Vegetarian";
+            if (value === "vegan") return "Vegan";
+            if (value === "halal") return "Halal";
+            if (value === "kosher") return "Kosher";
+            return value.charAt(0).toUpperCase() + value.slice(1);
+          };
+
+          const resolvedTargetGender = normalizePartnerGenderPreference(
+            preferencesData.partner_gender_preference ||
+              preferencesData.partner_experience ||
+              ""
+          );
+
           setFormData({
-            lookingFor: "", // This isn't stored in DB, keep empty
+            lookingFor:
+              getLookingForFromGenders({
+                requesterGender: profileData?.gender || null,
+                targetGender: resolvedTargetGender,
+              }) ||
+              landingLookingFor ||
+              "",
             location: preferencesData.partner_location || "",
-            ageRange: preferencesData.partner_age_range || "20 - 29",
+            ageRange: preferencesData.partner_age_range || "",
             height: formatHeight(preferencesData.partner_height_min_cm, preferencesData.partner_height_max_cm),
             ethnicity: {
-              nigerian: nigerianEthnicities.length > 0 ? nigerianEthnicities : ["I'd rather not say"],
-              other: otherEthnicities.length > 0 ? otherEthnicities : ["I'd rather not say"],
+              nigerian: nigerianEthnicities.length > 0 ? nigerianEthnicities : [],
+              other: otherEthnicities.length > 0 ? otherEthnicities : [],
             },
             languages: { nigerian: [], other: [] }, // Languages aren't stored for preferences
-            education: preferencesData.partner_education?.[0] || "High school",
-            employment: preferencesData.partner_employment || "Employed",
+            education: preferencesData.partner_education?.[0] || "",
+            employment: mapEmploymentFromDb(preferencesData.partner_employment),
             drinking: mapDrinking(preferencesData.partner_drinking),
             smoking: mapSmoking(preferencesData.partner_smoking),
-            diet: preferencesData.partner_diet || "Gluten",
-            religion: preferencesData.partner_religion?.[0] || "Hindu",
+            diet: mapDietFromDb(preferencesData.partner_diet),
+            religion: preferencesData.partner_religion?.[0] || "",
             hasChildren: mapHaveChildren(preferencesData.partner_have_children),
             wantsChildren: mapWantChildren(preferencesData.partner_want_children),
             pets: mapPets(preferencesData.partner_pets),
             benefits: [],
           });
+          setPartnerLocationPickedFromGoogle(
+            isLikelyGoogleSuggestedLocation(preferencesData.partner_location || "")
+          );
 
           // Set height inches for slider
           if (preferencesData.partner_height_min_cm && preferencesData.partner_height_max_cm) {
             const avgCm = Math.round((preferencesData.partner_height_min_cm + preferencesData.partner_height_max_cm) / 2);
             setHeightInches(Math.round(avgCm / 2.54));
           }
+        } else if (landingLookingFor) {
+          setFormData((prev) => ({
+            ...prev,
+            lookingFor: landingLookingFor,
+          }));
         }
 
-        // Check if preferences are already completed
-        const { data: progress } = await supabase
-          .from("user_progress")
-          .select("preferences_completed")
-          .eq("user_id", user.id)
-          .maybeSingle();
-
-        if (progress && progress.preferences_completed && !stepParam && !editMode) {
-          // Preferences already completed, show congratulations step (unless editing)
-          setCurrentStep(16);
-        }
       } catch (error) {
         console.error("Error loading preferences:", error);
       } finally {
@@ -200,19 +279,19 @@ function PreferencesPageContent() {
   const [formData, setFormData] = useState<PreferenceData>({
     lookingFor: "",
     location: "",
-    ageRange: "20 - 29",
-    height: "6'0\" • 183 cm", // Default to 6'0" as shown in requirements
-    ethnicity: { nigerian: ["I'd rather not say"], other: ["I'd rather not say"] },
+    ageRange: "",
+    height: "",
+    ethnicity: { nigerian: [], other: [] },
     languages: { nigerian: [], other: [] },
-    education: "High school",
-    employment: "Employed",
-    drinking: "Drinks often",
-    smoking: "Smoke Smoke",
-    diet: "Gluten",
-    religion: "Hindu",
-    hasChildren: "Doesn't have kids",
-    wantsChildren: "Doesn't want kids",
-    pets: "Doesn't have pet(s)",
+    education: "",
+    employment: "",
+    drinking: "",
+    smoking: "",
+    diet: "",
+    religion: "",
+    hasChildren: "",
+    wantsChildren: "",
+    pets: "",
     benefits: [],
   });
 
@@ -229,28 +308,33 @@ function PreferencesPageContent() {
         setFormData({
           lookingFor: draft.lookingFor || "",
           location: draft.location || "",
-          ageRange: draft.ageRange || "20 - 29",
-          height: draft.height || "6'0\" • 183 cm",
-          ethnicity: draft.ethnicity || { nigerian: ["I'd rather not say"], other: ["I'd rather not say"] },
+          ageRange: draft.ageRange || "",
+          height: draft.height || "",
+          ethnicity: draft.ethnicity || { nigerian: [], other: [] },
           languages: draft.languages || { nigerian: [], other: [] },
-          education: draft.education || "High school",
-          employment: draft.employment || "Employed",
-          drinking: draft.drinking || "Drinks often",
-          smoking: draft.smoking || "Smoke Smoke",
-          diet: draft.diet || "Gluten",
-          religion: draft.religion || "Hindu",
-          hasChildren: draft.hasChildren || "Doesn't have kids",
-          wantsChildren: draft.wantsChildren || "Doesn't want kids",
-          pets: draft.pets || "Doesn't have pet(s)",
+          education: draft.education || "",
+          employment: draft.employment || "",
+          drinking: draft.drinking || "",
+          smoking: draft.smoking || "",
+          diet: draft.diet || "",
+          religion: draft.religion || "",
+          hasChildren: draft.hasChildren || "",
+          wantsChildren: draft.wantsChildren || "",
+          pets: draft.pets || "",
           benefits: draft.benefits || [],
         });
+        setPartnerLocationPickedFromGoogle(
+          isLikelyGoogleSuggestedLocation(draft.location || "")
+        );
         
         if (draft.heightInches) {
           setHeightInches(draft.heightInches);
         }
         
         if (draft.currentStep) {
-          setCurrentStep(draft.currentStep);
+          // Step 16 is a true completion screen and should not be restored
+          // from draft state alone.
+          setCurrentStep(Math.min(draft.currentStep, totalSteps - 1));
         }
 
         // Show notification that draft was loaded
@@ -309,7 +393,131 @@ function PreferencesPageContent() {
     };
   }, [formData, heightInches, currentStep, initialized]);
 
+  const handleCompletionContinue = () => {
+    clearFormDraft(FORM_DRAFT_KEY);
+    router.push("/dashboard/discover");
+  };
+
+  const validatePreferencesStep = (step: number) => {
+    switch (step) {
+      case 1:
+        if (!formData.lookingFor.trim()) {
+          toast.warning("Please select who you're looking for.");
+          return false;
+        }
+        return true;
+      case 2: {
+        const normalizedLocation = normalizeLocation(formData.location);
+        if (!normalizedLocation) {
+          toast.warning("Please select your ideal partner's location.");
+          return false;
+        }
+        if (
+          !partnerLocationPickedFromGoogle ||
+          !isLikelyGoogleSuggestedLocation(normalizedLocation)
+        ) {
+          toast.warning("Please choose a location from Google suggestions.");
+          return false;
+        }
+        if (normalizedLocation !== formData.location) {
+          setFormData((prev) => ({ ...prev, location: normalizedLocation }));
+        }
+        return true;
+      }
+      case 3:
+        if (!formData.ageRange.trim()) {
+          toast.warning("Please select an age range.");
+          return false;
+        }
+        return true;
+      case 4:
+        if (!formData.height.trim()) {
+          toast.warning("Please select a height preference.");
+          return false;
+        }
+        return true;
+      case 5:
+        if (
+          formData.ethnicity.nigerian.length === 0 &&
+          formData.ethnicity.other.length === 0
+        ) {
+          toast.warning("Please select at least one ethnicity.");
+          return false;
+        }
+        return true;
+      case 6:
+        if (
+          formData.languages.nigerian.length === 0 &&
+          formData.languages.other.length === 0
+        ) {
+          toast.warning("Please select at least one language.");
+          return false;
+        }
+        return true;
+      case 7:
+        if (!formData.education.trim()) {
+          toast.warning("Please select education preference.");
+          return false;
+        }
+        return true;
+      case 8:
+        if (!formData.employment.trim()) {
+          toast.warning("Please select employment preference.");
+          return false;
+        }
+        return true;
+      case 9:
+        if (!formData.drinking.trim()) {
+          toast.warning("Please select drinking preference.");
+          return false;
+        }
+        return true;
+      case 10:
+        if (!formData.smoking.trim()) {
+          toast.warning("Please select smoking preference.");
+          return false;
+        }
+        return true;
+      case 11:
+        if (!formData.diet.trim()) {
+          toast.warning("Please select diet preference.");
+          return false;
+        }
+        return true;
+      case 12:
+        if (!formData.religion.trim()) {
+          toast.warning("Please select religion preference.");
+          return false;
+        }
+        return true;
+      case 13:
+        if (!formData.hasChildren.trim()) {
+          toast.warning("Please select children preference.");
+          return false;
+        }
+        return true;
+      case 14:
+        if (!formData.wantsChildren.trim()) {
+          toast.warning("Please select future children preference.");
+          return false;
+        }
+        return true;
+      case 15:
+        if (!formData.pets.trim()) {
+          toast.warning("Please select pet preference.");
+          return false;
+        }
+        return true;
+      default:
+        return true;
+    }
+  };
+
   const handleNext = () => {
+    if (!validatePreferencesStep(currentStep)) {
+      return;
+    }
+
     if (currentStep < totalSteps) {
       // If moving to the final step (16), submit the form
       if (currentStep === totalSteps - 1) {
@@ -329,9 +537,37 @@ function PreferencesPageContent() {
   const handleSubmit = async () => {
     setLoading(true);
     try {
+      for (let step = 1; step <= totalSteps - 1; step += 1) {
+        if (!validatePreferencesStep(step)) {
+          setCurrentStep(step);
+          setLoading(false);
+          return;
+        }
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push("/login");
+        return;
+      }
+
+      const normalizedLocation = normalizeLocation(formData.location);
+      if (
+        !normalizedLocation ||
+        !partnerLocationPickedFromGoogle ||
+        !isLikelyGoogleSuggestedLocation(normalizedLocation)
+      ) {
+        toast.error("Please choose your preferred location from Google suggestions.");
+        setLoading(false);
+        return;
+      }
+
+      const partnerGenderPreference = getTargetGenderFromLookingFor(
+        formData.lookingFor
+      );
+      if (!partnerGenderPreference) {
+        toast.error("Please choose who you're looking for.");
+        setLoading(false);
         return;
       }
 
@@ -407,12 +643,12 @@ function PreferencesPageContent() {
 
       // Prepare preferences data for user_preferences table
       // Field mapping: Form Field → Database Column
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const preferencesUpdate: any = {
+      const preferencesUpdate: Record<string, unknown> = {
         user_id: user.id,
+        partner_gender_preference: partnerGenderPreference,
         
         // Location preferences
-        partner_location: formData.location?.trim() || null, // Step 2: location → partner_location
+        partner_location: normalizedLocation || null, // Step 2: location → partner_location
         partner_age_range: formData.ageRange || null, // Step 3: ageRange → partner_age_range
         partner_height_min_cm: heightMinCm, // Step 4: height → partner_height_min_cm (calculated)
         partner_height_max_cm: heightMaxCm, // Step 4: height → partner_height_max_cm (calculated)
@@ -450,7 +686,29 @@ function PreferencesPageContent() {
         .select()
         .single();
 
-      if (preferencesError) {
+      let persistedPreferences = savedPreferences;
+      if (preferencesError?.code === "42703") {
+        const legacyFallback = {
+          ...preferencesUpdate,
+          // Backward-compatible fallback when partner_gender_preference column is not present yet.
+          partner_experience: partnerGenderPreference,
+        };
+        delete (legacyFallback as Record<string, unknown>).partner_gender_preference;
+
+        const { error: legacyError, data: legacySaved } = await supabase
+          .from("user_preferences")
+          .upsert(legacyFallback, { onConflict: "user_id" })
+          .select()
+          .single();
+
+        if (legacyError) {
+          console.error("Error saving legacy partner preference:", legacyError);
+          throw new Error(
+            `Failed to save preferences: ${legacyError.message || "Unknown error"}`
+          );
+        }
+        persistedPreferences = legacySaved;
+      } else if (preferencesError) {
         console.error("Error saving preferences to user_preferences:", {
           message: preferencesError.message,
           code: preferencesError.code,
@@ -487,9 +745,43 @@ function PreferencesPageContent() {
         throw new Error(`Failed to update progress: ${progressError.message || "Unknown error"}`);
       }
 
+      // Track onboarding preferences completion only on first completion flow (not edit).
+      if (!wasPreferencesCompleted && !isEditMode) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const accessToken = session?.access_token;
+
+          if (accessToken) {
+            const lifecycleResponse = await fetch("/api/lifecycle/profile-progress", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({
+                step: "preferences_completed",
+                event_data: {
+                  partner_location: normalizedLocation || null,
+                  partner_age_range: formData.ageRange || null,
+                },
+              }),
+            });
+
+            if (!lifecycleResponse.ok) {
+              console.warn(
+                "Preferences lifecycle tracking failed:",
+                lifecycleResponse.status
+              );
+            }
+          }
+        } catch (lifecycleError) {
+          console.warn("Preferences lifecycle tracking error:", lifecycleError);
+        }
+      }
+
       // Verify the data was saved
-      if (savedPreferences) {
-        console.log("Preferences saved successfully to user_preferences:", savedPreferences);
+      if (persistedPreferences) {
+        console.log("Preferences saved successfully to user_preferences:", persistedPreferences);
       } else {
         console.warn("Warning: Preferences saved but verification data not returned");
       }
@@ -498,16 +790,18 @@ function PreferencesPageContent() {
       clearFormDraft(FORM_DRAFT_KEY);
       setSaveStatus(null);
 
-      // Redirect: to view when editing, otherwise to subscription
+      // Redirect: to view when editing, otherwise to discover
       if (isEditMode) {
         router.push("/dashboard/profile/preferences/view");
       } else {
-        router.push("/dashboard/profile/subscription");
+        router.push("/dashboard/discover");
       }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving preferences:", error);
-      const errorMessage = error?.message || "Failed to save preferences. Please try again.";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to save preferences. Please try again.";
       toast.error(errorMessage);
     } finally {
       setLoading(false);
@@ -567,7 +861,7 @@ function PreferencesPageContent() {
               <p className="mt-3 sm:mt-4 md:mt-5 text-white/90 text-sm sm:text-base md:text-lg lg:text-xl leading-relaxed max-w-2xl mx-auto">That way we can recommend singles to tickle your fancy.<br />And vice versa.</p>
             </div>
             <div className="space-y-3 sm:space-y-4 mt-6 sm:mt-8">
-              {["I'm a man seeking a woman", "I'm a woman seeking a man", "I'm a man seeking a man", "I'm a woman seeking a woman"].map((option) => (
+              {LOOKING_FOR_OPTIONS.map((option) => (
                 <button
                   key={option}
                   type="button"
@@ -594,7 +888,11 @@ function PreferencesPageContent() {
             <div>
               <GooglePlacesAutocomplete
                 value={formData.location}
-                onChange={(value) => setFormData({ ...formData, location: value })}
+                onChange={(value, prediction) => {
+                  setFormData({ ...formData, location: normalizeLocation(value) });
+                  setPartnerLocationPickedFromGoogle(Boolean(prediction));
+                }}
+                requireSuggestion
                 placeholder="Leicester, United Kingdom"
                 className="w-full bg-transparent border-0 border-b-2 border-white/50 text-white text-center text-base sm:text-lg md:text-xl lg:text-2xl placeholder-white/50 focus:border-white focus:outline-none pb-2 sm:pb-3"
               />
@@ -1233,10 +1531,10 @@ function PreferencesPageContent() {
         </div>
 
         {/* Main Content - Centered */}
-        <main className="flex min-h-screen flex-col items-center justify-center px-4 py-6 sm:py-8 md:py-12 lg:py-16">
+        <main className="flex min-h-screen flex-col items-center justify-center px-4 py-6 sm:py-8 md:py-12 lg:py-16 pb-[calc(env(safe-area-inset-bottom)+6rem)]">
 
           {/* Step content */}
-          <div className="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl px-2 sm:px-4">
+          <div className="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl px-2 sm:px-4 [&_h2]:mx-auto [&_h2]:max-w-[95%] [&_h2]:!text-[clamp(1.6rem,6.2vw,3rem)] [&_h2]:break-words [&_h2]:[overflow-wrap:anywhere] [&_h2]:[text-wrap:balance]">
             {!initialized ? (
               <div className="text-white text-center">Loading...</div>
             ) : (
@@ -1280,12 +1578,13 @@ function PreferencesPageContent() {
           {/* Button for congratulations step */}
           {initialized && currentStep === 16 && (
             <div className="mt-8 sm:mt-10 md:mt-12 flex w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl justify-end px-2 sm:px-4">
-              <Link
-                href="/dashboard/discover"
+              <button
+                type="button"
+                onClick={handleCompletionContinue}
                 className="rounded-lg bg-white px-6 py-3 sm:px-8 sm:py-4 md:px-10 md:py-5 text-sm sm:text-base md:text-lg font-semibold text-[#1f419a] shadow-lg transition-all hover:shadow-xl hover:scale-105"
               >
                   That&apos;s it
-              </Link>
+              </button>
             </div>
           )}
         </main>

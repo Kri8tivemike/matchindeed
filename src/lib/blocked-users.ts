@@ -10,6 +10,17 @@
  */
 
 import { supabase } from "@/lib/supabase";
+import { shouldSkipBackgroundRequest } from "@/lib/request-errors";
+
+const BLOCKED_IDS_TTL_MS = 60_000;
+
+let blockedIdsCache:
+  | {
+      userId: string;
+      value: Set<string>;
+      expiresAt: number;
+    }
+  | null = null;
 
 /**
  * Returns a Set of user IDs that should be excluded from feeds/listings.
@@ -17,43 +28,48 @@ import { supabase } from "@/lib/supabase";
  */
 export async function getBlockedUserIds(): Promise<Set<string>> {
   try {
+    const now = Date.now();
     const {
       data: { session },
     } = await supabase.auth.getSession();
 
-    if (!session?.user?.id) return new Set();
+    const currentUserId = session?.user?.id;
+    if (!currentUserId) return new Set();
 
-    const myId = session.user.id;
-
-    // Fetch both directions: users I blocked + users who blocked me
-    const [blockedByMe, blockedMe] = await Promise.all([
-      supabase
-        .from("blocked_users")
-        .select("blocked_id")
-        .eq("blocker_id", myId),
-      supabase
-        .from("blocked_users")
-        .select("blocker_id")
-        .eq("blocked_id", myId),
-    ]);
-
-    const ids = new Set<string>();
-
-    // If blocked_users table doesn't exist (404), gracefully return empty set
-    if (blockedByMe.error || blockedMe.error) {
-      return ids;
+    if (
+      blockedIdsCache &&
+      blockedIdsCache.userId === currentUserId &&
+      blockedIdsCache.expiresAt > now
+    ) {
+      return new Set(blockedIdsCache.value);
     }
 
-    if (blockedByMe.data) {
-      blockedByMe.data.forEach((row) => ids.add(row.blocked_id));
-    }
-    if (blockedMe.data) {
-      blockedMe.data.forEach((row) => ids.add(row.blocker_id));
+    if (shouldSkipBackgroundRequest()) {
+      return new Set();
     }
 
-    return ids;
+    const res = await fetch("/api/profile/block/ids", {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (!res.ok) return new Set();
+
+    const payload = await res.json().catch(() => null);
+    const blockedIds = Array.isArray(payload?.blocked_ids)
+      ? payload.blocked_ids.filter((id: unknown): id is string => typeof id === "string")
+      : [];
+    const value = new Set<string>(blockedIds);
+    blockedIdsCache = {
+      userId: currentUserId,
+      value,
+      expiresAt: now + BLOCKED_IDS_TTL_MS,
+    };
+
+    return new Set(value);
   } catch {
-    // Table may not exist yet — return empty set silently
-    return new Set();
+    // Blocking is non-critical for rendering. Fail closed to empty.
+    return blockedIdsCache ? new Set(blockedIdsCache.value) : new Set();
   }
 }

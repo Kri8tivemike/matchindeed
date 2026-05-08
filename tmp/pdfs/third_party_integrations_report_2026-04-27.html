@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MatchIndeed Third-Party Integrations Report</title>
+  <style>
+    @page { size: A4; margin: 18mm 14mm 18mm 14mm; }
+    :root {
+      --ink: #182235;
+      --muted: #5b6780;
+      --line: #d9e3f0;
+      --brand: #2646a3;
+      --brand-soft: #edf3ff;
+      --warn-soft: #fff8e7;
+      --warn: #ad6b00;
+      --ok-soft: #ebfaf2;
+      --ok: #136d49;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 10.4pt;
+      line-height: 1.45;
+      background: #fff;
+    }
+    h1 {
+      font-size: 24pt;
+      line-height: 1.12;
+      margin: 0 0 8px;
+      color: var(--brand);
+      letter-spacing: -0.03em;
+    }
+    h2 {
+      margin: 18px 0 10px;
+      font-size: 14pt;
+      color: var(--brand);
+      padding: 9px 12px;
+      border-left: 4px solid var(--brand);
+      background: var(--brand-soft);
+      border-radius: 10px;
+      page-break-after: avoid;
+    }
+    p {
+      margin: 0 0 8px;
+    }
+    a {
+      color: var(--brand);
+      text-decoration: none;
+    }
+    code {
+      padding: 1px 5px;
+      border-radius: 6px;
+      background: #eff3fa;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+      word-break: break-word;
+    }
+    ul.list {
+      margin: 0 0 10px;
+      padding-left: 18px;
+    }
+    li { margin: 0 0 4px; }
+    .table-wrap {
+      margin: 10px 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    thead th {
+      background: #eef3fb;
+      color: var(--brand);
+      font-size: 8.8pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--line);
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 8px 9px;
+      border-bottom: 1px solid #edf2f8;
+      word-break: break-word;
+    }
+    tbody tr:nth-child(even) td {
+      background: #fbfdff;
+    }
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+    tr, td, th, .table-wrap {
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <h1>MatchIndeed Third-Party Integrations Report</h1>
+<p>Date verified: April 27, 2026</p>
+<p>Website reviewed: <code>https://matchindeed.com</code></p>
+<h2>Purpose</h2>
+<p>This report lists the third-party platforms, API services, and external providers currently connected to the MatchIndeed website or implemented in the codebase for website operations.</p>
+<p>This report does not expose any secret values. It lists:</p>
+<ul class="list">
+<li>provider name</li>
+<li>service purpose</li>
+<li>provider website or API URL</li>
+<li>configuration status</li>
+<li>the environment variable names used by the app</li>
+</ul>
+<h2>Production-Confirmed Active Integrations</h2>
+<p>These services were confirmed as configured on the live production website as of April 27, 2026.</p>
+<div class="table-wrap"><table><thead><tr>
+<th>Provider</th>
+<th>Purpose in MatchIndeed</th>
+<th>Provider URL / API URL</th>
+<th>Production status</th>
+<th>Environment variables used</th>
+</tr></thead><tbody>
+<tr>
+<td>Supabase</td>
+<td>Core backend, authentication, database, storage, and realtime features</td>
+<td><a href="https://supabase.com">https://supabase.com</a>, <code>https://szmkvcifwopbnatsdcmw.supabase.co</code></td>
+<td>Confirmed active</td>
+<td><code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code></td>
+</tr>
+<tr>
+<td>Stripe</td>
+<td>Subscription payments and wallet credit checkout</td>
+<td><a href="https://stripe.com">https://stripe.com</a>, <a href="https://api.stripe.com">https://api.stripe.com</a></td>
+<td>Confirmed active</td>
+<td><code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>, <code>STRIPE_SECRET_KEY</code></td>
+</tr>
+<tr>
+<td>Google Maps Places API</td>
+<td>Address and location autocomplete</td>
+<td><a href="https://developers.google.com/maps">https://developers.google.com/maps</a>, <code>https://maps.googleapis.com/maps/api/js</code></td>
+<td>Confirmed active</td>
+<td><code>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code></td>
+</tr>
+<tr>
+<td>OneSignal</td>
+<td>Push notifications to users</td>
+<td><a href="https://onesignal.com">https://onesignal.com</a>, <a href="https://dashboard.onesignal.com">https://dashboard.onesignal.com</a>, <code>https://onesignal.com/api/v1/notifications</code></td>
+<td>Confirmed active</td>
+<td><code>NEXT_PUBLIC_ONESIGNAL_APP_ID</code>, <code>ONESIGNAL_REST_KEY</code></td>
+</tr>
+<tr>
+<td>Resend</td>
+<td>Transactional email sending</td>
+<td><a href="https://resend.com">https://resend.com</a>, <a href="https://api.resend.com">https://api.resend.com</a></td>
+<td>Confirmed active</td>
+<td><code>RESEND_API_KEY</code>, <code>EMAIL_FROM</code></td>
+</tr>
+<tr>
+<td>Zoom</td>
+<td>Video meeting creation and meeting links</td>
+<td><a href="https://marketplace.zoom.us">https://marketplace.zoom.us</a>, <code>https://zoom.us/oauth/token</code>, <code>https://api.zoom.us/v2/users/me/meetings</code></td>
+<td>Confirmed active</td>
+<td><code>ZOOM_ACCOUNT_ID</code>, <code>ZOOM_CLIENT_ID</code>, <code>ZOOM_CLIENT_SECRET</code></td>
+</tr>
+<tr>
+<td>TheHive.ai</td>
+<td>Content moderation for photos and text</td>
+<td><a href="https://thehive.ai">https://thehive.ai</a>, <code>https://api.thehive.ai</code></td>
+<td>Confirmed active</td>
+<td><code>THEHIVE_SECRET_KEY</code></td>
+</tr>
+<tr>
+<td>OpenAI</td>
+<td>AI-assisted moderation and identity-related image checks</td>
+<td><a href="https://platform.openai.com">https://platform.openai.com</a>, <code>https://api.openai.com/v1/responses</code></td>
+<td>Confirmed active</td>
+<td><code>OPENAI_API_KEY</code></td>
+</tr>
+<tr>
+<td>Customer.io</td>
+<td>Behavioral messaging, lifecycle events, campaign triggers</td>
+<td><a href="https://customer.io">https://customer.io</a>, <code>https://track.customer.io/api/v1</code>, <code>https://api.customer.io/v1</code></td>
+<td>Confirmed active</td>
+<td><code>CUSTOMERIO_SITE_ID</code>, <code>CUSTOMERIO_API_KEY</code>, <code>CUSTOMERIO_APP_API_KEY</code></td>
+</tr>
+</tbody></table></div>
+<h2>Partially Configured or Incomplete Integrations</h2>
+<p>These providers are implemented in the project, but the live production environment appears incomplete based on the available server-side configuration review.</p>
+<div class="table-wrap"><table><thead><tr>
+<th>Provider</th>
+<th>Purpose in MatchIndeed</th>
+<th>Provider URL / API URL</th>
+<th>Current status</th>
+<th>Environment variables observed</th>
+</tr></thead><tbody>
+<tr>
+<td>Zoho</td>
+<td>Planned support, CRM, operations, analytics, and back-office tooling</td>
+<td><a href="https://www.zoho.com">https://www.zoho.com</a>, <a href="https://api-console.zoho.com">https://api-console.zoho.com</a>, <code>https://accounts.zoho.com</code></td>
+<td>Only partially configured on production</td>
+<td><code>ZOHO_ORG_ID</code> confirmed, but OAuth credentials were not confirmed in production env</td>
+</tr>
+</tbody></table></div>
+<h2>Implemented In Code But Not Confirmed As Live-Configured</h2>
+<p>These services are present in the codebase and may be planned, optional, or environment-dependent, but they were not confirmed as configured on the production server during this review.</p>
+<div class="table-wrap"><table><thead><tr>
+<th>Provider</th>
+<th>Purpose in MatchIndeed</th>
+<th>Provider URL / API URL</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td>Sentry</td>
+<td>Error tracking and production monitoring</td>
+<td><a href="https://sentry.io">https://sentry.io</a></td>
+<td>Implemented in code, not production-confirmed</td>
+</tr>
+<tr>
+<td>Cloudflare Turnstile</td>
+<td>Bot protection on forms and registration</td>
+<td><a href="https://dash.cloudflare.com">https://dash.cloudflare.com</a>, <code>https://challenges.cloudflare.com/turnstile/v0/siteverify</code></td>
+<td>Implemented in code, not production-confirmed</td>
+</tr>
+<tr>
+<td>FingerprintJS</td>
+<td>Device fingerprinting and fraud reduction</td>
+<td><a href="https://fingerprint.com">https://fingerprint.com</a></td>
+<td>Implemented in code, not production-confirmed</td>
+</tr>
+<tr>
+<td>Mixpanel</td>
+<td>Product analytics and event tracking</td>
+<td><a href="https://mixpanel.com">https://mixpanel.com</a>, <code>https://api.mixpanel.com/track</code></td>
+<td>Implemented in code, not production-confirmed</td>
+</tr>
+<tr>
+<td>IPQualityScore</td>
+<td>IP and email fraud scoring</td>
+<td><a href="https://www.ipqualityscore.com">https://www.ipqualityscore.com</a></td>
+<td>Implemented in code, not production-confirmed</td>
+</tr>
+<tr>
+<td>Africa&#39;s Talking</td>
+<td>SMS delivery option</td>
+<td><a href="https://africastalking.com">https://africastalking.com</a>, <code>https://api.africastalking.com/version1/messaging</code></td>
+<td>Implemented in code, not production-confirmed</td>
+</tr>
+<tr>
+<td>Sinch</td>
+<td>Alternative SMS delivery option</td>
+<td><a href="https://sinch.com">https://sinch.com</a>, <code>https://us.sms.api.sinch.com</code></td>
+<td>Implemented in code, not production-confirmed</td>
+</tr>
+<tr>
+<td>ImageKit</td>
+<td>Image CDN and optimization option</td>
+<td><a href="https://imagekit.io">https://imagekit.io</a></td>
+<td>Implemented in env template, not production-confirmed</td>
+</tr>
+</tbody></table></div>
+<h2>Key Client Notes</h2>
+<ul class="list">
+<li>The website currently depends heavily on Supabase, Stripe, Zoom, Resend, OneSignal, Google Maps, TheHive.ai, OpenAI, and Customer.io.</li>
+<li>Stripe is clearly active for payments, but <code>STRIPE_WEBHOOK_SECRET</code> was not confirmed in the reviewed production <code>.env</code> files. This should be reviewed carefully because subscription or payment finalization can depend on a correctly configured webhook.</li>
+<li>Zoho support exists in the codebase, but the production setup looked incomplete during this review.</li>
+<li>Several security and analytics services exist in code but do not appear fully enabled in the reviewed production environment.</li>
+</ul>
+<h2>Source Verification Basis</h2>
+<p>This report was compiled from:</p>
+<ul class="list">
+<li>the active Next.js application code</li>
+<li>environment variable references in source files</li>
+<li>local project environment files</li>
+<li>a direct production server environment review performed on April 27, 2026</li>
+</ul>
+<h2>Reference Implementation Areas</h2>
+<p>These project files show where the integrations are currently used:</p>
+<ul class="list">
+<li>Supabase: <code>src/lib/supabase.ts</code></li>
+<li>Stripe checkout: <code>src/app/api/create-checkout-session/route.ts</code></li>
+<li>Resend email: <code>src/lib/email.ts</code></li>
+<li>Zoom meetings: <code>src/lib/zoom.ts</code></li>
+<li>OneSignal push: <code>src/lib/onesignal.ts</code></li>
+<li>Google Places autocomplete: <code>src/components/GooglePlacesAutocomplete.tsx</code></li>
+<li>Customer.io tracking: <code>src/lib/customerio.ts</code></li>
+<li>TheHive.ai and OpenAI moderation: <code>src/lib/content-moderation.ts</code></li>
+<li>Zoho integration utilities: <code>src/lib/zoho.ts</code></li>
+</ul>
+</body>
+</html>

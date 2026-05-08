@@ -29,7 +29,13 @@ import {
   Shield,
   FileText,
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import {
+  extractCoordinatorFeedback,
+  getParticipantResponses,
+} from "@/lib/coordinator-feedback";
 
 // ---------------------------------------------------------------
 // TYPES
@@ -39,14 +45,15 @@ import {
 type MeetingReport = {
   id: string;
   meeting_id: string;
+  coordinator_id: string | null;
   coordinator_name: string;
   conclusion: string | null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  participant_yes_no: any;
+  participant_yes_no: Record<string, unknown> | null;
   video_recording_url: string | null;
   host_decision: string | null;
   admin_notes: string | null;
   finalized: boolean;
+  created_at: string | null;
   meeting: {
     id: string;
     host_id: string;
@@ -54,6 +61,36 @@ type MeetingReport = {
     fee_cents: number;
     charge_status: string;
   } | null;
+};
+
+type MeetingReportRow = {
+  id: string;
+  meeting_id: string;
+  coordinator_id: string | null;
+  coordinator_name: string;
+  conclusion: string | null;
+  participant_yes_no: Record<string, unknown> | null;
+  video_recording_url: string | null;
+  host_decision: string | null;
+  admin_notes: string | null;
+  finalized: boolean;
+  created_at: string | null;
+  meetings:
+    | {
+        id: string;
+        host_id: string;
+        scheduled_at: string;
+        fee_cents: number;
+        charge_status: string;
+      }
+    | Array<{
+        id: string;
+        host_id: string;
+        scheduled_at: string;
+        fee_cents: number;
+        charge_status: string;
+      }>
+    | null;
 };
 
 /** Investigation meeting fetched from admin resolve API */
@@ -71,6 +108,7 @@ type InvestigationMeeting = {
   host_notes: string | null;
   finalized_at: string | null;
   finalized_by: string | null;
+  admin_resolved_at?: string | null;
   created_at: string;
   participants: {
     user_id: string;
@@ -107,6 +145,8 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+const INVESTIGATIONS_PAGE_SIZE = 5;
+
 export default function AdminPostMeetingsPage() {
   const { toast } = useToast();
 
@@ -134,6 +174,8 @@ export default function AdminPostMeetingsPage() {
   const [resolveNotes, setResolveNotes] = useState("");
   const [resolving, setResolving] = useState(false);
   const [resolvedMeetings, setResolvedMeetings] = useState<InvestigationMeeting[]>([]);
+  const [resolvedLoading, setResolvedLoading] = useState(false);
+  const [investigationPage, setInvestigationPage] = useState(1);
 
   // ---------------------------------------------------------------
   // FETCH FUNCTIONS
@@ -148,6 +190,7 @@ export default function AdminPostMeetingsPage() {
         .select(`
           id,
           meeting_id,
+          coordinator_id,
           coordinator_name,
           conclusion,
           participant_yes_no,
@@ -155,6 +198,7 @@ export default function AdminPostMeetingsPage() {
           host_decision,
           admin_notes,
           finalized,
+          created_at,
           meetings (
             id,
             host_id,
@@ -170,8 +214,7 @@ export default function AdminPostMeetingsPage() {
         return;
       }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const transformedReports: MeetingReport[] = (data || []).map((report: any) => ({
+      const transformedReports: MeetingReport[] = ((data || []) as MeetingReportRow[]).map((report) => ({
         ...report,
         meeting: Array.isArray(report.meetings) ? report.meetings[0] : report.meetings,
       }));
@@ -191,7 +234,7 @@ export default function AdminPostMeetingsPage() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const res = await fetch("/api/admin/meetings/resolve?status=pending_review", {
+      const res = await fetch("/api/admin/meetings/resolve?status=pending_review&limit=50", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
@@ -201,33 +244,6 @@ export default function AdminPostMeetingsPage() {
       } else {
         console.error("Failed to fetch investigations:", res.status);
       }
-
-      // Also fetch resolved investigations
-      const resResolved = await fetch("/api/admin/meetings/resolve?status=captured", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const resRefunded = await fetch("/api/admin/meetings/resolve?status=refunded", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-
-      const resolved: InvestigationMeeting[] = [];
-      if (resResolved.ok) {
-        const d = await resResolved.json();
-        resolved.push(
-          ...(d.meetings || []).filter(
-            (m: InvestigationMeeting) => m.finalized_at !== null
-          )
-        );
-      }
-      if (resRefunded.ok) {
-        const d = await resRefunded.json();
-        resolved.push(
-          ...(d.meetings || []).filter(
-            (m: InvestigationMeeting) => m.finalized_at !== null
-          )
-        );
-      }
-      setResolvedMeetings(resolved);
     } catch (error) {
       console.error("Error fetching investigations:", error);
     } finally {
@@ -235,10 +251,66 @@ export default function AdminPostMeetingsPage() {
     }
   }, []);
 
+  /** Fetch resolved investigations only when the admin opens that tab */
+  const fetchResolvedMeetings = useCallback(async () => {
+    setResolvedLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const [resResolved, resRefunded] = await Promise.all([
+        fetch("/api/admin/meetings/resolve?status=captured&limit=50", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+        fetch("/api/admin/meetings/resolve?status=refunded&limit=50", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+      ]);
+
+      const resolved: InvestigationMeeting[] = [];
+      if (resResolved.ok) {
+        const d = await resResolved.json();
+        resolved.push(
+          ...(d.meetings || []).filter(
+            (m: InvestigationMeeting) =>
+              m.admin_resolved_at !== null || m.finalized_at !== null
+          )
+        );
+      }
+      if (resRefunded.ok) {
+        const d = await resRefunded.json();
+        resolved.push(
+          ...(d.meetings || []).filter(
+            (m: InvestigationMeeting) =>
+              m.admin_resolved_at !== null || m.finalized_at !== null
+          )
+        );
+      }
+
+      setResolvedMeetings(
+        resolved.sort((a, b) => {
+          const aTime = a.admin_resolved_at || a.finalized_at || a.created_at;
+          const bTime = b.admin_resolved_at || b.finalized_at || b.created_at;
+          return new Date(bTime).getTime() - new Date(aTime).getTime();
+        })
+      );
+    } catch (error) {
+      console.error("Error fetching resolved investigations:", error);
+    } finally {
+      setResolvedLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchReports();
     fetchInvestigations();
   }, [fetchInvestigations]);
+
+  useEffect(() => {
+    if (activeTab === "resolved" && resolvedMeetings.length === 0) {
+      fetchResolvedMeetings();
+    }
+  }, [activeTab, fetchResolvedMeetings, resolvedMeetings.length]);
 
   // ---------------------------------------------------------------
   // HANDLERS
@@ -441,6 +513,10 @@ export default function AdminPostMeetingsPage() {
 
   const pendingReports = reports.filter((r) => !r.finalized);
   const finalizedReports = reports.filter((r) => r.finalized);
+  const selectedCoordinatorFeedback = extractCoordinatorFeedback(selectedReport);
+  const selectedParticipantResponses = selectedReport
+    ? getParticipantResponses(selectedReport.participant_yes_no)
+    : {};
 
   /** Get participant display by role */
   const getParticipant = (meeting: InvestigationMeeting, role: string) =>
@@ -492,6 +568,27 @@ export default function AdminPostMeetingsPage() {
       "Both parties share responsibility. Charges remain as-is (no refund). Use for mutual fault situations.",
   };
 
+  const totalInvestigationPages = Math.max(
+    1,
+    Math.ceil(investigations.length / INVESTIGATIONS_PAGE_SIZE)
+  );
+  const currentInvestigationPage = Math.min(
+    investigationPage,
+    totalInvestigationPages
+  );
+  const investigationPageStart =
+    (currentInvestigationPage - 1) * INVESTIGATIONS_PAGE_SIZE;
+  const paginatedInvestigations = investigations.slice(
+    investigationPageStart,
+    investigationPageStart + INVESTIGATIONS_PAGE_SIZE
+  );
+  const investigationPageEnd =
+    investigationPageStart + paginatedInvestigations.length;
+
+  useEffect(() => {
+    setInvestigationPage((page) => Math.min(page, totalInvestigationPages));
+  }, [totalInvestigationPages]);
+
   // ---------------------------------------------------------------
   // RENDER
   // ---------------------------------------------------------------
@@ -509,8 +606,13 @@ export default function AdminPostMeetingsPage() {
         </div>
         <button
           onClick={() => {
-            fetchReports();
-            fetchInvestigations();
+            if (activeTab === "reports") {
+              fetchReports();
+            } else if (activeTab === "resolved") {
+              fetchResolvedMeetings();
+            } else {
+              fetchInvestigations();
+            }
           }}
           className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
         >
@@ -580,8 +682,10 @@ export default function AdminPostMeetingsPage() {
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {investigations.map((meeting) => {
+            <>
+              <div className="max-h-[68vh] overflow-auto pr-2">
+                <div className="space-y-4">
+              {paginatedInvestigations.map((meeting) => {
                 const guest = getParticipant(meeting, "guest");
                 const host = getParticipant(meeting, "host");
                 const daysSinceFinalized = meeting.finalized_at
@@ -706,7 +810,74 @@ export default function AdminPostMeetingsPage() {
                   </div>
                 );
               })}
-            </div>
+                </div>
+              </div>
+              {totalInvestigationPages > 1 && (
+                <div className="mt-4 flex flex-col gap-3 rounded-xl border border-gray-100 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-gray-500">
+                    Showing {investigationPageStart + 1} to{" "}
+                    {investigationPageEnd} of {investigations.length} reviews
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInvestigationPage(
+                          Math.max(1, currentInvestigationPage - 1)
+                        )
+                      }
+                      disabled={currentInvestigationPage === 1}
+                      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </button>
+                    <label
+                      className="sr-only"
+                      htmlFor="investigation-page-select"
+                    >
+                      Select review page
+                    </label>
+                    <select
+                      id="investigation-page-select"
+                      value={currentInvestigationPage}
+                      onChange={(event) =>
+                        setInvestigationPage(Number(event.target.value))
+                      }
+                      className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20"
+                    >
+                      {Array.from(
+                        { length: totalInvestigationPages },
+                        (_, index) => {
+                          const pageNumber = index + 1;
+                          return (
+                            <option key={pageNumber} value={pageNumber}>
+                              Page {pageNumber} of {totalInvestigationPages}
+                            </option>
+                          );
+                        }
+                      )}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInvestigationPage(
+                          Math.min(
+                            totalInvestigationPages,
+                            currentInvestigationPage + 1
+                          )
+                        )
+                      }
+                      disabled={currentInvestigationPage === totalInvestigationPages}
+                      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -732,37 +903,59 @@ export default function AdminPostMeetingsPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {pendingReports.map((report) => (
-                <div
-                  key={report.id}
-                  className="bg-white rounded-xl p-4 shadow-sm border border-gray-100"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        Meeting #{report.meeting_id.slice(0, 8)}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        Coordinator: {report.coordinator_name}
-                      </p>
-                      {report.meeting && (
+              {pendingReports.map((report) => {
+                const feedback = extractCoordinatorFeedback(report);
+
+                return (
+                  <div
+                    key={report.id}
+                    className="bg-white rounded-xl p-4 shadow-sm border border-gray-100"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-gray-900">
+                            Meeting #{report.meeting_id.slice(0, 8)}
+                          </p>
+                          {feedback?.status_label && (
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                feedback.status === "successful"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-red-100 text-red-700"
+                              }`}
+                            >
+                              {feedback.status_label}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-gray-500">
-                          Scheduled:{" "}
-                          {new Date(
-                            report.meeting.scheduled_at
-                          ).toLocaleString()}
+                          Coordinator: {report.coordinator_name}
                         </p>
-                      )}
+                        {feedback?.note && (
+                          <p className="mt-1 line-clamp-2 text-sm text-gray-600">
+                            {feedback.note}
+                          </p>
+                        )}
+                        {report.meeting && (
+                          <p className="text-sm text-gray-500">
+                            Scheduled:{" "}
+                            {new Date(
+                              report.meeting.scheduled_at
+                            ).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setSelectedReport(report)}
+                        className="px-4 py-2 rounded-lg bg-[#1f419a] text-white hover:bg-[#17357b]"
+                      >
+                        Review
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setSelectedReport(report)}
-                      className="px-4 py-2 rounded-lg bg-[#1f419a] text-white hover:bg-[#17357b]"
-                    >
-                      Review
-                    </button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -773,7 +966,7 @@ export default function AdminPostMeetingsPage() {
       {/* ============================================================= */}
       {activeTab === "resolved" && (
         <div>
-          {investigationsLoading ? (
+          {resolvedLoading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="h-8 w-8 animate-spin text-[#1f419a]" />
             </div>
@@ -873,9 +1066,26 @@ export default function AdminPostMeetingsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Coordinator Conclusion
                 </label>
-                <p className="p-3 bg-gray-50 rounded-lg text-sm">
-                  {selectedReport.conclusion || "No conclusion provided"}
-                </p>
+                <div className="space-y-2 rounded-lg bg-gray-50 p-3 text-sm">
+                  <p className="font-semibold text-gray-900">
+                    {selectedCoordinatorFeedback?.status_label ||
+                      selectedReport.conclusion ||
+                      "No conclusion provided"}
+                  </p>
+                  {selectedCoordinatorFeedback?.note ? (
+                    <p className="text-gray-700">
+                      {selectedCoordinatorFeedback.note}
+                    </p>
+                  ) : null}
+                  {selectedCoordinatorFeedback?.submitted_at ? (
+                    <p className="text-xs text-gray-500">
+                      Submitted{" "}
+                      {new Date(
+                        selectedCoordinatorFeedback.submitted_at
+                      ).toLocaleString()}
+                    </p>
+                  ) : null}
+                </div>
               </div>
 
               <div>
@@ -883,11 +1093,9 @@ export default function AdminPostMeetingsPage() {
                   Participant Responses
                 </label>
                 <div className="p-3 bg-gray-50 rounded-lg">
-                  {selectedReport.participant_yes_no &&
-                  typeof selectedReport.participant_yes_no === "object" ? (
-                    Object.entries(selectedReport.participant_yes_no).map(
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      ([userId, response]: [string, any]) => (
+                  {Object.keys(selectedParticipantResponses).length > 0 ? (
+                    Object.entries(selectedParticipantResponses).map(
+                      ([userId, response]) => (
                         <div
                           key={userId}
                           className="flex items-center gap-2 mb-2"
@@ -956,8 +1164,7 @@ export default function AdminPostMeetingsPage() {
                 <select
                   value={finalizeAction}
                   onChange={(e) =>
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    setFinalizeAction(e.target.value as any)
+                    setFinalizeAction(e.target.value as "charge" | "refund" | "no_charge")
                   }
                   className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
                 >

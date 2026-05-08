@@ -16,6 +16,8 @@ const BRAND = {
   gradient: "linear-gradient(135deg, #1f419a 0%, #2a44a3 100%)",
   footerText: "MatchIndeed — Video Dating, Done Right",
   supportEmail: "support@matchindeed.com",
+  lightLogoUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com"}/matchindeed-logo-white.png`,
+  darkLogoUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com"}/matchindeed-logo-black-font.png`,
 };
 
 // ---------------------------------------------------------------
@@ -37,13 +39,16 @@ function baseLayout(title: string, bodyContent: string): string {
     body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f7; }
     .container { max-width: 600px; margin: 0 auto; padding: 20px; }
     .card { background: #ffffff; border-radius: 16px; padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-    .header { text-align: center; padding-bottom: 24px; border-bottom: 1px solid #eee; margin-bottom: 24px; }
-    .logo { font-size: 24px; font-weight: 800; background: ${BRAND.gradient}; -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .header { text-align: center; padding: 24px; border-bottom: 1px solid #e5e7eb; margin-bottom: 24px; background: linear-gradient(135deg, #1e2a78 0%, #2a44a3 100%); border-radius: 14px; }
+    .logo-mark { display: inline-block; }
+    .logo-mark img { display: block; width: 170px; max-width: 100%; height: auto; margin: 0 auto; }
+    .logo-mark .logo-dark { display: none; }
     h1 { color: #1a1a2e; font-size: 22px; margin: 0 0 8px; }
     p { color: #4a4a6a; font-size: 15px; line-height: 1.6; margin: 8px 0; }
     .highlight { background: #f0f2ff; border-left: 4px solid ${BRAND.primaryColor}; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
     .highlight p { margin: 4px 0; }
-    .btn { display: inline-block; padding: 14px 32px; background: ${BRAND.gradient}; color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 16px 0; }
+    .btn, .btn:link, .btn:visited { display: inline-block; padding: 14px 32px; background: ${BRAND.gradient}; color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 16px 0; }
+    .btn span { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
     .warning { background: #fff8e6; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
     .success { background: #ecfdf5; border-left: 4px solid #10b981; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
     .danger { background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
@@ -56,13 +61,39 @@ function baseLayout(title: string, bodyContent: string): string {
     .badge-green { background: #d1fae5; color: #065f46; }
     .badge-red { background: #fee2e2; color: #991b1b; }
     .badge-amber { background: #fef3c7; color: #92400e; }
+    @media (prefers-color-scheme: dark) {
+      body { background-color: #111827 !important; }
+      .card { background: #1f2937 !important; box-shadow: none !important; }
+      .header { background: #ffffff !important; border-bottom-color: #374151 !important; }
+      .logo-mark .logo-light { display: none !important; }
+      .logo-mark .logo-dark { display: block !important; }
+      h1 { color: #f9fafb !important; }
+      p { color: #d1d5db !important; }
+      .highlight { background: #273449 !important; }
+      .warning { background: #3a2c16 !important; }
+      .success { background: #163227 !important; }
+      .danger { background: #3b1f25 !important; }
+      .btn, .btn:link, .btn:visited, .btn span { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
+      .footer { border-top-color: #374151 !important; }
+      .footer p { color: #9ca3af !important; }
+      .meta { color: #9ca3af !important; }
+    }
+    [data-ogsc] body { background-color: #111827 !important; }
+    [data-ogsc] .card { background: #1f2937 !important; box-shadow: none !important; }
+    [data-ogsc] .header { background: #ffffff !important; border-bottom-color: #374151 !important; }
+    [data-ogsc] .logo-mark .logo-light { display: none !important; }
+    [data-ogsc] .logo-mark .logo-dark { display: block !important; }
+    [data-ogsc] .btn, [data-ogsc] .btn:link, [data-ogsc] .btn:visited, [data-ogsc] .btn span { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="card">
       <div class="header">
-        <div class="logo">${BRAND.name}</div>
+        <div class="logo-mark">
+          <img class="logo-light" src="${BRAND.lightLogoUrl}" alt="${BRAND.name}" width="170" height="68" />
+          <img class="logo-dark" src="${BRAND.darkLogoUrl}" alt="${BRAND.name}" width="170" height="68" />
+        </div>
       </div>
       ${bodyContent}
       <div class="footer">
@@ -80,9 +111,13 @@ function baseLayout(title: string, bodyContent: string): string {
 // ---------------------------------------------------------------
 
 export type EmailTemplate =
+  | "signup_confirmation"
+  | "password_reset"
   | "meeting_request"
   | "meeting_accepted"
+  | "meeting_approved"
   | "meeting_cancelled"
+  | "profile_view"
   | "meeting_reminder"
   | "meeting_completed"
   | "cancellation_charge"
@@ -92,7 +127,9 @@ export type EmailTemplate =
   | "response_submitted"
   | "credit_refund"
   | "welcome"
-  | "account_warning";
+  | "account_warning"
+  | "account_deactivated"
+  | "account_deletion_requested";
 
 export type EmailData = {
   recipientName: string;
@@ -111,12 +148,20 @@ export function generateEmail(
   data: EmailData
 ): { subject: string; html: string } {
   switch (template) {
+    case "signup_confirmation":
+      return signupConfirmationEmail(data);
+    case "password_reset":
+      return passwordResetEmail(data);
     case "meeting_request":
       return meetingRequestEmail(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
+    case "meeting_approved":
+      return meetingApprovedEmail(data);
     case "meeting_cancelled":
       return meetingCancelledEmail(data);
+    case "profile_view":
+      return profileViewEmail(data);
     case "meeting_reminder":
       return meetingReminderEmail(data);
     case "meeting_completed":
@@ -137,6 +182,10 @@ export function generateEmail(
       return welcomeEmail(data);
     case "account_warning":
       return accountWarningEmail(data);
+    case "account_deactivated":
+      return accountDeactivatedEmail(data);
+    case "account_deletion_requested":
+      return accountDeletionRequestedEmail(data);
     default:
       throw new Error(`Unknown email template: ${template}`);
   }
@@ -145,6 +194,63 @@ export function generateEmail(
 // ---------------------------------------------------------------
 // INDIVIDUAL TEMPLATES
 // ---------------------------------------------------------------
+
+function signupConfirmationEmail(data: EmailData) {
+  const subject = "Confirm your MatchIndeed account";
+  const html = baseLayout(
+    subject,
+    `
+    <h1 style="text-align:center;">Confirm your account</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>Thank you for joining MatchIndeed — where intentional dating begins.</p>
+    <p>To complete your sign-up and activate your account, please confirm your email address by clicking the button below:</p>
+    <div style="text-align:center;">
+      <a href="${data.confirmationUrl || "#"}" class="btn">Confirm My Account</a>
+    </div>
+    <p class="meta" style="text-align:center;">If the button doesn&apos;t work, use this link:</p>
+    <p style="word-break:break-word; text-align:center;">
+      <a href="${data.confirmationUrl || "#"}" style="color:${BRAND.primaryColor}; text-decoration:underline;">${data.confirmationUrl || "Confirmation Link"}</a>
+    </p>
+    <div class="highlight">
+      <p><strong>Once confirmed, you&apos;ll be able to:</strong></p>
+      <p>Set up your profile</p>
+      <p>View who&apos;s interested in you</p>
+      <p>Book video-date meetings</p>
+      <p>Start connecting with real, intentional daters</p>
+    </div>
+    <p class="meta" style="text-align:center;">If you didn&apos;t create a MatchIndeed account, you can safely ignore this email.</p>
+    `
+  );
+  return { subject, html };
+}
+
+function passwordResetEmail(data: EmailData) {
+  const subject = "Reset your MatchIndeed password";
+  const html = baseLayout(
+    subject,
+    `
+    <h1 style="text-align:center;">Reset your password</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>We received a request to reset your MatchIndeed password.</p>
+    <div class="highlight">
+      <p><strong>Use the secure button below to choose a new password.</strong></p>
+      <p>This reset link expires in 1 hour for your safety.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.resetUrl || "#"}" class="btn">Reset Password</a>
+    </div>
+    <p class="meta" style="text-align:center;">If the button doesn&apos;t work, use this secure link:</p>
+    <p style="word-break:break-word; text-align:center;">
+      <a href="${data.resetUrl || "#"}" style="color:${BRAND.primaryColor}; text-decoration:underline;">${data.resetUrl || "Password Reset Link"}</a>
+    </p>
+    <div class="warning">
+      <p><strong>Didn&apos;t request this?</strong></p>
+      <p>You can safely ignore this email if you did not ask to reset your password.</p>
+    </div>
+    `
+  );
+  return { subject, html };
+}
 
 function meetingRequestEmail(data: EmailData) {
   const subject = `New Video Dating Meeting Request from ${data.requesterName}`;
@@ -157,6 +263,11 @@ function meetingRequestEmail(data: EmailData) {
     <div class="highlight">
       <p><strong>Date:</strong> ${data.meetingDate}</p>
       <p><strong>Time:</strong> ${data.meetingTime}</p>
+      ${
+        data.meetingTimeZone
+          ? `<p><strong>Time zone:</strong> ${data.meetingTimeZone}</p>`
+          : ""
+      }
       <p><strong>Type:</strong> ${data.meetingType || "Video Call"}</p>
     </div>
     <p>Please log in to your dashboard to accept or decline this request.</p>
@@ -171,25 +282,119 @@ function meetingRequestEmail(data: EmailData) {
   return { subject, html };
 }
 
-function meetingAcceptedEmail(data: EmailData) {
-  const subject = `Meeting Accepted! Your video date is confirmed`;
+function accountDeactivatedEmail(data: EmailData) {
+  const subject = "Your MatchIndeed Account Is Currently Deactivated";
   const html = baseLayout(
     subject,
     `
-    <h1>Meeting Confirmed!</h1>
+    <h1>Your MatchIndeed Account Is Currently Deactivated</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>Your profile is hidden and you cannot book dates, send messages, or interact with other members.</p>
+    <p>You can reactivate your account at any time to continue connecting.</p>
+    <div style="text-align:center;">
+      <a href="${data.reactivateUrl || data.dashboardUrl || "#"}" class="btn">Reactivate My Account</a>
+    </div>
+    <p class="meta" style="text-align:center;">If you did not request this change, please contact MatchIndeed support.</p>
+    `
+  );
+  return { subject, html };
+}
+
+function accountDeletionRequestedEmail(data: EmailData) {
+  const subject = "We received your MatchIndeed account deletion request";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Account deletion request received</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>We’ve received your request to delete your MatchIndeed account.</p>
+    <div class="warning">
+      <p>Your profile is now hidden while our support team reviews your request.</p>
+      ${
+        data.requestedAt
+          ? `<p><strong>Requested:</strong> ${data.requestedAt}</p>`
+          : ""
+      }
+    </div>
+    <p>We’ll contact you if we need any additional information before completing the request.</p>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Contact Support</a>
+    </div>
+    <p class="meta" style="text-align:center;">If you did not submit this request, please contact MatchIndeed support immediately.</p>
+    `
+  );
+  return { subject, html };
+}
+
+function meetingAcceptedEmail(data: EmailData) {
+  const awaitingAdminApproval = Boolean(data.awaitingAdminApproval);
+  const subject = awaitingAdminApproval
+    ? `Meeting accepted — awaiting admin approval`
+    : `Meeting Accepted! Your video date is confirmed`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>${awaitingAdminApproval ? "Meeting Accepted!" : "Meeting Confirmed!"}</h1>
     <p>Hi ${data.recipientName},</p>
-    <p>Great news! <strong>${data.partnerName}</strong> has accepted your meeting request.</p>
-    <div class="success">
+    <p>${
+      awaitingAdminApproval
+        ? `<strong>${data.partnerName}</strong> has accepted this meeting request.`
+        : `Great news! <strong>${data.partnerName}</strong> has accepted your meeting request.`
+    }</p>
+    <div class="${awaitingAdminApproval ? "highlight" : "success"}">
       <p><strong>Date:</strong> ${data.meetingDate}</p>
       <p><strong>Time:</strong> ${data.meetingTime}</p>
-      <p><strong>Status:</strong> <span class="badge badge-green">Confirmed</span></p>
+      ${
+        data.meetingTimeZone
+          ? `<p><strong>Time zone:</strong> ${data.meetingTimeZone}</p>`
+          : ""
+      }
+      <p><strong>Status:</strong> <span class="badge ${awaitingAdminApproval ? "badge-amber" : "badge-green"}">${awaitingAdminApproval ? "Awaiting Admin Approval" : "Confirmed"}</span></p>
     </div>
-    <p>Make sure to be on time. The meeting link will be available in your dashboard.</p>
+    <p>${
+      awaitingAdminApproval
+        ? "Both participants have accepted. MatchIndeed admin will review the request and confirm the booking before the meeting link appears in your dashboard."
+        : "Make sure to be on time. The meeting link will be available in your dashboard."
+    }</p>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">Go to Dashboard</a>
     </div>
-    <div class="warning">
+    ${
+      awaitingAdminApproval
+        ? ""
+        : `<div class="warning">
       <p><strong>Important:</strong> Cancellation after confirmation will result in charges. Please ensure your availability.</p>
+    </div>`
+    }
+    `
+  );
+  return { subject, html };
+}
+
+function meetingApprovedEmail(data: EmailData) {
+  const subject = "Your video date has been approved by MatchIndeed";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Meeting Approved</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p>Good news! MatchIndeed admin has approved your video meeting with <strong>${data.partnerName}</strong>.</p>
+    <div class="success">
+      <p><strong>Date:</strong> ${data.meetingDate}</p>
+      <p><strong>Time:</strong> ${data.meetingTime}</p>
+      ${
+        data.meetingTimeZone
+          ? `<p><strong>Time zone:</strong> ${data.meetingTimeZone}</p>`
+          : ""
+      }
+      <p><strong>Status:</strong> <span class="badge badge-green">Approved by Admin</span></p>
+    </div>
+    <p>Your meeting link is now ready in your appointments. Please join on time and make sure you have a stable internet connection before the meeting starts.</p>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">View Meeting</a>
+    </div>
+    <div class="warning">
+      <p><strong>Important:</strong> Cancellation after admin approval may result in charges. Please only cancel if absolutely necessary.</p>
     </div>
     `
   );
@@ -203,16 +408,45 @@ function meetingCancelledEmail(data: EmailData) {
     `
     <h1>Meeting Cancelled</h1>
     <p>Hi ${data.recipientName},</p>
-    <p>The video dating meeting scheduled for <strong>${data.meetingDate}</strong> has been cancelled by <strong>${data.cancelledBy}</strong>.</p>
+    <p>Your video-dating meeting set for <strong>${data.meetingDate}</strong> was cancelled by <strong>${data.cancelledBy}</strong>.</p>
     ${
-      data.refundIssued
+      data.cancellationReason
+        ? `<div class="highlight"><p><strong>Reason for cancellation:</strong></p><p>${data.cancellationReason}</p></div>`
+        : ""
+    }
+    ${
+      data.freePlanRestored
+        ? `<div class="success"><p>Your Free Plan credit has been restored and is ready to use anytime.</p></div>`
+        : data.refundIssued
         ? `<div class="success"><p>Your credits have been refunded to your account.</p></div>`
         : data.chargeApplied
           ? `<div class="danger"><p>A cancellation fee has been applied as per our cancellation policy.</p></div>`
           : ""
     }
+    <p>MatchIndeed Support</p>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">Back to Dashboard</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function profileViewEmail(data: EmailData) {
+  const subject = `${data.partnerName} viewed your profile`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Someone Viewed Your Profile</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p><strong>${data.partnerName}</strong> viewed your profile on MatchIndeed.</p>
+    <div class="highlight">
+      <p>This is a great time to review their profile, like them back, or request a video date if you're interested.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn" style="display:inline-block;padding:14px 32px;background:${BRAND.gradient};color:#ffffff !important;-webkit-text-fill-color:#ffffff !important;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;margin:16px 0;">
+        <span style="color:#ffffff !important;-webkit-text-fill-color:#ffffff !important;">See all views</span>
+      </a>
     </div>
     `
   );
@@ -230,6 +464,11 @@ function meetingReminderEmail(data: EmailData) {
     <div class="highlight">
       <p><strong>Date:</strong> ${data.meetingDate}</p>
       <p><strong>Time:</strong> ${data.meetingTime}</p>
+      ${
+        data.meetingTimeZone
+          ? `<p><strong>Time zone:</strong> ${data.meetingTimeZone}</p>`
+          : ""
+      }
       <p><strong>With:</strong> ${data.partnerName}</p>
     </div>
     <p>Make sure you&apos;re ready and your camera/microphone are working.</p>
@@ -262,22 +501,22 @@ function meetingCompletedEmail(data: EmailData) {
 }
 
 function cancellationChargeEmail(data: EmailData) {
-  const subject = `Cancellation Charge Applied — Meeting #${data.meetingRef}`;
+  const subject = `Cancellation Credits Applied — Meeting #${data.meetingRef}`;
   const html = baseLayout(
     subject,
     `
-    <h1>Cancellation Charge</h1>
+    <h1>Cancellation Credits</h1>
     <p>Hi ${data.recipientName},</p>
-    <p>A cancellation charge has been applied to your account for the video dating meeting scheduled on <strong>${data.meetingDate}</strong>.</p>
+    <p>Cancellation credits have been deducted from your account for the video dating meeting scheduled on <strong>${data.meetingDate}</strong>.</p>
     <div class="danger">
-      <p><strong>Charge:</strong> ${data.chargeAmount}</p>
+      <p><strong>Credits deducted:</strong> ${data.creditAmount}</p>
       <p><strong>Reason:</strong> ${data.reason || "Meeting cancelled after confirmation"}</p>
     </div>
-    <p>Per our cancellation policy, charges apply when meetings are cancelled after they have been accepted and confirmed.</p>
+    <p>Per our cancellation policy, cancellation credits apply when meetings are cancelled after they have been accepted and confirmed.</p>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">View Details</a>
     </div>
-    <p class="meta">If you believe this charge is incorrect, please contact support.</p>
+    <p class="meta">If you believe this credit deduction is incorrect, please contact support.</p>
     `
   );
   return { subject, html };

@@ -90,6 +90,11 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; badge: string }>
     text: "text-blue-900",
     badge: "bg-blue-200 text-blue-800",
   },
+  partner_responded: {
+    bg: "bg-purple-50",
+    text: "text-purple-900",
+    badge: "bg-purple-200 text-purple-800",
+  },
   approved: {
     bg: "bg-green-50",
     text: "text-green-900",
@@ -226,7 +231,12 @@ export default function AdminReactivationPage() {
       if (decision === "approved") {
         const { error: activateError } = await supabase
           .from("accounts")
-          .update({ account_status: "active" })
+          .update({
+            account_status: "active",
+            profile_visible: true,
+            calendar_enabled: true,
+            profile_status: "online",
+          })
           .eq("id", selectedRequest.user_id);
 
         if (activateError) throw activateError;
@@ -274,7 +284,12 @@ export default function AdminReactivationPage() {
 
   const totalPages = Math.ceil(filteredRequests.length / itemsPerPage);
 
-  const pendingCount = requests.filter((r) => r.status === "pending").length;
+  const pendingCount = requests.filter(
+    (r) =>
+      r.status === "pending" ||
+      r.status === "partner_notified" ||
+      r.status === "partner_responded"
+  ).length;
   const approvedCount = requests.filter((r) => r.status === "approved").length;
   const rejectedCount = requests.filter((r) => r.status === "rejected").length;
 
@@ -357,6 +372,7 @@ export default function AdminReactivationPage() {
           <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="partner_notified">Partner Notified</option>
+          <option value="partner_responded">Partner Responded</option>
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
         </select>
@@ -412,7 +428,9 @@ export default function AdminReactivationPage() {
                     {request.updated_at && ` • Updated ${new Date(request.updated_at).toLocaleDateString()}`}
                   </p>
                 </div>
-                {request.status === "pending" || request.status === "partner_notified" ? (
+                {["pending", "partner_notified", "partner_responded"].includes(
+                  request.status
+                ) ? (
                   <button
                     onClick={() => setSelectedRequest(request)}
                     className="px-4 py-2 rounded-lg bg-[#1f419a] text-white hover:bg-[#17357b] font-medium whitespace-nowrap"
@@ -533,7 +551,11 @@ export default function AdminReactivationPage() {
               )}
 
               {/* Only show decision controls if not already decided */}
-              {selectedRequest.status === "pending" || selectedRequest.status === "partner_notified" ? (
+              {[
+                "pending",
+                "partner_notified",
+                "partner_responded",
+              ].includes(selectedRequest.status) ? (
                 <>
                   {/* Decision */}
                   <div>

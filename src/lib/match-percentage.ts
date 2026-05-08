@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------
 
 export type PartnerPreferences = {
+  partner_gender_preference?: string | null;
   partner_location?: string | null;
   partner_age_range?: string | null;
   partner_height_min_cm?: number | null;

@@ -1,8 +1,8 @@
 /**
  * Admin Permissions Constants
  *
- * All available permissions for sub-admin roles.
- * Used by AdminSidebar and SubAdmins page.
+ * All available permissions for admin and coordinator accounts.
+ * Used by AdminSidebar, Coordinator dashboard, and SubAdmins page.
  */
 
 export const ALL_PERMISSIONS = [
@@ -25,6 +25,52 @@ export const ALL_PERMISSIONS = [
   "view_logs",
   "manage_activity_limits",
   "manage_subadmins",
+  "manage_2fa_auth",
 ] as const;
 
 export type Permission = (typeof ALL_PERMISSIONS)[number];
+
+export const COORDINATOR_PERMISSIONS = [
+  "view_assigned_meetings",
+  "view_upcoming_meetings",
+  "join_approved_meetings",
+  "manage_2fa_auth",
+] as const;
+
+export type CoordinatorPermission = (typeof COORDINATOR_PERMISSIONS)[number];
+
+export const ACCOUNT_PERMISSION_LABELS: Record<
+  Permission | CoordinatorPermission,
+  string
+> = {
+  view_users: "View users",
+  edit_users: "Edit users",
+  view_reports: "View reports",
+  resolve_reports: "Resolve reports",
+  moderate_photos: "Moderate photos",
+  warn_users: "Warn users",
+  suspend_users: "Suspend users",
+  view_meetings: "View meetings",
+  manage_meetings: "Manage meetings",
+  view_wallet: "View wallet",
+  manage_wallet: "Manage wallet",
+  view_analytics: "View analytics",
+  manage_pricing: "Manage pricing",
+  manage_calendar: "Manage calendar",
+  manage_hosts: "Manage coordinators",
+  manage_reactivation: "Manage reactivation",
+  view_logs: "View logs",
+  manage_activity_limits: "Manage activity limits",
+  manage_subadmins: "Manage sub-admins",
+  manage_2fa_auth: "2FA Auth setup",
+  view_assigned_meetings: "View assigned meetings",
+  view_upcoming_meetings: "View upcoming meetings",
+  join_approved_meetings: "Join approved meetings",
+};
+
+export const ACCOUNT_PERMISSIONS = [
+  ...ALL_PERMISSIONS,
+  ...COORDINATOR_PERMISSIONS,
+] as const;
+
+export type AccountPermission = (typeof ACCOUNT_PERMISSIONS)[number];

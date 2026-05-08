@@ -43,16 +43,35 @@ async function getAuthUserId(request: NextRequest): Promise<string | null> {
 }
 
 /**
- * Verify the user is a host
+ * Fetch active host profile by user id
  */
-async function verifyHost(userId: string): Promise<boolean> {
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("user_type")
-    .eq("id", userId)
-    .single();
+async function getHostProfile(userId: string) {
+  const { data, error } = await supabase
+    .from("host_profiles")
+    .select("id, host_type, is_active")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-  return account?.user_type === "host";
+  if (error || !data || !data.is_active) {
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Check if meeting belongs to host (for optional meeting-linked reports)
+ */
+async function ensureMeetingBelongsToHost(hostId: string, meetingId: string) {
+  const { data, error } = await supabase
+    .from("host_meetings")
+    .select("id")
+    .eq("host_id", hostId)
+    .eq("meeting_id", meetingId)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  return true;
 }
 
 /**
@@ -66,9 +85,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify user is a host
-    const isHost = await verifyHost(userId);
-    if (!isHost) {
+    const hostProfile = await getHostProfile(userId);
+    if (!hostProfile) {
       return NextResponse.json(
         { error: "Only hosts can submit reports" },
         { status: 403 }
@@ -100,6 +118,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (meeting_id && !(await ensureMeetingBelongsToHost(hostProfile.id, meeting_id))) {
+      return NextResponse.json(
+        { error: "Meeting not found for this host" },
+        { status: 404 }
+      );
+    }
+
     const validSeverities = ["low", "medium", "high", "critical"];
     const severityLevel = severity && validSeverities.includes(severity) ? severity : "medium";
 
@@ -108,12 +133,12 @@ export async function POST(request: NextRequest) {
       .from("host_reports")
       .insert([
         {
-          host_id: userId,
+          host_id: hostProfile.id,
           report_type,
           meeting_id: meeting_id || null,
           guest_id: guest_id || null,
-          title,
-          description,
+          title: title.trim(),
+          description: description.trim(),
           severity: severityLevel,
           status: "pending",
           created_at: new Date().toISOString(),

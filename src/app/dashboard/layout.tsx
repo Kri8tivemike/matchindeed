@@ -6,6 +6,13 @@ import { supabase } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
 import MobileNav from "@/components/dashboard/MobileNav";
 import OneSignalProvider from "@/components/OneSignalProvider";
+import { DashboardAccessProvider } from "@/components/dashboard/DashboardAccessProvider";
+import {
+  calculateAge,
+  MINIMUM_PLATFORM_AGE,
+} from "@/lib/age-restrictions";
+import { shouldSkipBackgroundRequest } from "@/lib/request-errors";
+import { resolveUserProgressState } from "@/lib/user-progress";
 
 /**
  * DashboardLayout - Protected layout that enforces profile completion
@@ -49,6 +56,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         // Store user ID for OneSignal and other integrations
         setUserId(session.user.id);
 
+        // Block underage users from dashboard access.
+        const { data: profileData } = await supabase
+          .from("user_profiles")
+          .select("date_of_birth")
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+        const age = calculateAge(profileData?.date_of_birth || null);
+        if (age !== null && age < MINIMUM_PLATFORM_AGE) {
+          await supabase.auth.signOut();
+          router.push("/login");
+          return;
+        }
+
         // If on an allowed route, let them through
         if (isAllowedRoute) {
           setChecking(false);
@@ -57,26 +77,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
 
         // Check profile and preferences completion status
-        const { data: progress, error: progressError } = await supabase
-          .from("user_progress")
-          .select("profile_completed, preferences_completed")
-          .eq("user_id", session.user.id)
-          .maybeSingle();
-
-        // If no progress record exists, create one and redirect to profile edit
-        if (progressError || !progress) {
-          await supabase.from("user_progress").upsert([
-            { 
-              user_id: session.user.id, 
-              profile_completed: false, 
-              preferences_completed: false 
-            }
-          ], { onConflict: "user_id" });
-          
-          // Redirect to profile edit page - draft will be automatically loaded if available
-          router.push("/dashboard/profile/edit");
-          return;
-        }
+        const progress = await resolveUserProgressState(supabase, session.user.id);
 
         // If profile is not completed, redirect to profile edit page
         // Draft will be automatically loaded if available, allowing users to resume
@@ -116,6 +117,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     /** Send a single heartbeat to update last_active_at */
     const sendHeartbeat = async () => {
+      if (shouldSkipBackgroundRequest()) return;
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
@@ -151,20 +154,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  // Full-screen overlay pages (edit, my-account) should not show mobile nav
+  // Full-screen overlay/form pages should not show mobile nav
   const isOverlayPage =
     pathname.includes("/profile/edit") ||
+    pathname.startsWith("/dashboard/profile/preferences") ||
     pathname.includes("/profile/my-account") ||
     pathname.includes("/profile/notifications") ||
     pathname.includes("/meetings/join");
 
   return (
-    <>
+    <DashboardAccessProvider>
       <OneSignalProvider userId={userId} />
       <div className={!isOverlayPage ? "mobile-nav-spacing" : ""}>
         {children}
       </div>
       {!isOverlayPage && <MobileNav />}
-    </>
+    </DashboardAccessProvider>
   );
 }

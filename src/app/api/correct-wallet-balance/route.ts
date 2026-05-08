@@ -1,18 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { hasUnlockedWalletAccess } from "@/lib/subscription/permissions";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+const getErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
+
 /**
  * Correct wallet balance based on actual transaction records
  * This recalculates the balance from transaction history
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
     // Get authenticated user from server-side session
     const cookieStore = await cookies();
@@ -29,8 +32,7 @@ export async function POST(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) => {
                 cookieStore.set(name, value, options);
               });
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (error) {
+            } catch {
               // Ignore cookie setting errors
             }
           },
@@ -42,6 +44,17 @@ export async function POST(request: NextRequest) {
 
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const walletAccessEnabled = await hasUnlockedWalletAccess(user.id);
+    if (!walletAccessEnabled) {
+      return NextResponse.json(
+        {
+          error:
+            "Wallet is locked until your first successful subscription payment.",
+        },
+        { status: 403 }
+      );
     }
 
     // Get all transactions for this user
@@ -136,11 +149,10 @@ export async function POST(request: NextRequest) {
       difference,
       message: "Balance is correct, no adjustment needed",
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error correcting wallet balance:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to correct wallet balance" },
+      { error: getErrorMessage(error, "Failed to correct wallet balance") },
       { status: 500 }
     );
   }

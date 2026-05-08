@@ -4,6 +4,17 @@ import {
   sendMeetingCancelledEmail,
   sendCancellationChargeEmail,
 } from "@/lib/email";
+import { consumeCredits, refundConsumedCredits } from "@/lib/credits/actions";
+import {
+  evaluateCancellationPolicy,
+  getCancellationFeeCredits,
+} from "@/lib/meetings/validation";
+import {
+  deriveWorkflowState,
+  requireMeetingStateTransition,
+} from "@/lib/meetings/state-machine";
+import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
+import { restoreStarterTrialMeeting } from "@/lib/starter-trial";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,6 +38,107 @@ async function getAuthUser(request: NextRequest) {
   }
 
   return user;
+}
+
+async function refundBookingValueToGuest(
+  meetingId: string,
+  guestUserId: string,
+  meeting: {
+    requester_credit_cost?: number | null;
+    fee_cents?: number | null;
+    charge_status?: string | null;
+  }
+) {
+  await refundConsumedCredits(
+    supabase,
+    guestUserId,
+    typeof meeting.requester_credit_cost === "number"
+      ? meeting.requester_credit_cost
+      : 1,
+    {
+      actionType: "meeting_canceled_refund",
+      description:
+        "Meeting canceled by the other participant; refunded booking credits.",
+    }
+  );
+
+  if (meeting.charge_status !== "captured" || !meeting.fee_cents) {
+    return false;
+  }
+
+  const { data: wallet } = await supabase
+    .from("wallets")
+    .select("balance_cents")
+    .eq("user_id", guestUserId)
+    .single();
+
+  if (!wallet) {
+    return false;
+  }
+
+  const balanceBefore = wallet.balance_cents || 0;
+  const balanceAfter = balanceBefore + meeting.fee_cents;
+
+  await supabase
+    .from("wallets")
+    .update({
+      balance_cents: balanceAfter,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", guestUserId);
+
+  await supabase.from("wallet_transactions").insert({
+    user_id: guestUserId,
+    type: "meeting_cancellation_refund",
+    amount_cents: meeting.fee_cents,
+    description: `Meeting booking refund for canceled meeting ${meetingId}.`,
+    balance_before_cents: balanceBefore,
+    balance_after_cents: balanceAfter,
+    reference_id: meetingId,
+  });
+
+  return true;
+}
+
+function formatCredits(amount: number) {
+  return `${amount} credit${amount === 1 ? "" : "s"}`;
+}
+
+async function restoreStarterTrialForOtherParticipants(
+  meetingId: string,
+  canceledByUserId: string
+) {
+  const { data: participants, error } = await supabase
+    .from("meeting_participants")
+    .select("user_id")
+    .eq("meeting_id", meetingId)
+    .neq("user_id", canceledByUserId);
+
+  if (error) {
+    throw error;
+  }
+
+  const restoredUserIds = await Promise.all(
+    (participants || []).map(async (participant) => {
+      try {
+        const result = await restoreStarterTrialMeeting(
+          supabase,
+          String(participant.user_id),
+          meetingId
+        );
+        return result.restored ? String(participant.user_id) : null;
+      } catch (starterTrialError) {
+        console.error("Error restoring starter trial after meeting cancellation:", {
+          meetingId,
+          userId: participant.user_id,
+          starterTrialError,
+        });
+        return null;
+      }
+    })
+  );
+
+  return restoredUserIds.filter((userId): userId is string => Boolean(userId));
 }
 
 /**
@@ -84,30 +196,39 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Determine if cancellation is allowed and what fees apply
-    const cancellationFeeCents = meeting.cancellation_fee_cents || 0;
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("tier, role")
+      .eq("id", user.id)
+      .single();
+
+    const userTier = (account?.tier || "basic").toLowerCase();
+    const isAdmin =
+      !!account?.role &&
+      ["admin", "superadmin"].includes(account.role);
+
+    const { data: guest } = await supabase
+      .from("meeting_participants")
+      .select("user_id")
+      .eq("meeting_id", meeting_id)
+      .eq("role", "guest")
+      .single();
+
+    const refundsAffectedBooker = Boolean(guest?.user_id && guest.user_id !== user.id);
+
+    const policy = evaluateCancellationPolicy({
+      meetingStatus: meeting.status,
+      userTier,
+      isAdmin,
+      isHostCanceller: participant.role === "host",
+      cancellationFeeCents: getCancellationFeeCredits(userTier),
+      meetingFeeCents: meeting.fee_cents,
+      confirmed: true,
+    });
     const isAdminApproved = meeting.status === "confirmed";
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const isHost = participant.role === "host";
-
-    // Per client rules: No one can cancel after admin approval
-    // The cancelling user gets charged regardless of role
-    let canCancel = true;
-    let cancellationBlocked = false;
-    let blockReason = "";
-
-    if (isAdminApproved) {
-      // Meeting is confirmed/approved — cancellation is heavily penalized
-      canCancel = true; // They CAN cancel but will be charged
-      cancellationBlocked = false;
-    }
-
-    // If meeting is already canceled or completed, cannot cancel
-    if (!["pending", "confirmed"].includes(meeting.status)) {
-      canCancel = false;
-      cancellationBlocked = true;
-      blockReason = "This meeting cannot be canceled (already " + meeting.status + ").";
-    }
+    const canCancel = policy.allowed;
+    const cancellationBlocked = !policy.allowed;
+    const blockReason = policy.allowed ? "" : policy.message || "Cancellation is blocked.";
 
     return NextResponse.json({
       meeting_id,
@@ -116,23 +237,26 @@ export async function GET(request: NextRequest) {
       can_cancel: canCancel,
       cancellation_blocked: cancellationBlocked,
       block_reason: blockReason,
-      cancellation_fee_cents: cancellationFeeCents,
+      cancellation_fee_credits: policy.cancellationFeeCents,
       is_admin_approved: isAdminApproved,
       // Warning message to display to user
       warning_message: isAdminApproved
-        ? "This meeting has been approved. Cancelling will result in a cancellation fee being charged to your account. No credit refund will be issued."
-        : cancellationFeeCents > 0
-        ? "Cancelling this meeting will incur a cancellation fee."
+        ? refundsAffectedBooker
+          ? `This meeting has been approved. Cancelling will charge ${formatCredits(policy.cancellationFeeCents)} to your account, and the other participant's booking value will be refunded.`
+          : `This meeting has been approved. Cancelling will result in ${formatCredits(policy.cancellationFeeCents)} being charged to your account. No refund will be issued.`
+        : refundsAffectedBooker
+        ? `Cancelling this meeting will charge ${formatCredits(policy.cancellationFeeCents)} to your account and refund the other participant's booking value.`
+        : policy.cancellationFeeCents > 0
+        ? `Cancelling this meeting will incur a fee of ${formatCredits(policy.cancellationFeeCents)}.`
         : "Are you sure you want to cancel this meeting?",
       // Fee breakdown
       fee_details: {
-        cancellation_fee: cancellationFeeCents,
-        credit_refund: isAdminApproved ? false : true,
+        cancellation_fee_credits: policy.cancellationFeeCents,
+        credit_refund: refundsAffectedBooker,
         charged_to: "cancelling_user",
       },
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error in GET /api/meetings/cancel:", error);
     return NextResponse.json(
       { error: "Internal server error" },
@@ -212,51 +336,91 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get cancellation fee (admin-configurable)
-    const cancellationFeeCents = meeting.cancellation_fee_cents || 0;
-    const isAdminApproved = meeting.status === "confirmed";
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("tier, role")
+      .eq("id", user.id)
+      .single();
 
-    // ---------------------------------------------------------------
-    // CANCELLATION RULES (per client requirements)
-    // ---------------------------------------------------------------
+    const userTier = (account?.tier || "basic").toLowerCase();
+    const isAdmin =
+      !!account?.role &&
+      ["admin", "superadmin"].includes(account.role);
 
-    // Rule 1: If meeting is confirmed (admin approved), cancellation
-    //         is penalized — no credit refund, cancellation fee charged.
-    //         The user MUST confirm they've seen the fee warning.
-    if (isAdminApproved && !confirmed) {
+    const cancellationPolicy = evaluateCancellationPolicy({
+      meetingStatus: meeting.status,
+      userTier,
+      isAdmin,
+      isHostCanceller: participant.role === "host",
+      cancellationFeeCents: getCancellationFeeCredits(userTier),
+      meetingFeeCents: meeting.fee_cents,
+      confirmed: !!confirmed,
+    });
+    if (!cancellationPolicy.allowed) {
       return NextResponse.json(
         {
-          error: "cancellation_requires_confirmation",
-          message: "This meeting has been approved. Cancelling will charge you a cancellation fee with no credit refund. Please confirm to proceed.",
-          cancellation_fee_cents: cancellationFeeCents,
-          requires_confirmation: true,
+          error: cancellationPolicy.code || "cancellation_blocked",
+          message: cancellationPolicy.message || "Cancellation is not allowed.",
+          cancellation_fee_credits: cancellationPolicy.cancellationFeeCents,
+          requires_confirmation: cancellationPolicy.requiresConfirmation || false,
+          requires_upgrade:
+            cancellationPolicy.code === "tier_cancellation_forbidden",
         },
-        { status: 422 }
+        { status: cancellationPolicy.status }
       );
     }
 
-    // Rule 2: Even for pending meetings, if there's a fee, user must confirm
-    if (cancellationFeeCents > 0 && !confirmed) {
+    const cancellationFeeCredits = cancellationPolicy.cancellationFeeCents;
+    const formattedCancellationFee =
+      cancellationFeeCredits > 0
+        ? formatCredits(cancellationFeeCredits)
+        : "";
+
+    const currentWorkflowState = deriveWorkflowState({
+      workflowState:
+        typeof meeting.workflow_state === "string" ? meeting.workflow_state : null,
+      status: meeting.status,
+    });
+    const transitionValidation = requireMeetingStateTransition({
+      from: currentWorkflowState,
+      to: "canceled",
+    });
+    if (!transitionValidation.allowed) {
       return NextResponse.json(
         {
-          error: "cancellation_requires_confirmation",
-          message: `Cancelling this meeting will incur a fee of ${(cancellationFeeCents / 100).toFixed(2)}. Please confirm to proceed.`,
-          cancellation_fee_cents: cancellationFeeCents,
-          requires_confirmation: true,
+          error: "invalid_state_transition",
+          message:
+            transitionValidation.message ||
+            "Meeting cannot be moved to canceled state.",
         },
-        { status: 422 }
+        { status: 409 }
       );
     }
 
-    // ---------------------------------------------------------------
-    // PROCESS CANCELLATION
-    // ---------------------------------------------------------------
+    if (cancellationFeeCredits > 0) {
+      const charge = await consumeCredits(supabase, user.id, cancellationFeeCredits, {
+        actionType: "meeting_cancellation_fee",
+        description: `Cancellation fee for meeting ${meeting_id}. Canceled by ${participant.role}.`,
+      });
 
-    // Cancel the meeting — record who canceled and when
+      if (!charge.success) {
+        return NextResponse.json(
+          {
+            error: "insufficient_credits",
+            message: `You need ${formattedCancellationFee} to cancel this meeting.`,
+            cancellation_fee_credits: cancellationFeeCredits,
+            credits_available: charge.available,
+          },
+          { status: 402 }
+        );
+      }
+    }
+
     const { error: updateError } = await supabase
       .from("meetings")
       .update({
         status: "canceled",
+        workflow_state: "canceled",
         canceled_by: user.id,
         canceled_at: new Date().toISOString(),
         cancellation_reason: reason || null,
@@ -264,47 +428,17 @@ export async function POST(request: NextRequest) {
       .eq("id", meeting_id);
 
     if (updateError) {
+      if (cancellationFeeCredits > 0) {
+        await refundConsumedCredits(supabase, user.id, cancellationFeeCredits, {
+          actionType: "meeting_cancellation_fee_refund",
+          description: `Refunded ${formattedCancellationFee} because the meeting cancellation could not be completed.`,
+        });
+      }
       console.error("Error canceling meeting:", updateError);
       return NextResponse.json(
         { error: "Failed to cancel meeting" },
         { status: 500 }
       );
-    }
-
-    // ---------------------------------------------------------------
-    // CHARGE THE CANCELLING USER
-    // ---------------------------------------------------------------
-
-    // Apply cancellation fee to the cancelling user's wallet
-    if (cancellationFeeCents > 0) {
-      const { data: wallet } = await supabase
-        .from("wallets")
-        .select("balance_cents")
-        .eq("user_id", user.id)
-        .single();
-
-      if (wallet) {
-        const newBalance = (wallet.balance_cents || 0) - cancellationFeeCents;
-
-        await supabase
-          .from("wallets")
-          .update({
-            balance_cents: newBalance,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", user.id);
-
-        // Create wallet transaction record for audit trail
-        await supabase.from("wallet_transactions").insert({
-          user_id: user.id,
-          type: "cancellation_fee",
-          amount_cents: -cancellationFeeCents,
-          description: `Cancellation fee for meeting ${meeting_id}. Canceled by ${participant.role}.`,
-          balance_before_cents: wallet.balance_cents || 0,
-          balance_after_cents: newBalance,
-          reference_id: meeting_id,
-        });
-      }
     }
 
     // ---------------------------------------------------------------
@@ -314,31 +448,25 @@ export async function POST(request: NextRequest) {
     // Per client rules: If meeting was confirmed (admin approved),
     // NO credit refund to the requester (guest).
     // If meeting was still pending, guest gets credit back.
-    if (!isAdminApproved) {
-      // Meeting was pending — refund credits to the guest (requester)
-      const { data: guest } = await supabase
-        .from("meeting_participants")
-        .select("user_id")
-        .eq("meeting_id", meeting_id)
-        .eq("role", "guest")
-        .single();
+    const { data: guest } = await supabase
+      .from("meeting_participants")
+      .select("user_id")
+      .eq("meeting_id", meeting_id)
+      .eq("role", "guest")
+      .single();
 
-      if (guest) {
-        const { data: guestCredits } = await supabase
-          .from("credits")
-          .select("used")
-          .eq("user_id", guest.user_id)
-          .single();
+    const refundsAffectedBooker = Boolean(guest?.user_id && guest.user_id !== user.id);
+    let bookingValueRefunded = false;
 
-        if (guestCredits) {
-          await supabase
-            .from("credits")
-            .update({ used: Math.max(0, guestCredits.used - 1) })
-            .eq("user_id", guest.user_id);
-        }
-      }
+    if (refundsAffectedBooker && guest?.user_id) {
+      bookingValueRefunded = true;
+      await refundBookingValueToGuest(meeting_id, guest.user_id, meeting);
     }
-    // If admin approved: NO refund — credits remain consumed
+
+      const restoredStarterTrialUserIds =
+        meeting.status === "pending"
+          ? await restoreStarterTrialForOtherParticipants(meeting_id, user.id)
+          : [];
 
     // ---------------------------------------------------------------
     // SEND NOTIFICATIONS TO BOTH PARTIES
@@ -369,20 +497,40 @@ export async function POST(request: NextRequest) {
       );
 
       for (const otherP of otherParticipants || []) {
+        const cancellationMessage = `${cancellerName} has canceled the video meeting scheduled for ${new Date(meeting.scheduled_at).toLocaleDateString()} at ${new Date(meeting.scheduled_at).toLocaleTimeString()}.${
+          cancellationFeeCredits > 0
+            ? ` The cancelling party has been charged ${formattedCancellationFee}.`
+            : ""
+        }${
+          refundsAffectedBooker
+            ? " Your booking value has been refunded."
+            : ""
+        }`;
+
         await supabase.from("notifications").insert({
           user_id: otherP.user_id,
           type: "meeting_canceled",
           title: "Meeting Canceled",
-          message: `${cancellerName} has canceled the video meeting scheduled for ${new Date(meeting.scheduled_at).toLocaleDateString()} at ${new Date(meeting.scheduled_at).toLocaleTimeString()}.${
-            isAdminApproved
-              ? " The cancelling party has been charged a cancellation fee."
-              : ""
-          }`,
+          message: cancellationMessage,
           data: {
             meeting_id,
             canceled_by: user.id,
             canceled_by_role: participant.role,
-            cancellation_fee_applied: cancellationFeeCents > 0,
+            cancellation_fee_applied: cancellationFeeCredits > 0,
+          },
+        });
+
+        await sendPushNotificationIfAllowed({
+          userId: otherP.user_id,
+          type: "meeting_canceled",
+          title: "Video meeting canceled",
+          message: cancellationMessage,
+          url: "/dashboard/meetings?tab=all",
+          data: {
+            meeting_id,
+            canceled_by: user.id,
+            canceled_by_role: participant.role,
+            cancellation_fee_applied: cancellationFeeCredits > 0,
           },
         });
       }
@@ -393,19 +541,35 @@ export async function POST(request: NextRequest) {
         type: "meeting_canceled",
         title: "Meeting Cancellation Confirmed",
         message: `You have canceled the video meeting scheduled for ${new Date(meeting.scheduled_at).toLocaleDateString()}.${
-          cancellationFeeCents > 0
-            ? ` A cancellation fee of ${(cancellationFeeCents / 100).toFixed(2)} has been charged to your account.`
+          cancellationFeeCredits > 0
+            ? ` ${formattedCancellationFee} has been charged to your credits balance.`
             : ""
-        }${isAdminApproved ? " No credit refund will be issued." : ""}`,
+        }${refundsAffectedBooker ? " The other participant has been refunded." : " No refund will be issued."}`,
         data: {
           meeting_id,
-          cancellation_fee_cents: cancellationFeeCents,
-          credit_refunded: !isAdminApproved,
+          cancellation_fee_credits: cancellationFeeCredits,
+          credit_refunded: bookingValueRefunded,
         },
       });
 
       // Send email notifications to both parties
       const meetingDateStr = new Date(meeting.scheduled_at).toLocaleDateString();
+
+      if (cancellerAccount?.email) {
+        const { data: cancellerProfile } = await supabase
+          .from("user_profiles")
+          .select("first_name")
+          .eq("user_id", user.id)
+          .single();
+
+        await sendMeetingCancelledEmail(cancellerAccount.email, {
+          recipientName: cancellerProfile?.first_name || cancellerName,
+          meetingDate: meetingDateStr,
+          cancelledBy: "you",
+          refundIssued: false,
+          chargeApplied: cancellationFeeCredits > 0,
+        });
+      }
 
       for (const otherP of otherParticipants || []) {
         const { data: otherAccount } = await supabase
@@ -425,19 +589,20 @@ export async function POST(request: NextRequest) {
             recipientName: otherProfile?.first_name || "User",
             meetingDate: meetingDateStr,
             cancelledBy: cancellerName,
-            refundIssued: !isAdminApproved && otherP.role === "guest",
+            refundIssued: bookingValueRefunded && otherP.role === "guest",
+            freePlanRestored: restoredStarterTrialUserIds.includes(otherP.user_id),
             chargeApplied: false,
-          });
+          }, otherP.user_id);
         }
       }
 
       // Send cancellation charge email to the cancelling user if fee applies
-      if (cancellationFeeCents > 0 && cancellerAccount?.email) {
+      if (cancellationFeeCredits > 0 && cancellerAccount?.email) {
         await sendCancellationChargeEmail(cancellerAccount.email, {
           recipientName: cancellerName,
           meetingDate: meetingDateStr,
           meetingRef: meeting_id.slice(0, 8),
-          chargeAmount: `${(cancellationFeeCents / 100).toFixed(2)}`,
+          creditAmount: formattedCancellationFee,
           reason: "Meeting cancelled after confirmation",
         });
       }
@@ -449,13 +614,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: "Meeting canceled successfully",
-      cancellation_fee_applied: cancellationFeeCents > 0,
-      cancellation_fee_cents: cancellationFeeCents,
-      credit_refunded: !isAdminApproved,
-      canceled_by: participant.role,
+      cancellation_fee_applied: cancellationFeeCredits > 0,
+      cancellation_fee_credits: cancellationFeeCredits,
+      credit_refunded: bookingValueRefunded,
+      canceled_by: user.id,
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error in POST /api/meetings/cancel:", error);
     return NextResponse.json(
       { error: "Internal server error" },

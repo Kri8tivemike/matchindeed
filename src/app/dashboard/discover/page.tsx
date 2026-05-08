@@ -15,6 +15,23 @@ import { isAgeRestrictedForMatching } from "@/lib/age-restrictions";
 import { getActiveStatus } from "@/lib/active-status";
 import MeetingRequestModal from "@/components/MeetingRequestModal";
 import { useToast } from "@/components/ToastProvider";
+import {
+  NO_ACTIVE_MEETING_AVAILABILITY_BUTTON_LABEL,
+  NO_ACTIVE_MEETING_AVAILABILITY_TEXT,
+  getMinimumRequestableMeetingStartIso,
+  hasRequestableMeetingAvailability,
+} from "@/lib/meetings/request-availability";
+import { toStateCountryLabel } from "@/lib/location";
+import {
+  matchesPartnerGenderPreference,
+  resolvePartnerGenderPreference,
+} from "@/lib/matching/interest-preference";
+import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
+import {
+  FILTER_RELATIONSHIP_STATUS_OPTIONS,
+  formatRelationshipStatusLabel,
+  relationshipStatusMatches,
+} from "@/lib/relationship-status";
 
 type Profile = {
   id: string;
@@ -54,6 +71,7 @@ type Profile = {
   activeColor?: string;
   /** Whether user is currently online */
   isUserOnline?: boolean;
+  hasCalendarSlots?: boolean;
 };
 
 type RawProfile = {
@@ -84,6 +102,7 @@ type AccountRow = {
   display_name: string | null;
   account_status: string | null;
   profile_visible?: boolean | null;
+  calendar_enabled?: boolean | null;
   email_verified?: boolean | null;
   last_active_at?: string | null;
 };
@@ -102,7 +121,7 @@ export default function DiscoverPage() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const [activityLimits, setActivityLimits] = useState<{
+  const [, setActivityLimits] = useState<{
     day: { used: number; limit: number };
     week: { used: number; limit: number };
     month: { used: number; limit: number };
@@ -129,6 +148,9 @@ export default function DiscoverPage() {
   const [filterMaxAge, setFilterMaxAge] = useState(70);
   const [filterCity, setFilterCity] = useState("");
   const [filterGender, setFilterGender] = useState("");
+  const [requiredPartnerGender, setRequiredPartnerGender] = useState<
+    "male" | "female" | null
+  >(null);
   const [filterRelStatus, setFilterRelStatus] = useState("");
   const [filterVerified, setFilterVerified] = useState(false);
   const [filterHeightMin, setFilterHeightMin] = useState(140);
@@ -142,6 +164,8 @@ export default function DiscoverPage() {
   const [sortBy, setSortBy] = useState<string>("match");
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [showProfileDetail, setShowProfileDetail] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   // Fetch existing wink/interested activities on mount
   useEffect(() => {
@@ -202,11 +226,13 @@ export default function DiscoverPage() {
     drinking?: string | null;
     diet?: string | null;
     pets?: string | null;
+    hasCalendarSlots?: boolean;
   };
 
   const [topPicks, setTopPicks] = useState<TopPick[]>([]);
   const [topPicksLoading, setTopPicksLoading] = useState(false);
   const [topPicksError, setTopPicksError] = useState<string | null>(null);
+  const [hasLoadedTopPicks, setHasLoadedTopPicks] = useState(false);
   const [topPickIndex, setTopPickIndex] = useState(0);
   const topPick = topPicks[topPickIndex] ?? null;
   const fallbackPeople = [
@@ -217,9 +243,48 @@ export default function DiscoverPage() {
   const topImageIdxRef = useRef(0);
   const [topImageSrc, setTopImageSrc] = useState<string>(topPick ? topPick.imageUrl : fallbackPeople[0]);
   const [topAvatarSrcs, setTopAvatarSrcs] = useState<string[]>(() => topPicks.map(p => p.imageUrl));
+  const fetchTopPicksRef = useRef<() => Promise<void>>(async () => {});
+  const topPicksRequestInFlightRef = useRef(false);
 
   const [countdown, setCountdown] = useState("00:00:00");
   const lastRefreshDateRef = useRef<string>("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+    updateViewport();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateViewport);
+      return () => mediaQuery.removeEventListener("change", updateViewport);
+    }
+
+    mediaQuery.addListener(updateViewport);
+    return () => mediaQuery.removeListener(updateViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!showFilters || typeof document === "undefined") return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showFilters]);
+
+  useEffect(() => {
+    if (!showFilters || !isMobileViewport) return;
+    setShowAdvancedFilters(false);
+  }, [showFilters, isMobileViewport]);
+
+  useEffect(() => {
+    if (!requiredPartnerGender) return;
+    const allowedFilter = requiredPartnerGender === "male" ? "Male" : "Female";
+    if (filterGender && filterGender !== allowedFilter) {
+      setFilterGender("");
+    }
+  }, [filterGender, requiredPartnerGender]);
   
   useEffect(() => {
     const update = () => {
@@ -238,14 +303,12 @@ export default function DiscoverPage() {
       const today = now.toISOString().split("T")[0];
       if (diff <= 1000 && activeTab === "topPicks" && lastRefreshDateRef.current !== today) {
         lastRefreshDateRef.current = today;
-        fetchTopPicks();
+        void fetchTopPicksRef.current();
       }
     };
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-    // fetchTopPicks is intentionally called from the timer; activeTab gates execution.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   /**
@@ -270,15 +333,30 @@ export default function DiscoverPage() {
           return;
         }
 
-        // Get user's preferences for filtering (including blocked locations)
-        const { data: preferences } = await supabase
-          .from("user_preferences")
-          .select("*")
-          .eq("user_id", user.id)
-          .maybeSingle();
+        const [{ data: preferences }, { data: requesterProfile }] = await Promise.all([
+          supabase
+            .from("user_preferences")
+            .select("*")
+            .eq("user_id", user.id)
+            .maybeSingle(),
+          supabase
+            .from("user_profiles")
+            .select("gender")
+            .eq("user_id", user.id)
+            .maybeSingle(),
+        ]);
+        const requesterGender = requesterProfile?.gender || null;
 
         // Extract blocked locations for filtering
         const blockedLocations: string[] = preferences?.blocked_locations || [];
+        const partnerGenderPreference = resolvePartnerGenderPreference({
+          partnerGenderPreference: preferences?.partner_gender_preference || null,
+          legacyPartnerExperience: preferences?.partner_experience || null,
+          requesterGender,
+        });
+        if (isMounted) {
+          setRequiredPartnerGender(partnerGenderPreference);
+        }
 
         // Fetch other users' profiles
         // Try a simple query first to test RLS
@@ -348,28 +426,23 @@ export default function DiscoverPage() {
         let accountsMap = new Map<string, AccountRow>();
         const accountIds = otherProfiles.map((p) => p.user_id);
 
-        // Try fetching with profile_visible filter; fall back if column doesn't exist
+        // Query only guaranteed columns to avoid runtime schema-cache errors on older deployments.
         let accountsData: AccountRow[] | null = null;
         let accountsError: { code?: string } | null = null;
 
         const { data: accData, error: accErr } = await supabase
           .from("accounts")
-          .select("id, display_name, account_status, profile_visible, email_verified, last_active_at")
+          .select("id, display_name, account_status, email_verified, profile_visible, calendar_enabled")
           .in("id", accountIds);
 
-        if (accErr && accErr.code === "42703") {
-          // Columns don't exist yet — query without them
-          const { data: fallbackData, error: fallbackErr } = await supabase
-            .from("accounts")
-            .select("id, display_name, account_status, email_verified")
-            .in("id", accountIds);
-          const fallbackRows = (fallbackData || []) as AccountRow[];
-          accountsData = fallbackRows.map((a) => ({ ...a, profile_visible: true, last_active_at: null }));
-          accountsError = fallbackErr;
-        } else {
-          accountsData = (accData || null) as AccountRow[] | null;
-          accountsError = accErr;
-        }
+        const rows = (accData || []) as AccountRow[];
+        accountsData = rows.map((a) => ({
+          ...a,
+          profile_visible: a.profile_visible ?? true,
+          calendar_enabled: a.calendar_enabled ?? true,
+          last_active_at: a.last_active_at ?? null,
+        }));
+        accountsError = accErr;
 
         if (accountsError) {
           console.warn("Error fetching account names:", accountsError);
@@ -377,10 +450,23 @@ export default function DiscoverPage() {
         } else {
           // Only include active AND visible accounts
           const activeAccounts = (accountsData || []).filter(
-            (a) => a.account_status === "active" && a.profile_visible !== false
+            (a) =>
+              (a.account_status || "active") === "active" &&
+              a.profile_visible !== false &&
+              a.calendar_enabled !== false
           );
           accountsMap = new Map(activeAccounts.map((a) => [a.id, a]));
         }
+
+        const { data: availabilityData } = await supabase
+          .from("meeting_availability")
+          .select("user_id")
+          .in("user_id", accountIds)
+          .gte("scheduled_at_utc", getMinimumRequestableMeetingStartIso());
+
+        const usersWithSlots = new Set(
+          ((availabilityData || []) as { user_id: string }[]).map((slot) => slot.user_id)
+        );
 
         // Get users the current user has rejected (to exclude them from discovery)
         // IMPORTANT: We ONLY exclude "rejected" profiles, NOT profiles that have been:
@@ -444,6 +530,26 @@ export default function DiscoverPage() {
 
           // Exclude users aged 18–23 (platform rule: no matching for this age range)
           if (isAgeRestrictedForMatching(p.date_of_birth)) {
+            return false;
+          }
+
+          // Enforce service-level gender eligibility (e.g. no male-to-male).
+          if (
+            !evaluateGenderEligibility({
+              requesterGender,
+              targetGender: p.gender,
+            }).allowed
+          ) {
+            return false;
+          }
+
+          // Enforce discover eligibility based on saved partner gender preference.
+          if (
+            !matchesPartnerGenderPreference(
+              p.gender,
+              partnerGenderPreference
+            )
+          ) {
             return false;
           }
 
@@ -609,7 +715,7 @@ export default function DiscoverPage() {
             user_id: p.user_id,
             name: p.first_name || account?.display_name || "User",
             age,
-            city: p.location || "Unknown",
+            city: toStateCountryLabel(p.location) || null,
             imageUrl: primaryPhoto,
             heightLabel,
             heightCm: p.height_cm || null,
@@ -629,6 +735,10 @@ export default function DiscoverPage() {
             want_children: p.want_children || null,
             relationship_status: p.relationship_status || null,
             verified: account?.email_verified || false,
+            hasCalendarSlots: hasRequestableMeetingAvailability(
+              account,
+              usersWithSlots.has(p.user_id)
+            ),
             // Active status
             lastActiveAt: account?.last_active_at || null,
             ...(() => {
@@ -682,6 +792,8 @@ export default function DiscoverPage() {
     return count;
   }, [filterMinAge, filterMaxAge, filterCity, filterVerified, filterGender, filterRelStatus, filterHeightMin, filterHeightMax, filterLanguages, filterEthnicities, filterEducations, filterReligions, filterChildren, filterSmoking]);
 
+  const showAdvancedFilterSections = !isMobileViewport || showAdvancedFilters;
+
   /**
    * Build active filter chips for quick removal
    */
@@ -696,7 +808,11 @@ export default function DiscoverPage() {
     if (filterGender)
       chips.push({ key: "gender", label: `${filterGender}`, onClear: () => setFilterGender("") });
     if (filterRelStatus)
-      chips.push({ key: "relStatus", label: `${filterRelStatus}`, onClear: () => setFilterRelStatus("") });
+      chips.push({
+        key: "relStatus",
+        label: formatRelationshipStatusLabel(filterRelStatus),
+        onClear: () => setFilterRelStatus(""),
+      });
     if (filterHeightMin !== 140 || filterHeightMax !== 220)
       chips.push({ key: "height", label: `Height ${filterHeightMin}–${filterHeightMax}cm`, onClear: () => { setFilterHeightMin(140); setFilterHeightMax(220); } });
     if (filterLanguages.length > 0)
@@ -753,7 +869,7 @@ export default function DiscoverPage() {
         if (!p.gender || p.gender.toLowerCase() !== filterGender.toLowerCase()) return false;
       }
       if (filterRelStatus) {
-        if (!p.relationship_status || p.relationship_status.toLowerCase() !== filterRelStatus.toLowerCase()) return false;
+        if (!relationshipStatusMatches(p.relationship_status, filterRelStatus)) return false;
       }
       if ((filterHeightMin !== 140 || filterHeightMax !== 220) && p.heightCm) {
         if (p.heightCm < filterHeightMin || p.heightCm > filterHeightMax) return false;
@@ -835,28 +951,61 @@ export default function DiscoverPage() {
   }, [filteredProfiles.length, currentIndex]);
 
   const currentProfile = filteredProfiles[currentIndex] ?? null;
+  const currentProfileCanRequestMeeting = Boolean(currentProfile?.hasCalendarSlots);
+  const currentProfileMeetingLabel = currentProfileCanRequestMeeting
+    ? "Request Video Meeting"
+    : NO_ACTIVE_MEETING_AVAILABILITY_BUTTON_LABEL;
+  const topPickCanRequestMeeting = Boolean(topPick?.hasCalendarSlots);
+  const topPickMeetingLabel = topPickCanRequestMeeting
+    ? "Request Video Meeting"
+    : NO_ACTIVE_MEETING_AVAILABILITY_BUTTON_LABEL;
 
   /**
    * Fetch top picks from API
    */
-  const fetchTopPicks = async () => {
+  const fetchTopPicks = useCallback(async () => {
+    if (topPicksRequestInFlightRef.current) return;
+    topPicksRequestInFlightRef.current = true;
+
     try {
       setTopPicksLoading(true);
       setTopPicksError(null);
       
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      const [{ data: sessionData }, { data: userData }] = await Promise.all([
+        supabase.auth.getSession(),
+        supabase.auth.getUser(),
+      ]);
+      const accessToken = sessionData.session?.access_token ?? null;
+      const userId = userData.user?.id ?? null;
+
+      if (!accessToken && !userId) {
         setTopPicksError("Not authenticated");
+        setTopPicks([]);
+        setTopAvatarSrcs([]);
+        setTopImageSrc("/placeholder-profile.svg");
+        setTopPickIndex(0);
+        setHasLoadedTopPicks(false);
         setTopPicksLoading(false);
         return;
       }
 
-      const response = await fetch(`/api/top-picks?user_id=${user.id}`);
-      const result = await response.json();
+      const apiUrl = userId ? `/api/top-picks?user_id=${encodeURIComponent(userId)}` : "/api/top-picks";
+      const response = await fetch(apiUrl, {
+        headers: accessToken
+          ? {
+              Authorization: `Bearer ${accessToken}`,
+            }
+          : undefined,
+      });
+      const result = await response.json().catch(() => ({ error: "Invalid server response" }));
 
       if (!response.ok) {
         setTopPicksError(result.error || "Failed to load top picks");
         setTopPicks([]);
+        setTopAvatarSrcs([]);
+        setTopImageSrc("/placeholder-profile.svg");
+        setTopPickIndex(0);
+        setHasLoadedTopPicks(false);
         return;
       }
 
@@ -873,25 +1022,37 @@ export default function DiscoverPage() {
         setTopAvatarSrcs(result.picks.map((p: TopPick) => p.imageUrl || "/placeholder-profile.svg"));
       } else {
         setTopPicks([]);
+        setTopAvatarSrcs([]);
+        setTopImageSrc("/placeholder-profile.svg");
+        setTopPickIndex(0);
       }
+      setHasLoadedTopPicks(true);
     } catch (error) {
       console.error("Error fetching top picks:", error);
       setTopPicksError("An error occurred while loading top picks");
       setTopPicks([]);
+      setTopAvatarSrcs([]);
+      setTopImageSrc("/placeholder-profile.svg");
+      setTopPickIndex(0);
+      setHasLoadedTopPicks(false);
     } finally {
       setTopPicksLoading(false);
+      topPicksRequestInFlightRef.current = false;
     }
-  };
+  }, [topPickIndex]);
+
+  useEffect(() => {
+    fetchTopPicksRef.current = fetchTopPicks;
+  }, [fetchTopPicks]);
 
   /**
    * Fetch top picks when tab switches to topPicks
    */
   useEffect(() => {
-    if (activeTab === "topPicks" && !topPicksLoading) {
-      fetchTopPicks();
+    if (activeTab === "topPicks" && !hasLoadedTopPicks) {
+      void fetchTopPicksRef.current();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, hasLoadedTopPicks]);
 
   // Show loading state
   if (loading && profiles.length === 0) {
@@ -911,7 +1072,7 @@ export default function DiscoverPage() {
       <div className="min-h-screen w-full bg-gray-50">
         <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-            <Link href="/dashboard"><Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} /></Link>
+            <Link href="/dashboard"><Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} /></Link>
             <NotificationBell />
           </div>
         </header>
@@ -938,7 +1099,7 @@ export default function DiscoverPage() {
       <div className="min-h-screen w-full bg-gray-50">
         <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-            <Link href="/dashboard"><Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} /></Link>
+            <Link href="/dashboard"><Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} /></Link>
             <NotificationBell />
           </div>
         </header>
@@ -976,7 +1137,15 @@ export default function DiscoverPage() {
   /**
    * Handle opening meeting request modal
    */
-  const handleRequestMeeting = async (targetUserId: string) => {
+  const handleRequestMeeting = async (
+    targetUserId: string,
+    canRequestMeeting = true
+  ) => {
+    if (!canRequestMeeting) {
+      globalToast.info(NO_ACTIVE_MEETING_AVAILABILITY_TEXT);
+      return;
+    }
+
     try {
       // Get target user's profile and account info
       const { data: profile } = await supabase
@@ -1155,7 +1324,7 @@ export default function DiscoverPage() {
     <div className="min-h-screen w-full bg-gray-50">
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <Link href="/dashboard"><Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} /></Link>
+          <Link href="/dashboard"><Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} /></Link>
           <NotificationBell />
         </div>
       </header>
@@ -1290,7 +1459,7 @@ export default function DiscoverPage() {
               currentProfile ? (
               <div className="mt-4 grid grid-cols-1 gap-6 md:grid-cols-[1fr_1px_1fr]">
                 <div className="relative overflow-hidden rounded-3xl ring-1 ring-black/5 bg-[#eef2ff]">
-                  <div className="relative aspect-[4/5]">
+                  <div className="relative aspect-[3/4] md:aspect-[4/5]">
                     <Image
                       src={profileImgSrc ?? currentProfile.imageUrl}
                       alt={`${currentProfile.name} profile photo`}
@@ -1333,13 +1502,23 @@ export default function DiscoverPage() {
                       >
                         <ChevronRight className="h-4 w-4" />
                       </button>
-                      <div className="absolute bottom-3 left-3 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">
+                      <div className="absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white md:left-3 md:top-auto md:bottom-3">
                         {currentIndex + 1} / {filteredProfiles.length}
+                      </div>
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/85 via-black/40 to-transparent md:hidden" />
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 p-5 md:hidden">
+                        <div className="text-[2.1rem] font-semibold leading-none tracking-tight text-white drop-shadow">
+                          {currentProfile.name}
+                          {currentProfile.age !== null ? `, ${currentProfile.age}` : ""}
+                        </div>
+                        <div className="mt-2 text-[1.05rem] font-medium text-white/90 drop-shadow">
+                          {currentProfile.city || "Unknown location"}
+                        </div>
                       </div>
                   </div>
                 </div>
                 <div className="hidden w-px bg-gray-200 md:block" />
-                <div className="p-5 rounded-3xl bg-white shadow-sm">
+                <div className="rounded-3xl bg-white p-4 shadow-sm md:p-5">
                     {/* Match Badge */}
                     {currentProfile.matchScore > 0 && (
                       <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold mb-3 ${currentProfile.matchBgColor} ${currentProfile.matchColor}`}>
@@ -1348,13 +1527,13 @@ export default function DiscoverPage() {
                       </div>
                     )}
 
-                    <div className="flex items-center gap-1.5 text-2xl font-semibold text-gray-900">
+                    <div className="hidden items-center gap-1.5 text-2xl font-semibold text-gray-900 md:flex">
                       {currentProfile.name}
                       {currentProfile.verified && (
                         <BadgeCheck className="h-5 w-5 text-blue-500 flex-shrink-0" />
                       )}
                     </div>
-                  <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">
+                  <div className="mt-1 hidden items-center gap-2 text-sm text-gray-600 md:flex">
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white shadow ring-2 ring-[#1f419a]">
                       <User className="h-3 w-3 text-[#1f419a]" />
                     </span>
@@ -1415,11 +1594,51 @@ export default function DiscoverPage() {
                       <div className="text-gray-500">Do you like {currentProfile.name}?</div>
                     </div>
                   </div>
-                  {/* View Full Profile Button */}
+                  {/* Mobile compact actions */}
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 md:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowProfileDetail(true)}
+                      className="flex h-10 items-center justify-center gap-1.5 rounded-full border border-[#1f419a]/30 bg-[#1f419a]/5 px-3 text-xs font-medium text-[#1f419a] transition-colors hover:bg-[#1f419a]/10"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        currentProfile &&
+                        handleRequestMeeting(
+                          currentProfile.user_id,
+                          currentProfileCanRequestMeeting
+                        )
+                      }
+                      disabled={!currentProfileCanRequestMeeting}
+                      title={
+                        currentProfileCanRequestMeeting
+                          ? "Request video meeting"
+                          : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
+                      }
+                      className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-[13px] font-medium leading-tight transition-colors sm:h-10 sm:py-0 sm:text-xs ${
+                        currentProfileCanRequestMeeting
+                          ? "border-[#1f419a] bg-[#1f419a] text-white hover:bg-[#17357f]"
+                          : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
+                      }`}
+                    >
+                      <Video className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="text-center">
+                        {currentProfileCanRequestMeeting
+                          ? "Request video date meeting"
+                          : NO_ACTIVE_MEETING_AVAILABILITY_BUTTON_LABEL}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Desktop action */}
                   <button
                     type="button"
                     onClick={() => setShowProfileDetail(true)}
-                    className="mt-3 flex items-center gap-2 rounded-full border border-[#1f419a]/30 bg-[#1f419a]/5 px-4 py-2 text-sm text-[#1f419a] hover:bg-[#1f419a]/10 transition-colors w-full justify-center"
+                    className="mt-3 hidden w-full items-center justify-center gap-2 rounded-full border border-[#1f419a]/30 bg-[#1f419a]/5 px-4 py-2 text-sm text-[#1f419a] transition-colors hover:bg-[#1f419a]/10 md:flex"
                   >
                     <Eye className="h-4 w-4" />
                     View Full Profile
@@ -1436,35 +1655,48 @@ export default function DiscoverPage() {
                     <p className="text-sm text-green-800">It&apos;s a match! You both like each other!</p>
                     </div>
                   )}
-                  {activityLimits && (
-                    <div className="mt-4 rounded-lg bg-blue-50 border border-blue-200 p-3">
-                      <p className="text-xs text-blue-800 mb-1">Activity Limits</p>
-                      <div className="text-xs text-blue-700 space-y-1">
-                        <div>Today: {activityLimits.day.used}/{activityLimits.day.limit === Infinity ? "∞" : activityLimits.day.limit}</div>
-                        <div>This Week: {activityLimits.week.used}/{activityLimits.week.limit === Infinity ? "∞" : activityLimits.week.limit}</div>
-                        <div>This Month: {activityLimits.month.used}/{activityLimits.month.limit === Infinity ? "∞" : activityLimits.month.limit}</div>
-                      </div>
-                    </div>
-                  )}
                   {currentProfile && likedProfileIds.has(currentProfile.user_id) ? (
-                    <div className="mt-6 flex flex-col gap-3">
-                      <div className="flex items-center justify-center">
-                      <div className="group flex items-center gap-2 rounded-full bg-gradient-to-r from-red-50 via-pink-50 to-red-50 px-6 py-3 border border-red-200 shadow-md transition-all duration-500 ease-out hover:shadow-lg hover:scale-105" style={{ animation: 'fadeIn 0.5s ease-out, slideUp 0.5s ease-out' }}>
+                    <div className="mt-3 flex flex-col gap-3 md:mt-6">
+                      <div className="flex items-center justify-center gap-2">
+                      <div className="group flex items-center gap-2 rounded-full border border-red-200 bg-gradient-to-r from-red-50 via-pink-50 to-red-50 px-4 py-2 shadow-md transition-all duration-500 ease-out hover:scale-105 hover:shadow-lg md:px-6 md:py-3" style={{ animation: 'fadeIn 0.5s ease-out, slideUp 0.5s ease-out' }}>
                         <Heart className="h-5 w-5 text-red-500 fill-red-500 transition-all duration-300 group-hover:scale-110" style={{ animation: 'heartbeat 2s ease-in-out infinite' }} />
                         <span className="text-sm font-semibold text-red-700 tracking-wide">Liked!</span>
                       </div>
+                      <button
+                        type="button"
+                        onClick={showNext}
+                        className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[#1f419a]/25 bg-[#1f419a]/5 px-4 text-sm font-semibold text-[#1f419a] transition-colors hover:bg-[#1f419a]/10 md:hidden"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleRequestMeeting(currentProfile.user_id)}
-                        className="h-11 w-full rounded-full border-2 border-[#1f419a] bg-white text-sm font-medium text-[#1f419a] shadow-sm flex items-center justify-center gap-2 transition-all hover:bg-[#eef2ff] hover:shadow-md hover:scale-105 active:scale-95"
+                        onClick={() =>
+                          handleRequestMeeting(
+                            currentProfile.user_id,
+                            currentProfileCanRequestMeeting
+                          )
+                        }
+                        disabled={!currentProfileCanRequestMeeting}
+                        title={
+                          currentProfileCanRequestMeeting
+                            ? "Request video meeting"
+                            : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
+                        }
+                        className={`hidden h-11 w-full items-center justify-center gap-2 rounded-full border-2 text-sm font-medium shadow-sm transition-all md:flex ${
+                          currentProfileCanRequestMeeting
+                            ? "border-[#1f419a] bg-white text-[#1f419a] hover:scale-105 hover:bg-[#eef2ff] hover:shadow-md active:scale-95"
+                            : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                        }`}
                       >
                         <Video className="h-4 w-4" />
-                        Request Video Meeting
+                        {currentProfileMeetingLabel}
                       </button>
                     </div>
                   ) : (
-                    <div className="mt-6 flex flex-col gap-3">
+                    <div className="mt-3 flex flex-col gap-3 md:mt-6">
                       <div className="flex gap-3">
                       <button
                         type="button"
@@ -1496,11 +1728,27 @@ export default function DiscoverPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => currentProfile && handleRequestMeeting(currentProfile.user_id)}
-                        className="h-11 w-full rounded-full border-2 border-[#1f419a] bg-white text-sm font-medium text-[#1f419a] shadow-sm flex items-center justify-center gap-2 transition-all hover:bg-[#eef2ff] hover:shadow-md hover:scale-105 active:scale-95"
+                        onClick={() =>
+                          currentProfile &&
+                          handleRequestMeeting(
+                            currentProfile.user_id,
+                            currentProfileCanRequestMeeting
+                          )
+                        }
+                        disabled={!currentProfileCanRequestMeeting}
+                        title={
+                          currentProfileCanRequestMeeting
+                            ? "Request video meeting"
+                            : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
+                        }
+                        className={`hidden h-11 w-full items-center justify-center gap-2 rounded-full border-2 text-sm font-medium shadow-sm transition-all md:flex ${
+                          currentProfileCanRequestMeeting
+                            ? "border-[#1f419a] bg-white text-[#1f419a] hover:scale-105 hover:bg-[#eef2ff] hover:shadow-md active:scale-95"
+                            : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                        }`}
                       >
                         <Video className="h-4 w-4" />
-                        Request Video Meeting
+                        {currentProfileMeetingLabel}
                       </button>
                     </div>
                   )}
@@ -1553,7 +1801,7 @@ export default function DiscoverPage() {
                   </div>
                 ) : (
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-[90px_1fr]">
-                  <div className="flex flex-col items-center gap-4">
+                  <div className="flex items-center justify-center gap-3 overflow-x-auto pb-1 md:flex-col md:items-center md:gap-4 md:overflow-visible md:pb-0">
                     {topPicks.map((p, i) => (
                       <button
                         key={p.user_id || `top-pick-${i}`}
@@ -1563,7 +1811,7 @@ export default function DiscoverPage() {
                           setTopImageSrc(topPicks[i]?.imageUrl || "/placeholder-profile.svg"); 
                           topImageIdxRef.current = 0; 
                         }}
-                        className={`rounded-full p-[2px] ${i === topPickIndex ? "ring-2 ring-[#1f419a]" : "ring-0"}`}
+                        className={`flex-shrink-0 rounded-full p-[2px] ${i === topPickIndex ? "ring-2 ring-[#1f419a]" : "ring-0"}`}
                         aria-label={`Select ${p.name}`}
                       >
                         <Image
@@ -1585,8 +1833,8 @@ export default function DiscoverPage() {
                     ))}
                   </div>
                   <div className="overflow-hidden rounded-3xl bg-white shadow ring-1 ring-black/5">
-                    <div className="grid grid-cols-2">
-                      <div className="relative aspect-[4/5] bg-[#eef2ff]">
+                    <div className="grid grid-cols-1 md:grid-cols-2">
+                      <div className="relative aspect-[3/4] bg-[#eef2ff] md:aspect-[4/5]">
                         <Image
                           src={topImageSrc}
                           alt={`${topPick?.name ?? "Profile"} large photo`}
@@ -1602,17 +1850,29 @@ export default function DiscoverPage() {
                             }
                           }}
                         />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/85 via-black/40 to-transparent md:hidden" />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 p-5 md:hidden">
+                          <div className="text-[2.1rem] font-semibold leading-none tracking-tight text-white drop-shadow">
+                            {topPick?.name || "Profile"}
+                            {topPick?.age !== null && topPick?.age !== undefined ? `, ${topPick.age}` : ""}
+                          </div>
+                          <div className="mt-2 text-[1.05rem] font-medium text-white/90 drop-shadow">
+                            {topPick?.city || "Unknown location"}
+                          </div>
+                        </div>
                       </div>
-                      <div className="p-6">
-                        <div className="text-2xl font-semibold text-gray-900">{topPick?.name}</div>
-                        <div className="mt-1 text-sm text-gray-600">
-                          {topPick?.age !== null && topPick?.age !== undefined ? `Age ${topPick.age}` : ""}
-                          {topPick?.age !== null && topPick?.city ? ", " : ""}
-                          {topPick?.city || ""}
+                      <div className="p-4 md:p-6">
+                        <div className="hidden md:block">
+                          <div className="text-2xl font-semibold text-gray-900">{topPick?.name}</div>
+                          <div className="mt-1 text-sm text-gray-600">
+                            {topPick?.age !== null && topPick?.age !== undefined ? `Age ${topPick.age}` : ""}
+                            {topPick?.age !== null && topPick?.city ? ", " : ""}
+                            {topPick?.city || ""}
+                          </div>
                         </div>
                         
                         {/* Profile details tags */}
-                        <div className="mt-4 flex flex-wrap gap-2">
+                        <div className="mt-3 flex flex-wrap gap-2 md:mt-4">
                           {topPick?.height_cm && (
                             <span className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700">
                               {Math.floor(topPick.height_cm / 30.48)}&apos;{Math.round((topPick.height_cm % 30.48) / 2.54)}&quot;
@@ -1656,11 +1916,27 @@ export default function DiscoverPage() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => topPick && handleRequestMeeting(topPick.user_id)}
-                              className="h-11 w-full rounded-full border-2 border-[#1f419a] bg-white text-sm font-medium text-[#1f419a] shadow-sm flex items-center justify-center gap-2 transition-all hover:bg-[#eef2ff] hover:shadow-md hover:scale-105 active:scale-95"
+                              onClick={() =>
+                                topPick &&
+                                handleRequestMeeting(
+                                  topPick.user_id,
+                                  topPickCanRequestMeeting
+                                )
+                              }
+                              disabled={!topPickCanRequestMeeting}
+                              title={
+                                topPickCanRequestMeeting
+                                  ? "Request video meeting"
+                                  : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
+                              }
+                              className={`h-11 w-full rounded-full border-2 text-sm font-medium shadow-sm flex items-center justify-center gap-2 transition-all ${
+                                topPickCanRequestMeeting
+                                  ? "border-[#1f419a] bg-[#1f419a] text-white hover:bg-[#17357f] hover:shadow-md hover:scale-105 active:scale-95"
+                                  : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                              }`}
                             >
                               <Video className="h-4 w-4" />
-                              Request Video Meeting
+                              {topPickMeetingLabel}
                             </button>
                           </div>
                         ) : (
@@ -1696,11 +1972,27 @@ export default function DiscoverPage() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => topPick && handleRequestMeeting(topPick.user_id)}
-                              className="h-11 w-full rounded-full border-2 border-[#1f419a] bg-white text-sm font-medium text-[#1f419a] shadow-sm flex items-center justify-center gap-2 transition-all hover:bg-[#eef2ff] hover:shadow-md hover:scale-105 active:scale-95"
+                              onClick={() =>
+                                topPick &&
+                                handleRequestMeeting(
+                                  topPick.user_id,
+                                  topPickCanRequestMeeting
+                                )
+                              }
+                              disabled={!topPickCanRequestMeeting}
+                              title={
+                                topPickCanRequestMeeting
+                                  ? "Request video meeting"
+                                  : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
+                              }
+                              className={`h-11 w-full rounded-full border-2 text-sm font-medium shadow-sm flex items-center justify-center gap-2 transition-all ${
+                                topPickCanRequestMeeting
+                                  ? "border-[#1f419a] bg-white text-[#1f419a] hover:bg-[#eef2ff] hover:shadow-md hover:scale-105 active:scale-95"
+                                  : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                              }`}
                             >
                               <Video className="h-4 w-4" />
-                              Request Video Meeting
+                              {topPickMeetingLabel}
                             </button>
                           </div>
                         )}
@@ -1718,17 +2010,17 @@ export default function DiscoverPage() {
 
       {/* Filter Modal */}
       {showFilters && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowFilters(false)} />
-          <div className="relative max-h-[90vh] w-[94vw] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl flex flex-col">
+          <div className="relative flex h-[100dvh] w-screen flex-col overflow-hidden bg-white md:h-auto md:max-h-[90vh] md:w-[94vw] md:max-w-lg md:rounded-2xl md:border md:border-gray-200 md:shadow-2xl">
             {/* Header */}
-            <div className="z-10 flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+            <div className="z-10 flex items-center justify-between border-b border-gray-100 px-4 py-3 md:px-5 md:py-3.5">
               <div className="flex items-center gap-3">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1f419a]/10">
                   <SlidersHorizontal className="h-4 w-4 text-[#1f419a]" />
                 </div>
                 <div>
-                  <div className="text-lg font-semibold text-gray-900">Discover Filters</div>
+                  <div className="text-base font-semibold text-gray-900 md:text-lg">Discover Filters</div>
                   {activeFilterCount > 0 && (
                     <div className="text-xs text-gray-500">{activeFilterCount} filter{activeFilterCount !== 1 ? "s" : ""} active</div>
                   )}
@@ -1738,18 +2030,28 @@ export default function DiscoverPage() {
             </div>
 
             {/* Scrollable body */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:px-5 md:py-4 md:space-y-5 md:pb-4">
 
               {/* Gender */}
               <div>
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2"><User className="h-3.5 w-3.5" /> Gender</div>
                 <div className="flex flex-wrap gap-2">
-                  {["", "Male", "Female", "Non-binary"].map((opt) => (
+                  {(
+                    requiredPartnerGender
+                      ? ["", requiredPartnerGender === "male" ? "Male" : "Female"]
+                      : ["", "Male", "Female", "Other"]
+                  ).map((opt) => (
                     <button key={opt || "any"} type="button" onClick={() => setFilterGender(opt)}
                       className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${filterGender === opt ? "border-[#1f419a] bg-[#1f419a] text-white shadow-sm" : "border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
                     >{opt || "Any"}</button>
                   ))}
                 </div>
+                {requiredPartnerGender && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Based on your preference, discover is limited to{" "}
+                    {requiredPartnerGender === "male" ? "men" : "women"}.
+                  </p>
+                )}
               </div>
 
               {/* Age */}
@@ -1787,14 +2089,31 @@ export default function DiscoverPage() {
                 </div>
               </div>
 
+              {isMobileViewport && (
+                <div className="border-t border-gray-100 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedFilters((prev) => !prev)}
+                    className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+                  >
+                    <span>Advanced filters</span>
+                    <ChevronDown
+                      className={`h-4 w-4 text-gray-500 transition-transform ${showAdvancedFilters ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                </div>
+              )}
+
               {/* Relationship Status */}
+              {showAdvancedFilterSections && (
+              <>
               <div className="border-t border-gray-100 pt-4">
                 <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Relationship Status</div>
                 <div className="flex flex-wrap gap-2">
-                  {["", "Single", "Divorced", "Widowed", "Separated"].map((opt) => (
-                    <button key={opt || "any"} type="button" onClick={() => setFilterRelStatus(opt)}
-                      className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${filterRelStatus === opt ? "border-[#1f419a] bg-[#1f419a] text-white shadow-sm" : "border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
-                    >{opt || "Any"}</button>
+                  {FILTER_RELATIONSHIP_STATUS_OPTIONS.map((option) => (
+                    <button key={option.value || "any"} type="button" onClick={() => setFilterRelStatus(option.value)}
+                      className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${filterRelStatus === option.value ? "border-[#1f419a] bg-[#1f419a] text-white shadow-sm" : "border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
+                    >{option.label}</button>
                   ))}
                 </div>
               </div>
@@ -1908,19 +2227,21 @@ export default function DiscoverPage() {
                   ))}
                 </div>
               </div>
+              </>
+              )}
 
             </div>
 
             {/* Footer */}
-            <div className="z-10 flex items-center justify-between border-t border-gray-100 bg-gray-50 px-5 py-3 rounded-b-2xl">
+            <div className="z-20 flex items-center justify-between border-t border-gray-100 bg-white px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] md:rounded-b-2xl md:bg-gray-50 md:px-5 md:py-3 md:pb-3">
               <button type="button" onClick={resetAllFilters} className="text-sm text-gray-500 hover:text-red-500 transition-colors">Reset All</button>
               <div className="flex items-center gap-2">
                 {activeFilterCount > 0 && (
-                  <span className="text-xs text-gray-400">{filteredProfiles.length} result{filteredProfiles.length !== 1 ? "s" : ""}</span>
+                  <span className="hidden text-xs text-gray-400 sm:inline">{filteredProfiles.length} result{filteredProfiles.length !== 1 ? "s" : ""}</span>
                 )}
                 <button type="button" onClick={() => { setShowFilters(false); setCurrentIndex(0); setProfileImgSrc(null); }}
                   className="rounded-full bg-[#1f419a] px-6 py-2 text-sm font-medium text-white hover:bg-[#17357b] shadow-sm transition-colors"
-                >Apply Filters</button>
+                >{isMobileViewport ? "Search" : "Apply Filters"}</button>
               </div>
             </div>
           </div>
@@ -1952,7 +2273,20 @@ export default function DiscoverPage() {
         }
         isOpen={showProfileDetail}
         onClose={() => setShowProfileDetail(false)}
-        onRequestMeeting={(uid) => handleRequestMeeting(uid)}
+        canRequestMeeting={
+          activeTab === "topPicks"
+            ? topPickCanRequestMeeting
+            : currentProfileCanRequestMeeting
+        }
+        onRequestMeeting={(uid) => {
+          setShowProfileDetail(false);
+          void handleRequestMeeting(
+            uid,
+            activeTab === "topPicks"
+              ? topPickCanRequestMeeting
+              : currentProfileCanRequestMeeting
+          );
+        }}
       />
 
     </div>

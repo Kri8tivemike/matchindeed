@@ -1,19 +1,17 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { CSSProperties } from "react";
 import "./globals.css";
+import { IdleSessionTimeout } from "@/components/auth/IdleSessionTimeout";
 import { DevWarningFilter } from "@/components/DevWarningFilter";
 import { ToastProvider } from "@/components/ToastProvider";
 import FingerprintProvider from "@/components/FingerprintProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const fallbackFontVars = {
+  "--font-geist-sans":
+    "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+  "--font-geist-mono":
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+} as CSSProperties;
 
 export const metadata: Metadata = {
   title: {
@@ -36,6 +34,13 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png", sizes: "600x600" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "600x600", type: "image/png" }],
+  },
   /** Google Search Console verification — replace with your actual tag */
   verification: {
     google: process.env.NEXT_PUBLIC_GSC_VERIFICATION || "",
@@ -49,13 +54,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className="antialiased" style={fallbackFontVars}>
         {/* Filters out known Next.js 16 dev warnings (params enumeration) */}
         <DevWarningFilter />
         <FingerprintProvider>
           <ToastProvider>
+            <IdleSessionTimeout />
             {children}
           </ToastProvider>
         </FingerprintProvider>

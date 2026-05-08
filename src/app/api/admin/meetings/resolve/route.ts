@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendInvestigationResolvedEmail } from "@/lib/email";
+import { refundConsumedCredits } from "@/lib/credits/actions";
+import { requireAdminAccess } from "@/lib/admin/permissions";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,35 +10,189 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-/**
- * Helper to get authenticated admin user from request
- */
-async function getAdminUser(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
+const REVIEW_SELECT_WITH_ADMIN_FIELDS = `
+  id,
+  host_id,
+  type,
+  status,
+  scheduled_at,
+  fee_cents,
+  charge_status,
+  cancellation_fee_cents,
+  outcome,
+  fault_determination,
+  host_notes,
+  finalized_at,
+  finalized_by,
+  admin_resolved_at,
+  created_at,
+  meeting_participants (
+    user_id,
+    role,
+    response
+  )
+`;
 
-  const token = authHeader.substring(7);
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-  if (error || !user) return null;
+const REVIEW_SELECT_BASELINE = `
+  id,
+  host_id,
+  type,
+  status,
+  scheduled_at,
+  fee_cents,
+  charge_status,
+  cancellation_fee_cents,
+  created_at,
+  meeting_participants (
+    user_id,
+    role,
+    response
+  )
+`;
 
-  // Check admin role
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+type ReviewFetchOptions = {
+  page: number;
+  limit: number;
+};
 
-  if (
-    !account?.role ||
-    !["admin", "superadmin", "moderator"].includes(account.role)
-  ) {
-    return null;
+type ReviewParticipantRow = {
+  user_id: string;
+  role: string;
+  response: string | null;
+};
+
+type ReviewMeetingRow = {
+  id: string;
+  host_id: string;
+  type: string;
+  status: string;
+  scheduled_at: string;
+  fee_cents: number;
+  charge_status: string;
+  cancellation_fee_cents: number;
+  outcome?: string | null;
+  fault_determination?: string | null;
+  host_notes?: string | null;
+  finalized_at?: string | null;
+  finalized_by?: string | null;
+  admin_resolved_at?: string | null;
+  created_at: string;
+  meeting_participants?: ReviewParticipantRow[] | null;
+};
+
+type ProfileRow = {
+  user_id: string;
+  first_name: string | null;
+  last_name: string | null;
+};
+
+type AccountRow = {
+  id: string;
+  email: string | null;
+  tier: string | null;
+};
+
+type MeetingResponseRow = {
+  meeting_id: string;
+  user_id: string;
+  response: string;
+  agreement_text: string | null;
+  signed_at: string | null;
+};
+
+const DEFAULT_REVIEW_LIMIT = 25;
+const MAX_REVIEW_LIMIT = 50;
+
+function getPaginationOptions(searchParams: URLSearchParams): ReviewFetchOptions {
+  const rawPage = Number(searchParams.get("page") || "1");
+  const rawLimit = Number(searchParams.get("limit") || DEFAULT_REVIEW_LIMIT);
+
+  return {
+    page: Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1,
+    limit:
+      Number.isFinite(rawLimit) && rawLimit > 0
+        ? Math.min(MAX_REVIEW_LIMIT, Math.floor(rawLimit))
+        : DEFAULT_REVIEW_LIMIT,
+  };
+}
+
+async function fetchReviewMeetings(status: string, options: ReviewFetchOptions) {
+  const from = (options.page - 1) * options.limit;
+  const to = from + options.limit - 1;
+
+  const runQuery = async (targetStatus: string, includeAdminFields: boolean) => {
+    const query = supabase
+      .from("meetings")
+      .select(
+        includeAdminFields
+          ? REVIEW_SELECT_WITH_ADMIN_FIELDS
+          : REVIEW_SELECT_BASELINE,
+        { count: "exact" }
+      )
+      .eq("charge_status", targetStatus)
+      .order(
+        targetStatus === "pending_review"
+          ? "finalized_at"
+          : targetStatus === "captured" || targetStatus === "refunded"
+            ? "admin_resolved_at"
+            : "created_at",
+        { ascending: targetStatus === "pending_review" }
+      )
+      .range(from, to);
+
+    return query;
+  };
+
+  let query = await runQuery(status, true);
+
+  if (query.error?.code === "22P02" && status === "pending_review") {
+    // Older databases may not have the pending_review enum value yet.
+    query = await runQuery("pending", true);
   }
 
-  return { user, role: account.role };
+  if (query.error && query.error.code === "42703") {
+    let fallback = await runQuery(status, false);
+
+    if (fallback.error?.code === "22P02" && status === "pending_review") {
+      fallback = await runQuery("pending", false);
+    }
+
+    if (fallback.error) {
+      return fallback;
+    }
+
+    return {
+      data: ((fallback.data || []) as unknown as ReviewMeetingRow[]).map((meeting) => ({
+        ...meeting,
+        outcome: null,
+        fault_determination: null,
+        host_notes: null,
+        finalized_at: null,
+        finalized_by: null,
+        admin_resolved_at: null,
+      })),
+      error: null,
+      count: fallback.count,
+    };
+  }
+
+  return query;
+}
+
+async function safeInsertNotification(payload: Record<string, unknown>) {
+  const { error } = await supabase.from("notifications").insert(payload);
+  if (error) {
+    // Notification schema differs across deployments; do not block admin resolutions.
+    console.warn("[admin/meetings/resolve] notification insert skipped:", error.message);
+  }
+}
+
+function normalizeReviewStatus(rawStatus: string) {
+  const status = rawStatus.toLowerCase();
+  if (["pending_review", "pending", "captured", "refunded"].includes(status)) {
+    return status;
+  }
+  return null;
 }
 
 /**
@@ -47,42 +203,29 @@ async function getAdminUser(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const admin = await getAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const guard = await requireAdminAccess(request, {
+      anyPermissions: ["view_meetings", "manage_meetings"],
+    });
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get("status") || "pending_review";
+    const requestedStatus = searchParams.get("status") || "pending_review";
+    const status = normalizeReviewStatus(requestedStatus);
+    const pagination = getPaginationOptions(searchParams);
+    if (!status) {
+      return NextResponse.json(
+        { error: "Invalid status. Use pending_review, pending, captured, or refunded." },
+        { status: 400 }
+      );
+    }
 
     // Fetch meetings under review
-    const { data: meetings, error } = await supabase
-      .from("meetings")
-      .select(
-        `
-        id,
-        host_id,
-        type,
-        status,
-        scheduled_at,
-        fee_cents,
-        charge_status,
-        cancellation_fee_cents,
-        outcome,
-        fault_determination,
-        host_notes,
-        finalized_at,
-        finalized_by,
-        created_at,
-        meeting_participants (
-          user_id,
-          role,
-          response
-        )
-      `
-      )
-      .eq("charge_status", status)
-      .order("finalized_at", { ascending: true });
+    const { data: meetings, error, count } = await fetchReviewMeetings(
+      status,
+      pagination
+    );
 
     if (error) {
       console.error("Error fetching review meetings:", error);
@@ -92,52 +235,120 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Enrich with participant names
-    const enrichedMeetings = [];
-    for (const meeting of meetings || []) {
-      const participants = [];
-      for (const p of meeting.meeting_participants || []) {
-        const { data: profile } = await supabase
-          .from("user_profiles")
-          .select("first_name, last_name")
-          .eq("user_id", p.user_id)
-          .single();
+    const meetingRows = (meetings || []) as unknown as ReviewMeetingRow[];
+    const meetingIds = meetingRows.map((meeting) => meeting.id);
+    const userIds = [
+      ...new Set(
+        meetingRows.flatMap((meeting) =>
+          (meeting.meeting_participants || []).map((participant) => participant.user_id)
+        )
+      ),
+    ];
 
-        const { data: account } = await supabase
-          .from("accounts")
-          .select("email, tier")
-          .eq("id", p.user_id)
-          .single();
+    const [profilesResult, accountsResult, responsesResult] = await Promise.all([
+      userIds.length > 0
+        ? supabase
+            .from("user_profiles")
+            .select("user_id, first_name, last_name")
+            .in("user_id", userIds)
+        : Promise.resolve({ data: [], error: null }),
+      userIds.length > 0
+        ? supabase
+            .from("accounts")
+            .select("id, email, tier")
+            .in("id", userIds)
+        : Promise.resolve({ data: [], error: null }),
+      meetingIds.length > 0
+        ? supabase
+            .from("meeting_responses")
+            .select("meeting_id, user_id, response, agreement_text, signed_at")
+            .in("meeting_id", meetingIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
 
-        participants.push({
-          user_id: p.user_id,
-          role: p.role,
-          response: p.response,
-          name: profile
-            ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim()
-            : "Unknown",
+    if (profilesResult.error) {
+      console.warn(
+        "[admin/meetings/resolve] profile enrichment skipped:",
+        profilesResult.error.message
+      );
+    }
+    if (accountsResult.error) {
+      console.warn(
+        "[admin/meetings/resolve] account enrichment skipped:",
+        accountsResult.error.message
+      );
+    }
+    if (responsesResult.error) {
+      console.warn(
+        "[admin/meetings/resolve] response enrichment skipped:",
+        responsesResult.error.message
+      );
+    }
+
+    const profilesByUserId = new Map(
+      ((profilesResult.data || []) as ProfileRow[]).map((profile) => [
+        profile.user_id,
+        profile,
+      ])
+    );
+    const accountsByUserId = new Map(
+      ((accountsResult.data || []) as AccountRow[]).map((account) => [
+        account.id,
+        account,
+      ])
+    );
+    const responsesByMeetingId = ((responsesResult.data || []) as MeetingResponseRow[])
+      .reduce<Record<string, Omit<MeetingResponseRow, "meeting_id">[]>>(
+        (acc, response) => {
+          if (!acc[response.meeting_id]) {
+            acc[response.meeting_id] = [];
+          }
+          acc[response.meeting_id].push({
+            user_id: response.user_id,
+            response: response.response,
+            agreement_text: response.agreement_text,
+            signed_at: response.signed_at,
+          });
+          return acc;
+        },
+        {}
+      );
+
+    const enrichedMeetings = meetingRows.map((meeting) => {
+      const participants = (meeting.meeting_participants || []).map((participant) => {
+        const profile = profilesByUserId.get(participant.user_id);
+        const account = accountsByUserId.get(participant.user_id);
+        const name = profile
+          ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim()
+          : "";
+
+        return {
+          user_id: participant.user_id,
+          role: participant.role,
+          response: participant.response,
+          name: name || account?.email?.split("@")[0] || "Unknown",
           email: account?.email || "",
           tier: account?.tier || "basic",
-        });
-      }
+        };
+      });
 
-      // Get meeting responses (Yes/No from both users)
-      const { data: responses } = await supabase
-        .from("meeting_responses")
-        .select("user_id, response, agreement_text, signed_at")
-        .eq("meeting_id", meeting.id);
-
-      enrichedMeetings.push({
+      return {
         ...meeting,
         meeting_participants: undefined,
         participants,
-        responses: responses || [],
-      });
-    }
+        responses: responsesByMeetingId[meeting.id] || [],
+      };
+    });
 
     return NextResponse.json({
       meetings: enrichedMeetings,
-      count: enrichedMeetings.length,
+      count: count ?? enrichedMeetings.length,
+      page: pagination.page,
+      limit: pagination.limit,
+      total_pages: Math.max(
+        1,
+        Math.ceil((count ?? enrichedMeetings.length) / pagination.limit)
+      ),
     });
   } catch (error) {
     console.error("Error in GET /api/admin/meetings/resolve:", error);
@@ -165,10 +376,13 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const admin = await getAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const guard = await requireAdminAccess(request, {
+      anyPermissions: ["manage_meetings"],
+    });
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
+    const admin = guard.context;
 
     const body = await request.json();
     const { meeting_id, resolution, admin_notes } = body;
@@ -210,10 +424,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (meeting.charge_status !== "pending_review") {
+    if (!["pending_review", "pending"].includes(meeting.charge_status)) {
       return NextResponse.json(
         {
-          error: `Meeting charge_status is "${meeting.charge_status}", expected "pending_review"`,
+          error: `Meeting charge_status is "${meeting.charge_status}", expected "pending"`,
         },
         { status: 400 }
       );
@@ -281,18 +495,18 @@ export async function POST(request: NextRequest) {
 
     // Refund credits if needed
     if (refundUserId) {
-      const { data: credits } = await supabase
-        .from("credits")
-        .select("used")
-        .eq("user_id", refundUserId)
-        .single();
-
-      if (credits) {
-        await supabase
-          .from("credits")
-          .update({ used: Math.max(0, credits.used - 1) })
-          .eq("user_id", refundUserId);
-      }
+      await refundConsumedCredits(
+        supabase,
+        refundUserId,
+        typeof meeting.requester_credit_cost === "number"
+          ? meeting.requester_credit_cost
+          : 1,
+        {
+          actionType: "admin_meeting_resolution_refund",
+          description:
+            "Admin resolved meeting dispute with credit refund to requester.",
+        }
+      );
 
       // Refund wallet if applicable
       if (meeting.fee_cents) {
@@ -316,8 +530,8 @@ export async function POST(request: NextRequest) {
             type: "investigation_refund",
             amount_cents: meeting.fee_cents,
             description: `Refund after investigation for meeting ${meeting_id.slice(0, 8)}`,
-            balance_before: wallet.balance_cents || 0,
-            balance_after: (wallet.balance_cents || 0) + meeting.fee_cents,
+            balance_before_cents: wallet.balance_cents || 0,
+            balance_after_cents: (wallet.balance_cents || 0) + meeting.fee_cents,
           });
         }
       }
@@ -345,23 +559,38 @@ export async function POST(request: NextRequest) {
           type: "investigation_charge",
           amount_cents: -meeting.fee_cents,
           description: `Charge after investigation for meeting ${meeting_id.slice(0, 8)} — fault determined`,
-          balance_before: wallet.balance_cents || 0,
-          balance_after: (wallet.balance_cents || 0) - meeting.fee_cents,
+          balance_before_cents: wallet.balance_cents || 0,
+          balance_after_cents: (wallet.balance_cents || 0) - meeting.fee_cents,
         });
       }
     }
 
     // Update meeting record
-    await supabase
+    const updatePayload = {
+      charge_status: newChargeStatus,
+      admin_resolution: resolution,
+      admin_resolution_notes: admin_notes || null,
+      admin_resolved_at: new Date().toISOString(),
+      admin_resolved_by: admin.userId,
+    };
+
+    const { error: meetingUpdateError } = await supabase
       .from("meetings")
-      .update({
-        charge_status: newChargeStatus,
-        admin_resolution: resolution,
-        admin_resolution_notes: admin_notes || null,
-        admin_resolved_at: new Date().toISOString(),
-        admin_resolved_by: admin.user.id,
-      })
+      .update(updatePayload)
       .eq("id", meeting_id);
+
+    if (meetingUpdateError?.code === "42703") {
+      const { error: fallbackUpdateError } = await supabase
+        .from("meetings")
+        .update({ charge_status: newChargeStatus })
+        .eq("id", meeting_id);
+
+      if (fallbackUpdateError) {
+        throw fallbackUpdateError;
+      }
+    } else if (meetingUpdateError) {
+      throw meetingUpdateError;
+    }
 
     // ---------------------------------------------------------------
     // SEND RESOLUTION NOTIFICATIONS
@@ -391,7 +620,7 @@ export async function POST(request: NextRequest) {
         message = `Dear ${name}, the investigation for your video dating meeting held on ${meetingDate} has been concluded. Please check your account for details.`;
       }
 
-      await supabase.from("notifications").insert({
+      await safeInsertNotification({
         user_id: p.user_id,
         type: "investigation_resolved",
         title: "Investigation Complete",
@@ -424,7 +653,7 @@ export async function POST(request: NextRequest) {
 
     // Log admin action
     await supabase.from("admin_logs").insert({
-      admin_id: admin.user.id,
+      admin_id: admin.userId,
       action: "investigation_resolved",
       meta: {
         meeting_id,
@@ -442,8 +671,7 @@ export async function POST(request: NextRequest) {
       charge_status: newChargeStatus,
       refund_issued: !!refundUserId,
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error in POST /api/admin/meetings/resolve:", error);
     return NextResponse.json(
       { error: "Internal server error" },

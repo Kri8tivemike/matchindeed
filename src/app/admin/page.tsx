@@ -4,22 +4,17 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   Users,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  CreditCard,
   Video,
   AlertTriangle,
   TrendingUp,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  TrendingDown,
   ArrowUpRight,
   ImageIcon,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  Calendar,
   DollarSign,
   Loader2,
   RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
 
 /**
  * Dashboard metrics type
@@ -424,7 +419,7 @@ export default function AdminDashboardPage() {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
           <div className="space-y-3">
             <Link
-              href="/admin/users"
+              href={adminPath("/users")}
               className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -435,7 +430,7 @@ export default function AdminDashboardPage() {
             </Link>
 
             <Link
-              href="/admin/moderation"
+              href={adminPath("/moderation")}
               className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -453,7 +448,7 @@ export default function AdminDashboardPage() {
             </Link>
 
             <Link
-              href="/admin/reports"
+              href={adminPath("/reports")}
               className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -471,7 +466,7 @@ export default function AdminDashboardPage() {
             </Link>
 
             <Link
-              href="/admin/pricing"
+              href={adminPath("/pricing")}
               className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -482,7 +477,7 @@ export default function AdminDashboardPage() {
             </Link>
 
             <Link
-              href="/admin/analytics"
+              href={adminPath("/analytics")}
               className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-[#1f419a]/5 to-[#2a44a3]/5 hover:from-[#1f419a]/10 hover:to-[#2a44a3]/10 transition-colors border border-[#1f419a]/10"
             >
               <div className="flex items-center gap-3">
@@ -500,7 +495,7 @@ export default function AdminDashboardPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
           <Link
-            href="/admin/logs"
+            href={adminPath("/logs")}
             className="text-sm text-[#1f419a] hover:underline"
           >
             View all

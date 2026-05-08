@@ -1,59 +1,80 @@
-# Email Verification Setup — Troubleshooting
+# Email Verification Setup — Resend
 
-Verification emails are sent by **Supabase Auth** when users sign up. Configure **Postmark SMTP** in Supabase so auth emails (signup, password reset) use the same provider as transactional emails.
-
----
-
-## Current Setup: Postmark for Auth + Transactional
-
-- **Auth emails** (signup verification, password reset): Supabase sends via Postmark SMTP (configured in Supabase Dashboard)
-- **Transactional emails** (meeting requests, notifications): App sends via Postmark API (`email.ts`, `POSTMARK_SERVER_TOKEN`)
+Verification emails are sent by **Supabase Auth** when users sign up.  
+Configure **Resend SMTP** in Supabase so auth emails (signup, password reset) use Resend.  
+Transactional emails in app APIs also use Resend (`src/lib/email.ts`, `RESEND_API_KEY`).
 
 ---
 
-## Postmark SMTP for Supabase Auth
+## Current Setup: Resend for Auth + Transactional
 
-Configure Postmark as Supabase's custom SMTP so all auth emails go through Postmark.
+- **Auth emails** (signup verification, password reset): Supabase sends through Resend SMTP.
+- **Transactional emails** (meetings, agreements, reactivation): app sends through Resend API.
 
-### 1. Get Postmark SMTP credentials
+---
 
-Postmark SMTP uses different credentials than the Server API token. Generate SMTP credentials:
+## Resend SMTP for Supabase Auth
 
-1. Log into [Postmark](https://account.postmarkapp.com) and select your Server
-2. Go to **Message Streams** → **Default Transactional Stream** → **Settings**
-3. Scroll to **SMTP** → **Generate an SMTP token**
-4. Copy the **Access Key** (username) and **Secret Key** (password) — the Secret Key is shown only once
+### 1. Prepare Resend sender domain
 
-### 2. Configure Supabase SMTP
+1. Log into [Resend](https://resend.com).
+2. Add and verify your sending domain (for example `matchindeed.com`).
+3. Confirm DNS records are green.
 
-1. Open **Supabase Dashboard** → your project → **Authentication** → **Email Templates**
-2. Scroll to **SMTP Settings** → Enable **Custom SMTP**
+### 2. Create API key for SMTP
+
+1. In Resend, go to **API Keys**.
+2. Create an API key (sending access is enough for SMTP).
+3. Copy the key (`re_...`).
+
+### 3. Configure Supabase SMTP
+
+1. Open **Supabase Dashboard** → your project → **Authentication** → **Email**.
+2. Enable **Custom SMTP**.
 3. Enter:
 
 | Field | Value |
 |-------|-------|
-| **Host** | `smtp.postmarkapp.com` |
+| **Host** | `smtp.resend.com` |
 | **Port** | `587` |
-| **Username** | Your Postmark SMTP Access Key |
-| **Password** | Your Postmark SMTP Secret Key |
-| **Sender email** | Verified address (e.g. `noreply@matchindeed.com`) |
+| **Username** | `resend` |
+| **Password** | Your Resend API key (`re_...`) |
+| **Sender email** | Verified sender (e.g. `noreply@matchindeed.com`) |
 | **Sender name** | `MatchIndeed` |
 
-4. Click **Save**
+4. Save.
 
-After saving, all auth emails (signup, password reset, magic links) go through Postmark. No app code changes needed.
+After this, Supabase signup/password-reset emails will route via Resend.
+
+---
+
+## App Environment Variables
+
+Use these in app runtime (`.env.local` and production env):
+
+```bash
+RESEND_API_KEY=re_...
+EMAIL_FROM="MatchIndeed <noreply@matchindeed.com>"
+NEXT_PUBLIC_APP_URL=https://www.matchindeed.com
+```
+
+Optional integration smoke fallback recipient:
+
+```bash
+RESEND_TEST_TO_EMAIL=admin@matchindeed.com
+```
 
 ---
 
 ## Redirect URLs
 
-The verification link must point to your app. Add all used URLs in:
+In Supabase:
 
-**Supabase Dashboard** → **Authentication** → **URL Configuration** → **Redirect URLs**
+**Authentication** → **URL Configuration** → **Redirect URLs**
 
 Examples:
 
-```
+```txt
 https://www.matchindeed.com/**
 https://michaels-mac-mini.tail0b12a7.ts.net:8443/**
 http://localhost:3001/**
@@ -61,37 +82,46 @@ http://localhost:3001/**
 
 ---
 
-## Environment Variable
-
-Set `NEXT_PUBLIC_APP_URL` to the URL testers use:
-
-- **Tailscale testing:** `https://michaels-mac-mini.tail0b12a7.ts.net:8443`
-- **Production:** `https://www.matchindeed.com`
-- **Local:** `http://localhost:3001`
-
-The verification link uses this for `emailRedirectTo`. If it's wrong, the link will point to the wrong domain.
-
----
-
-## "Email rate limit exceeded"
-
-When users see this error on registration, Supabase's built-in email provider has hit its hourly limit (typically 2–4 emails/hour). **Fix:** Configure Postmark SMTP in Supabase (see above) so verification emails use Postmark.
-
----
-
 ## Quick Checks
 
-1. **Supabase Auth logs**  
-   Dashboard → Logs → Auth — look for email send errors.
-
-2. **Spam folder**  
-   Ask testers to check spam/junk.
-
-3. **Postmark Activity**  
-   Check [Postmark Activity](https://account.postmarkapp.com/servers/) for delivery status, bounces, or blocks.
+1. Supabase Auth logs  
+   Dashboard → Logs → Auth (check verification send failures).
+2. Resend dashboard  
+   Check email events, bounces, and suppression list.
+3. App test endpoint (dev only)  
+   `GET /api/test-email`
 
 ---
 
-## Resend verification email button
+## Resend Verification Button
 
-Users can use **Resend verification email** on the verify-email page. That also goes through Supabase Auth and uses the same Postmark SMTP.
+The **Resend verification email** action on `/verify-email` still uses Supabase Auth resend.  
+So it also uses Resend once Supabase SMTP is configured to Resend.
+
+Because Supabase Auth owns this resend email body, the hosted **Confirm signup**
+template must be customized in Supabase, not only in the app's Resend templates.
+
+### Professional Confirm Signup Template
+
+The production-ready template lives at:
+
+```txt
+supabase/templates/confirmation.html
+```
+
+Apply it with the Supabase Management API:
+
+```bash
+export SUPABASE_ACCESS_TOKEN="your-supabase-management-access-token"
+export NEXT_PUBLIC_SUPABASE_URL="https://szmkvcifwopbnatsdcmw.supabase.co"
+node scripts/update-supabase-auth-confirmation-template.mjs
+```
+
+Or paste the same HTML manually:
+
+1. Open Supabase Dashboard.
+2. Go to **Authentication** -> **Email Templates**.
+3. Open **Confirm signup**.
+4. Set subject to `Confirm your MatchIndeed account`.
+5. Paste the contents of `supabase/templates/confirmation.html`.
+6. Save and send a test verification email.

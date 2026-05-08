@@ -114,8 +114,10 @@ export async function PUT(request: NextRequest) {
     // Clean and deduplicate
     const cleanedLocations = [...new Set(
       blocked_locations
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((loc: any) => typeof loc === "string" && loc.trim().length > 0)
+        .filter(
+          (loc: unknown): loc is string =>
+            typeof loc === "string" && loc.trim().length > 0
+        )
         .map((loc: string) => loc.trim())
     )];
 

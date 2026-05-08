@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess } from "@/lib/admin/permissions";
 
 /**
  * Admin User Profile API
@@ -19,37 +20,30 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-/**
- * Verify the requesting user is an admin
- */
-async function verifyAdmin(request: NextRequest): Promise<string | null> {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
+type ParticipationRow = {
+  meeting_id: string;
+  role: string;
+  status: string;
+};
 
-  const token = authHeader.substring(7);
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-  if (error || !user) return null;
-
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (!["admin", "superadmin", "moderator"].includes(account?.role || "")) {
-    return null;
-  }
-  return user.id;
-}
+type MeetingRow = {
+  id: string;
+  title: string | null;
+  status: string;
+  scheduled_date: string | null;
+  scheduled_time: string | null;
+  duration_minutes: number | null;
+  charge_status: string | null;
+  created_at: string;
+};
 
 export async function GET(request: NextRequest) {
   try {
-    const adminId = await verifyAdmin(request);
-    if (!adminId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const guard = await requireAdminAccess(request, {
+      anyPermissions: ["view_users"],
+    });
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
     const { searchParams } = new URL(request.url);
@@ -198,13 +192,11 @@ export async function GET(request: NextRequest) {
         .select("meeting_id, role, status")
         .eq("user_id", userId);
 
-      const meetingIds = (participations || []).map(
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (p: any) => p.meeting_id
+      const meetingIds = ((participations as ParticipationRow[] | null) || []).map(
+        (participation) => participation.meeting_id
       );
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let meetings: any[] = [];
+      let meetings: MeetingRow[] = [];
       if (meetingIds.length > 0) {
         const { data: meetingData } = await supabase
           .from("meetings")
@@ -213,7 +205,7 @@ export async function GET(request: NextRequest) {
           .order("created_at", { ascending: false })
           .limit(30);
 
-        meetings = meetingData || [];
+        meetings = (meetingData as MeetingRow[] | null) || [];
       }
 
       // Meeting status counts

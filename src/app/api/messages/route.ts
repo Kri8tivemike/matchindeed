@@ -1,11 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type PostgrestError } from "@supabase/supabase-js";
+import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
+import {
+  getAccountState,
+  isTargetInteractionUnavailable,
+  resolveOwnInteractionBlockMessage,
+  TARGET_ACCOUNT_INACTIVE_MESSAGE,
+} from "@/lib/account-interactions";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
+
+type ConversationMatch = {
+  id: string;
+  user1_id: string;
+  user2_id: string;
+  matched_at: string;
+  messaging_enabled: boolean;
+  meeting_id: string | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+};
+
+function isMissingReadAtColumn(error: PostgrestError | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    (error.message || "").toLowerCase().includes("read_at")
+  );
+}
 
 /**
  * Helper to get authenticated user from request
@@ -43,6 +70,51 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const matchId = searchParams.get("match_id");
+    const summaryOnly = searchParams.get("summary") === "true";
+
+    if (summaryOnly) {
+      const { data: matches, error: matchesError } = await supabase
+        .from("user_matches")
+        .select("id")
+        .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
+        .eq("messaging_enabled", true);
+
+      if (matchesError) {
+        console.error("Error fetching message summary matches:", matchesError);
+        return NextResponse.json(
+          { error: "Failed to fetch conversations" },
+          { status: 500 }
+        );
+      }
+
+      const matchIds = (matches || []).map((match) => match.id);
+      if (matchIds.length === 0) {
+        return NextResponse.json({
+          conversations: [],
+          total_unread: 0,
+        });
+      }
+
+      const unreadQuery = await supabase
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .in("match_id", matchIds)
+        .neq("sender_id", user.id)
+        .is("read_at", null);
+
+      if (unreadQuery.error && !isMissingReadAtColumn(unreadQuery.error)) {
+        console.error("Error fetching unread message summary:", unreadQuery.error);
+        return NextResponse.json(
+          { error: "Failed to fetch conversations" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        conversations: [],
+        total_unread: unreadQuery.error ? 0 : unreadQuery.count || 0,
+      });
+    }
 
     // -------------------------------------------------------
     // MODE 1: Fetch messages for a specific match
@@ -72,8 +144,19 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // Fetch messages
-      let query = supabase
+      // Fetch messages. Prefer schema with read_at, but gracefully fall back.
+      type MessageRow = {
+        id: string;
+        sender_id: string;
+        content: string;
+        message_type: string;
+        read_at: string | null;
+        created_at: string;
+      };
+
+      let messages: MessageRow[] = [];
+
+      let queryWithReadAt = supabase
         .from("messages")
         .select("id, sender_id, content, message_type, read_at, created_at")
         .eq("match_id", matchId)
@@ -81,29 +164,60 @@ export async function GET(request: NextRequest) {
         .limit(limit);
 
       if (before) {
-        query = query.lt("created_at", before);
+        queryWithReadAt = queryWithReadAt.lt("created_at", before);
       }
 
-      const { data: messages, error: msgError } = await query;
+      const { data: primaryMessages, error: primaryMsgError } = await queryWithReadAt;
 
-      if (msgError) {
-        console.error("Error fetching messages:", msgError);
+      if (primaryMsgError && isMissingReadAtColumn(primaryMsgError)) {
+        let fallbackQuery = supabase
+          .from("messages")
+          .select("id, sender_id, content, message_type, created_at")
+          .eq("match_id", matchId)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+
+        if (before) {
+          fallbackQuery = fallbackQuery.lt("created_at", before);
+        }
+
+        const { data: fallbackMessages, error: fallbackMsgError } = await fallbackQuery;
+        if (fallbackMsgError) {
+          console.error("Error fetching messages (fallback):", fallbackMsgError);
+          return NextResponse.json(
+            { error: "Failed to fetch messages" },
+            { status: 500 }
+          );
+        }
+
+        messages = ((fallbackMessages || []) as Omit<MessageRow, "read_at">[]).map((msg) => ({
+          ...msg,
+          read_at: null,
+        }));
+      } else if (primaryMsgError) {
+        console.error("Error fetching messages:", primaryMsgError);
         return NextResponse.json(
           { error: "Failed to fetch messages" },
           { status: 500 }
         );
+      } else {
+        messages = (primaryMessages || []) as MessageRow[];
       }
 
       // Mark unread messages from the OTHER user as read
       const partnerId =
         match.user1_id === user.id ? match.user2_id : match.user1_id;
 
-      await supabase
+      const markReadResult = await supabase
         .from("messages")
         .update({ read_at: new Date().toISOString() })
         .eq("match_id", matchId)
         .eq("sender_id", partnerId)
         .is("read_at", null);
+
+      if (markReadResult.error && !isMissingReadAtColumn(markReadResult.error)) {
+        console.error("Error marking messages as read:", markReadResult.error);
+      }
 
       return NextResponse.json({
         messages: (messages || []).reverse(), // Return in chronological order
@@ -116,10 +230,8 @@ export async function GET(request: NextRequest) {
     // MODE 2: List all conversations (matches with messaging)
     // -------------------------------------------------------
     // Try fetching with last_message_at column; fall back gracefully if it doesn't exist
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let matches: any[] | null = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let matchesError: any = null;
+    let matches: ConversationMatch[] | null = null;
+    let matchesError: PostgrestError | null = null;
 
     const { data: matchData, error: matchErr } = await supabase
       .from("user_matches")
@@ -137,15 +249,16 @@ export async function GET(request: NextRequest) {
         .eq("messaging_enabled", true)
         .order("matched_at", { ascending: false });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      matches = (fallbackData || []).map((m: any) => ({
+      const fallbackMatches =
+        (fallbackData as Omit<ConversationMatch, "last_message_at" | "last_message_preview">[] | null) || [];
+      matches = fallbackMatches.map((m) => ({
         ...m,
         last_message_at: null,
         last_message_preview: null,
       }));
       matchesError = fallbackErr;
     } else {
-      matches = matchData;
+      matches = (matchData as ConversationMatch[] | null) || null;
       matchesError = matchErr;
     }
 
@@ -173,17 +286,22 @@ export async function GET(request: NextRequest) {
       // Get partner account
       const { data: account } = await supabase
         .from("accounts")
-        .select("tier")
+        .select("tier, last_active_at")
         .eq("id", partnerId)
         .single();
 
       // Count unread messages from partner
-      const { count: unreadCount } = await supabase
+      const unreadQuery = await supabase
         .from("messages")
         .select("id", { count: "exact", head: true })
         .eq("match_id", match.id)
         .eq("sender_id", partnerId)
         .is("read_at", null);
+
+      let unreadCount = unreadQuery.count || 0;
+      if (unreadQuery.error && isMissingReadAtColumn(unreadQuery.error)) {
+        unreadCount = 0;
+      }
 
       const partnerName = profile
         ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim()
@@ -201,6 +319,7 @@ export async function GET(request: NextRequest) {
         partner_name: partnerName,
         partner_photo: partnerPhoto,
         partner_tier: account?.tier || "basic",
+        partner_last_active_at: account?.last_active_at || null,
         matched_at: match.matched_at,
         last_message_at: match.last_message_at,
         last_message_preview: match.last_message_preview,
@@ -290,6 +409,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const partnerId =
+      match.user1_id === user.id ? match.user2_id : match.user1_id;
+
+    const [senderAccount, partnerAccount] = await Promise.all([
+      getAccountState(supabase, user.id),
+      getAccountState(supabase, partnerId),
+    ]);
+
+    const senderBlockedMessage = resolveOwnInteractionBlockMessage(senderAccount);
+    if (senderBlockedMessage) {
+      return NextResponse.json(
+        { error: senderBlockedMessage, code: "account_deactivated" },
+        { status: 403 }
+      );
+    }
+
+    if (isTargetInteractionUnavailable(partnerAccount)) {
+      return NextResponse.json(
+        { error: TARGET_ACCOUNT_INACTIVE_MESSAGE, code: "target_unavailable" },
+        { status: 403 }
+      );
+    }
+
     // Insert the message
     const { data: message, error: insertError } = await supabase
       .from("messages")
@@ -325,9 +467,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Send notification to the other user
-    const partnerId =
-      match.user1_id === user.id ? match.user2_id : match.user1_id;
-
     const { data: senderProfile } = await supabase
       .from("user_profiles")
       .select("first_name")
@@ -335,6 +474,9 @@ export async function POST(request: NextRequest) {
       .single();
 
     const senderName = senderProfile?.first_name || "Your match";
+    const preview =
+      content.trim().substring(0, 80) +
+      (content.trim().length > 80 ? "..." : "");
 
     // In-app notification
     try {
@@ -342,7 +484,7 @@ export async function POST(request: NextRequest) {
         user_id: partnerId,
         type: "new_message",
         title: "New Message",
-        message: `${senderName}: ${content.trim().substring(0, 80)}${content.trim().length > 80 ? "..." : ""}`,
+        message: `${senderName}: ${preview}`,
         data: {
           match_id,
           sender_id: user.id,
@@ -352,6 +494,19 @@ export async function POST(request: NextRequest) {
     } catch (notifErr) {
       console.error("Error sending message notification:", notifErr);
     }
+
+    await sendPushNotificationIfAllowed({
+      userId: partnerId,
+      type: "new_message",
+      title: `New message from ${senderName}`,
+      message: preview ? `"${preview}"` : "Open the chat to reply.",
+      url: `/dashboard/messages/${match_id}`,
+      data: {
+        match_id,
+        sender_id: user.id,
+        message_id: message.id,
+      },
+    });
 
     return NextResponse.json({
       success: true,
@@ -417,6 +572,9 @@ export async function PATCH(request: NextRequest) {
       .is("read_at", null);
 
     if (error) {
+      if (isMissingReadAtColumn(error)) {
+        return NextResponse.json({ success: true });
+      }
       console.error("Error marking messages as read:", error);
       return NextResponse.json(
         { error: "Failed to mark messages as read" },

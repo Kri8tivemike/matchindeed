@@ -1,5 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess } from "@/lib/admin/permissions";
+import { getOneSignalWebPushStatus } from "@/lib/onesignal-app-status";
 
 /**
  * Admin-only endpoint to test all third-party API integrations.
@@ -57,31 +59,79 @@ async function testStripe(): Promise<TestResult> {
   }
 }
 
-/** 3. Postmark — get server info (minimal call) */
-async function testPostmark(): Promise<TestResult> {
-  const token = process.env.POSTMARK_SERVER_TOKEN;
-  if (!token) return { service: "Postmark", status: "skip", message: "Missing POSTMARK_SERVER_TOKEN" };
+/** 3. Resend — verify API access */
+async function testResend(): Promise<TestResult> {
+  const token = process.env.RESEND_API_KEY;
+  if (!token) return { service: "Resend", status: "skip", message: "Missing RESEND_API_KEY" };
 
   const start = Date.now();
   try {
-    const res = await fetch("https://api.postmarkapp.com/server", {
-      headers: {
-        Accept: "application/json",
-        "X-Postmark-Server-Token": token,
-      },
+    const domainsRes = await fetch("https://api.resend.com/domains?limit=1", {
+      headers: { Authorization: `Bearer ${token}` },
     });
-    const data = await res.json();
-    if (res.status === 401) return { service: "Postmark", status: "fail", message: "Invalid server token", responseTime: Date.now() - start };
-    if (data.Name) {
-      return { service: "Postmark", status: "pass", message: `Connected — server "${data.Name}"`, responseTime: Date.now() - start };
+    const domainsData = await domainsRes.json().catch(() => ({} as Record<string, unknown>));
+
+    if (domainsRes.ok) {
+      const count = Array.isArray(domainsData.data) ? domainsData.data.length : 0;
+      return {
+        service: "Resend",
+        status: "pass",
+        message: `Connected — domain API reachable (${count} listed)`,
+        responseTime: Date.now() - start,
+      };
     }
-    return { service: "Postmark", status: "fail", message: data.Message || `HTTP ${res.status}`, responseTime: Date.now() - start };
+
+    // Some keys are sending-only and may not have domain read scope.
+    const fallbackRecipient =
+      process.env.RESEND_TEST_TO_EMAIL ||
+      (process.env.ADMIN_EMAILS || "").split(",")[0]?.trim() ||
+      "";
+    if (!fallbackRecipient) {
+      return {
+        service: "Resend",
+        status: "skip",
+        message: "Key present, but no domain-read scope and no RESEND_TEST_TO_EMAIL fallback recipient",
+        responseTime: Date.now() - start,
+      };
+    }
+
+    const sendRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || "MatchIndeed <noreply@matchindeed.com>",
+        to: fallbackRecipient,
+        subject: "[Integration Test] Resend connectivity check",
+        html: "<p>This is an automated integration test email.</p>",
+      }),
+    });
+    const sendData = await sendRes.json().catch(() => ({} as Record<string, unknown>));
+
+    if (sendRes.ok && typeof sendData.id === "string") {
+      return {
+        service: "Resend",
+        status: "pass",
+        message: `Connected — send API accepted (message id ${sendData.id})`,
+        responseTime: Date.now() - start,
+      };
+    }
+
+    const message = typeof sendData.message === "string"
+      ? sendData.message
+      : typeof domainsData.message === "string"
+      ? domainsData.message
+      : `HTTP ${sendRes.status}`;
+
+    return { service: "Resend", status: "fail", message, responseTime: Date.now() - start };
   } catch (e: unknown) {
-    return { service: "Postmark", status: "fail", message: String(e), responseTime: Date.now() - start };
+    return { service: "Resend", status: "fail", message: String(e), responseTime: Date.now() - start };
   }
 }
 
-/** 4. Zoom — get access token */
+/** 4. Zoom — get access token and create/delete a disposable meeting */
 async function testZoom(): Promise<TestResult> {
   const accountId = process.env.ZOOM_ACCOUNT_ID;
   const clientId = process.env.ZOOM_CLIENT_ID;
@@ -91,13 +141,76 @@ async function testZoom(): Promise<TestResult> {
   const start = Date.now();
   try {
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-    const res = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`, {
+    const tokenRes = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`, {
       method: "POST",
       headers: { Authorization: `Basic ${credentials}` },
     });
-    const data = await res.json();
-    if (data.access_token) return { service: "Zoom", status: "pass", message: "Connected — token obtained", responseTime: Date.now() - start };
-    return { service: "Zoom", status: "fail", message: data.reason || data.error || "Unknown error", responseTime: Date.now() - start };
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) {
+      return {
+        service: "Zoom",
+        status: "fail",
+        message: tokenData.reason || tokenData.error || "OAuth token request failed",
+        responseTime: Date.now() - start,
+      };
+    }
+
+    const meetingStart = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    const createRes = await fetch("https://api.zoom.us/v2/users/me/meetings", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        topic: "MatchIndeed Integration Test",
+        type: 2,
+        start_time: meetingStart,
+        duration: 15,
+        timezone: "UTC",
+        settings: {
+          join_before_host: true,
+          waiting_room: false,
+          approval_type: 2,
+        },
+      }),
+    });
+
+    const createData = await createRes.json().catch(() => ({} as Record<string, unknown>));
+    if (!createRes.ok || !createData.join_url || !createData.id) {
+      return {
+        service: "Zoom",
+        status: "fail",
+        message:
+          typeof createData.message === "string"
+            ? `Token OK, meeting create failed: ${createData.message}`
+            : `Token OK, meeting create failed (HTTP ${createRes.status})`,
+        responseTime: Date.now() - start,
+      };
+    }
+
+    const deleteRes = await fetch(`https://api.zoom.us/v2/meetings/${createData.id}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+      },
+    });
+
+    if (!deleteRes.ok && deleteRes.status !== 404) {
+      return {
+        service: "Zoom",
+        status: "fail",
+        message: `Meeting created, but cleanup failed (HTTP ${deleteRes.status})`,
+        responseTime: Date.now() - start,
+      };
+    }
+
+    return {
+      service: "Zoom",
+      status: "pass",
+      message: "Connected — token, meeting creation, and cleanup all passed",
+      responseTime: Date.now() - start,
+    };
   } catch (e: unknown) {
     return { service: "Zoom", status: "fail", message: String(e), responseTime: Date.now() - start };
   }
@@ -188,20 +301,51 @@ async function testIPQS(): Promise<TestResult> {
 
 /** 9. OneSignal — get app info */
 async function testOneSignal(): Promise<TestResult> {
-  const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
-  const restKey = process.env.ONESIGNAL_REST_KEY;
-  if (!appId || !restKey) return { service: "OneSignal", status: "skip", message: "Missing OneSignal credentials" };
-
   const start = Date.now();
   try {
-    const res = await fetch(`https://api.onesignal.com/apps/${appId}`, {
-      headers: { Authorization: `Key ${restKey}` },
-    });
-    const data = await res.json();
-    if (data.id) {
-      return { service: "OneSignal", status: "pass", message: `Connected — app "${data.name}"`, responseTime: Date.now() - start };
+    const status = await getOneSignalWebPushStatus();
+    if (!status.appIdPresent || !status.restKeyPresent) {
+      return {
+        service: "OneSignal",
+        status: "skip",
+        message: "Missing OneSignal credentials",
+        responseTime: Date.now() - start,
+      };
     }
-    return { service: "OneSignal", status: "fail", message: data.errors?.[0] || "Unknown error", responseTime: Date.now() - start };
+
+    if (!status.configured) {
+      return {
+        service: "OneSignal",
+        status: "fail",
+        message: status.message,
+        responseTime: Date.now() - start,
+      };
+    }
+
+    if (!status.webPushConfigured) {
+      return {
+        service: "OneSignal",
+        status: "fail",
+        message: "App exists, but web push is not configured in OneSignal yet",
+        responseTime: Date.now() - start,
+      };
+    }
+
+    if (!status.originMatches) {
+      return {
+        service: "OneSignal",
+        status: "fail",
+        message: status.message,
+        responseTime: Date.now() - start,
+      };
+    }
+
+    return {
+      service: "OneSignal",
+      status: "pass",
+      message: `Connected — app "${status.appName || "OneSignal"}" is configured for web push`,
+      responseTime: Date.now() - start,
+    };
   } catch (e: unknown) {
     return { service: "OneSignal", status: "fail", message: String(e), responseTime: Date.now() - start };
   }
@@ -233,50 +377,77 @@ async function testMixpanel(): Promise<TestResult> {
 
 /** 11. TheHive.ai — test with a safe image URL */
 async function testTheHive(): Promise<TestResult> {
-  const apiKey = process.env.THEHIVE_API_KEY;
-  if (!apiKey) return { service: "TheHive.ai", status: "skip", message: "Missing THEHIVE_API_KEY" };
+  const v3Secret = process.env.THEHIVE_SECRET_KEY?.trim();
+  const legacyKey = process.env.THEHIVE_API_KEY?.trim();
+  const v2Token =
+    legacyKey && !/[\/=]/.test(legacyKey) ? legacyKey : null;
+  if (!v3Secret && !v2Token) {
+    return {
+      service: "TheHive.ai",
+      status: "skip",
+      message: "Missing THEHIVE_SECRET_KEY or THEHIVE_API_KEY",
+    };
+  }
 
   const start = Date.now();
   try {
-    const res = await fetch("https://api.thehive.ai/api/v2/task/sync", {
+    const url = v3Secret
+      ? "https://api.thehive.ai/api/v3/hive/visual-moderation"
+      : "https://api.thehive.ai/api/v2/task/sync";
+    const headers = {
+      Authorization: v3Secret ? `Bearer ${v3Secret}` : `Token ${v2Token}`,
+      "Content-Type": "application/json",
+    };
+    const body = v3Secret
+      ? {
+          input: [
+            {
+              media_url:
+                "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png",
+            },
+          ],
+        }
+      : {
+          url: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png",
+        };
+
+    const res = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Token ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png" }),
+      headers,
+      body: JSON.stringify(body),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
     if (res.status === 401 || res.status === 403) {
-      return { service: "TheHive.ai", status: "fail", message: "Invalid API key (401/403)", responseTime: Date.now() - start };
+      return {
+        service: "TheHive.ai",
+        status: "fail",
+        message: "Invalid API key/secret (401/403)",
+        responseTime: Date.now() - start,
+      };
     }
-    if (data.status) {
-      return { service: "TheHive.ai", status: "pass", message: "Connected — moderation API responded", responseTime: Date.now() - start };
+
+    const hasStatus =
+      !!data &&
+      typeof data === "object" &&
+      Array.isArray((data as { status?: unknown[] }).status);
+
+    if (hasStatus) {
+      return {
+        service: "TheHive.ai",
+        status: "pass",
+        message: `Connected (${v3Secret ? "V3" : "V2"}) — moderation API responded`,
+        responseTime: Date.now() - start,
+      };
     }
-    return { service: "TheHive.ai", status: "pass", message: `API reachable (HTTP ${res.status})`, responseTime: Date.now() - start };
+
+    return {
+      service: "TheHive.ai",
+      status: "pass",
+      message: `API reachable (HTTP ${res.status})`,
+      responseTime: Date.now() - start,
+    };
   } catch (e: unknown) {
     return { service: "TheHive.ai", status: "fail", message: String(e), responseTime: Date.now() - start };
-  }
-}
-
-/** 12. ImageKit — verify URL endpoint is reachable */
-async function testImageKit(): Promise<TestResult> {
-  const url = process.env.NEXT_PUBLIC_IMAGEKIT_URL;
-  if (!url) return { service: "ImageKit", status: "skip", message: "Missing NEXT_PUBLIC_IMAGEKIT_URL" };
-
-  const start = Date.now();
-  try {
-    // Try fetching a non-existent image — ImageKit returns 404 (meaning endpoint is valid)
-    const res = await fetch(`${url}/test-connectivity.jpg`, { method: "HEAD" });
-    // 404 = endpoint works, image doesn't exist (expected)
-    // 200 = also fine
-    // 403 = bad configuration
-    if (res.status === 404 || res.status === 200) {
-      return { service: "ImageKit", status: "pass", message: `CDN reachable (HTTP ${res.status})`, responseTime: Date.now() - start };
-    }
-    return { service: "ImageKit", status: "fail", message: `Unexpected status ${res.status}`, responseTime: Date.now() - start };
-  } catch (e: unknown) {
-    return { service: "ImageKit", status: "fail", message: String(e), responseTime: Date.now() - start };
   }
 }
 
@@ -369,34 +540,19 @@ async function testGSC(): Promise<TestResult> {
 // Main Handler
 // ---------------------------------------------------------------
 
-export async function GET(request: Request) {
-  // Admin-only: check for admin auth
-  const authHeader = request.headers.get("authorization");
-  const adminEmails = (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim().toLowerCase());
-
-  // Allow access with Supabase session or a simple admin check
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (supabaseUrl && supabaseKey && authHeader) {
-    try {
-      const token = authHeader.replace("Bearer ", "");
-      const client = createClient(supabaseUrl, supabaseKey, { auth: { autoRefreshToken: false, persistSession: false } });
-      const { data: { user } } = await client.auth.getUser(token);
-
-      if (!user || !adminEmails.includes(user.email?.toLowerCase() || "")) {
-        return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-      }
-    } catch {
-      return NextResponse.json({ error: "Invalid authentication" }, { status: 401 });
-    }
+export async function GET(request: NextRequest) {
+  const guard = await requireAdminAccess(request, {
+    anyPermissions: ["view_analytics"],
+  });
+  if (!guard.ok) {
+    return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
 
   // Run all tests in parallel
   const results = await Promise.all([
     testSupabase(),
     testStripe(),
-    testPostmark(),
+    testResend(),
     testZoom(),
     testSentry(),
     testTurnstile(),
@@ -405,7 +561,6 @@ export async function GET(request: Request) {
     testOneSignal(),
     testMixpanel(),
     testTheHive(),
-    testImageKit(),
     testCustomerIO(),
     testSinch(),
     testZoho(),

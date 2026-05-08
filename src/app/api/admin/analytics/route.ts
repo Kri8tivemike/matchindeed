@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess } from "@/lib/admin/permissions";
+import {
+  isMissingNotificationDeliveryLogsTableError,
+  summarizePushDelivery,
+} from "@/lib/notification-delivery";
 
 /**
  * Admin Analytics API
@@ -24,27 +29,16 @@ const supabase = createClient(
 
 export async function GET(request: NextRequest) {
   try {
-    // Basic auth check (admin verification should be done at layout level)
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const token = authHeader.substring(7);
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const guard = await requireAdminAccess(request, {
+      anyPermissions: ["view_analytics"],
+    });
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
     // Date helpers
     const now = new Date();
     const today = now.toISOString().split("T")[0];
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-      .toISOString();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
       .toISOString();
     const thisMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
@@ -149,7 +143,7 @@ export async function GET(request: NextRequest) {
     const { count: cancelledMeetings } = await supabase
       .from("meetings")
       .select("*", { count: "exact", head: true })
-      .eq("status", "cancelled");
+      .in("status", ["canceled", "cancelled"]);
 
     const { count: pendingMeetings } = await supabase
       .from("meetings")
@@ -243,6 +237,22 @@ export async function GET(request: NextRequest) {
       .from("notifications")
       .select("*", { count: "exact", head: true });
 
+    let pushDelivery = summarizePushDelivery([]);
+    const { data: pushRows, error: pushError } = await supabase
+      .from("notification_delivery_logs")
+      .select("channel, status, notification_type, created_at")
+      .eq("channel", "push")
+      .gte("created_at", sevenDaysAgo)
+      .order("created_at", { ascending: false });
+
+    if (pushError) {
+      if (!isMissingNotificationDeliveryLogsTableError(pushError)) {
+        console.error("Error loading notification delivery logs:", pushError);
+      }
+    } else {
+      pushDelivery = summarizePushDelivery(pushRows || []);
+    }
+
     // ---------------------------------------------------------------
     // Build Response
     // ---------------------------------------------------------------
@@ -280,6 +290,7 @@ export async function GET(request: NextRequest) {
       },
       notifications: {
         total: totalNotifications || 0,
+        push: pushDelivery,
       },
       trends: {
         signups_by_day: signupsByDay,

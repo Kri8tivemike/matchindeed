@@ -1,14 +1,35 @@
 "use client";
-import Link from "next/link";
+import NextLink from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import { ChevronRight, ChevronDown, HelpCircle, User, Users, Calendar, Heart, Search, Compass, Eye, Settings, Sliders, Bell, CreditCard, Info, LogOut, CalendarCheck, Wallet, MessageCircle, Home } from "lucide-react";
+import { useEffect, useState, type ComponentProps } from "react";
+import { ChevronRight, ChevronDown, HelpCircle, User, Users, Calendar, Heart, Search, Compass, Eye, Settings, Sliders, Bell, CreditCard, Info, LogOut, CalendarCheck, Wallet, MessageCircle, Home, History as HistoryIcon } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
+import { getSafeDisplayName } from "@/lib/name";
+import { toStateCountryLabel } from "@/lib/location";
+import {
+  isAbortLikeError,
+  isTransientRequestError,
+  shouldSkipBackgroundRequest,
+} from "@/lib/request-errors";
+import {
+  isRealtimeFailureStatus,
+  noteRealtimeFailure,
+  noteRealtimeSubscribed,
+  removeRealtimeChannelSafely,
+  shouldUseRealtime,
+} from "@/lib/realtime-fallback";
 import Image from "next/image";
+import { useDashboardAccess } from "@/components/dashboard/DashboardAccessProvider";
+
+type NextLinkProps = ComponentProps<typeof NextLink>;
+
+function Link({ prefetch, ...props }: NextLinkProps) {
+  return <NextLink {...props} prefetch={prefetch ?? false} />;
+}
 
 type SidebarProps = {
-  active?: "home" | "profile" | "my-account" | "preference" | "calendar" | "appointments" | "notifications" | "subscription" | "wallet" | "about" | "signout" | "edit" | "discover" | "likes" | "matches" | "search" | "messages";
+  active?: "home" | "profile" | "my-account" | "preference" | "calendar" | "appointments" | "history" | "notifications" | "subscription" | "wallet" | "about" | "signout" | "edit" | "discover" | "likes" | "matches" | "search" | "messages";
 };
 
 type UserInfo = {
@@ -20,6 +41,7 @@ type UserInfo = {
 
 export default function Sidebar({ active }: SidebarProps) {
   const { toast } = useToast();
+  const { walletAccessEnabled } = useDashboardAccess();
   const router = useRouter();
   const pathname = usePathname();
   const [userInfo, setUserInfo] = useState<UserInfo>({
@@ -28,8 +50,7 @@ export default function Sidebar({ active }: SidebarProps) {
     location: null,
     photo: null,
   });
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [isProfileExpanded, setIsProfileExpanded] = useState(false);
   const [isAppointmentsExpanded, setIsAppointmentsExpanded] = useState(false);
   const [isSubscriptionExpanded, setIsSubscriptionExpanded] = useState(false);
@@ -37,6 +58,7 @@ export default function Sidebar({ active }: SidebarProps) {
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   // Unread message count for the messages badge
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
 
   // Determine active state from pathname if not provided
   const getActiveState = (): SidebarProps["active"] => {
@@ -51,6 +73,7 @@ export default function Sidebar({ active }: SidebarProps) {
     if (pathname?.includes("/profile/wallet") || pathname?.includes("/wallet")) return "wallet";
     if (pathname?.includes("/profile")) return "profile";
     if (pathname?.includes("/calendar")) return "calendar";
+    if (pathname?.includes("/dashboard/history")) return "history";
     if (pathname?.includes("/meetings")) return "appointments";
     if (pathname?.includes("/messages")) return "messages";
     if (pathname?.includes("/likes")) return "likes";
@@ -72,7 +95,12 @@ export default function Sidebar({ active }: SidebarProps) {
 
   // Auto-expand appointments section if user is on appointments, calendar, or notifications page
   useEffect(() => {
-    if (currentActive === "appointments" || currentActive === "calendar" || currentActive === "notifications") {
+    if (
+      currentActive === "appointments" ||
+      currentActive === "history" ||
+      currentActive === "calendar" ||
+      currentActive === "notifications"
+    ) {
       setIsAppointmentsExpanded(true);
     }
   }, [currentActive]);
@@ -86,9 +114,25 @@ export default function Sidebar({ active }: SidebarProps) {
 
   // Fetch user information
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(min-width: 768px)");
+    const updateViewport = () => setIsDesktopViewport(mediaQuery.matches);
+    updateViewport();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateViewport);
+      return () => mediaQuery.removeEventListener("change", updateViewport);
+    }
+
+    mediaQuery.addListener(updateViewport);
+    return () => mediaQuery.removeListener(updateViewport);
+  }, []);
+
+  useEffect(() => {
     const fetchUserInfo = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
         if (!user) {
           setLoading(false);
           return;
@@ -127,7 +171,10 @@ export default function Sidebar({ active }: SidebarProps) {
           : profile?.profile_photo_url || null;
 
         setUserInfo({
-          name: profile?.first_name || account?.display_name || user.email?.split("@")[0] || "User",
+          name: getSafeDisplayName(
+            profile?.first_name,
+            account?.display_name || user.email?.split("@")[0] || null
+          ),
           age,
           location: profile?.location || null,
           photo: primaryPhoto,
@@ -145,131 +192,153 @@ export default function Sidebar({ active }: SidebarProps) {
   // Fetch unread notification count and subscribe to real-time updates
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let isMounted = true;
+    let disposed = false;
 
     const fetchUnreadCount = async () => {
+      if (shouldSkipBackgroundRequest()) {
+        return;
+      }
+
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
 
-        // Try with read_at column, fall back to total count
-        let unread = 0;
-        const { count, error: countError } = await supabase
-          .from("notifications")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .is("read_at", null);
+        const res = await fetch("/api/notifications?summary=true&unread_only=true", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
 
-        if (countError) {
-          // If read_at doesn't exist, count all notifications
-          const { count: totalCount } = await supabase
-            .from("notifications")
-            .select("id", { count: "exact", head: true })
-            .eq("user_id", user.id);
-          unread = totalCount || 0;
-        } else {
-          unread = count || 0;
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        const unread = typeof data?.unread_count === "number" ? data.unread_count : 0;
+        if (isMounted) {
+          setUnreadNotifCount(unread);
         }
-
-        setUnreadNotifCount(unread);
-
-        // Subscribe to new notifications for real-time badge updates
-        channel = supabase
-          .channel("sidebar-notif-count")
-          .on(
-            "postgres_changes",
-            {
-              event: "INSERT",
-              schema: "public",
-              table: "notifications",
-              filter: `user_id=eq.${user.id}`,
-            },
-            () => {
-              setUnreadNotifCount((prev) => prev + 1);
-            }
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "UPDATE",
-              schema: "public",
-              table: "notifications",
-              filter: `user_id=eq.${user.id}`,
-            },
-            () => {
-              // Refetch count when a notification is updated (marked as read)
-              fetchUnreadCount();
-            }
-          )
-          .subscribe();
       } catch (err) {
+        if (isTransientRequestError(err)) {
+          return;
+        }
         console.error("Error fetching unread count:", err);
       }
     };
 
-    fetchUnreadCount();
-
-    // Also poll every 60 seconds as a fallback
-    const interval = setInterval(async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        const { count, error: pollError } = await supabase
-          .from("notifications")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .is("read_at", null);
-        if (!pollError) {
-          setUnreadNotifCount(count || 0);
-        } else {
-          // If read_at column doesn't exist, try without it
-          const { count: totalCount } = await supabase
-            .from("notifications")
-            .select("id", { count: "exact", head: true })
-            .eq("user_id", user.id);
-          setUnreadNotifCount(totalCount || 0);
-        }
-      } catch {
-        // Silent fail
+    const setupRealtime = async () => {
+      if (!shouldUseRealtime()) {
+        return;
       }
-    }, 60000);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user ?? null;
+      if (!user || disposed) return;
+
+      channel = supabase
+        .channel("sidebar-notif-count")
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${user.id}`,
+          },
+          () => {
+            fetchUnreadCount();
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${user.id}`,
+          },
+          () => {
+            fetchUnreadCount();
+          }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            noteRealtimeSubscribed();
+            return;
+          }
+
+          if (isRealtimeFailureStatus(status) && noteRealtimeFailure(status)) {
+            removeRealtimeChannelSafely(supabase, channel);
+          }
+        });
+    };
+
+    fetchUnreadCount();
+    setupRealtime();
+
+    // Poll every 60 seconds as a fallback.
+    const interval = setInterval(fetchUnreadCount, 60000);
 
     return () => {
+      disposed = true;
+      isMounted = false;
       clearInterval(interval);
-      if (channel) supabase.removeChannel(channel);
+      removeRealtimeChannelSafely(supabase, channel);
     };
   }, []);
 
   // Fetch unread message count
   useEffect(() => {
+    if (!isDesktopViewport || pathname?.startsWith("/dashboard/messages")) {
+      return;
+    }
+
+    let isMounted = true;
+    let currentController: AbortController | null = null;
+
     const fetchUnreadMsgCount = async () => {
+      if (shouldSkipBackgroundRequest()) {
+        return;
+      }
+
+      currentController?.abort();
+      currentController = new AbortController();
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
 
-        const res = await fetch("/api/messages", {
+        const res = await fetch("/api/messages?summary=true", {
           headers: { Authorization: `Bearer ${session.access_token}` },
+          signal: currentController.signal,
         });
 
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
           setUnreadMsgCount(data.total_unread || 0);
         }
-      } catch {
-        // Silent fail
+      } catch (error) {
+        if (isAbortLikeError(error) || isTransientRequestError(error)) {
+          return;
+        }
       }
     };
 
     fetchUnreadMsgCount();
 
-    // Poll every 30 seconds for new messages
-    const interval = setInterval(fetchUnreadMsgCount, 30000);
+    // Poll every 60 seconds as a fallback to realtime updates.
+    const interval = setInterval(fetchUnreadMsgCount, 60000);
 
     // Real-time subscription for new messages
     let msgChannel: ReturnType<typeof supabase.channel> | null = null;
+    let disposed = false;
 
     const setupMsgRealtime = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!shouldUseRealtime()) {
+        return;
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user ?? null;
+      if (!user || disposed) return;
 
       msgChannel = supabase
         .channel("sidebar-msg-count")
@@ -278,16 +347,28 @@ export default function Sidebar({ active }: SidebarProps) {
           { event: "INSERT", schema: "public", table: "messages" },
           () => fetchUnreadMsgCount()
         )
-        .subscribe();
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            noteRealtimeSubscribed();
+            return;
+          }
+
+          if (isRealtimeFailureStatus(status) && noteRealtimeFailure(status)) {
+            removeRealtimeChannelSafely(supabase, msgChannel);
+          }
+        });
     };
 
     setupMsgRealtime();
 
     return () => {
+      disposed = true;
+      isMounted = false;
+      currentController?.abort();
       clearInterval(interval);
-      if (msgChannel) supabase.removeChannel(msgChannel);
+      removeRealtimeChannelSafely(supabase, msgChannel);
     };
-  }, []);
+  }, [isDesktopViewport, pathname]);
 
   const itemClass = (key: SidebarProps["active"]) =>
     `flex items-center justify-between rounded-xl px-3 py-2 transition-colors ${
@@ -311,8 +392,7 @@ export default function Sidebar({ active }: SidebarProps) {
       try {
         localStorage.removeItem("form_draft_profile_edit");
         localStorage.removeItem("form_draft_preferences_edit");
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-      } catch (e) {
+      } catch {
         // Ignore localStorage errors
       }
       
@@ -325,16 +405,17 @@ export default function Sidebar({ active }: SidebarProps) {
   };
 
   // Build location string
-  const locationString = userInfo.location 
+  const safeLocation = toStateCountryLabel(userInfo.location);
+  const locationString = safeLocation
     ? userInfo.age 
-      ? `Age ${userInfo.age}, ${userInfo.location}`
-      : userInfo.location
+      ? `Age ${userInfo.age}, ${safeLocation}`
+      : safeLocation
     : userInfo.age
     ? `Age ${userInfo.age}`
     : "";
 
   return (
-    <aside className="flex h-full flex-col rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
+    <aside className="flex h-full min-h-0 flex-col rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5 lg:sticky lg:top-20 lg:h-[calc(100dvh-5.5rem)]">
       {/* User Info Section */}
       <div className="flex items-center gap-3 rounded-xl bg-[#eef2ff] px-3 py-2 text-[#1f419a]">
         {userInfo.photo ? (
@@ -361,7 +442,8 @@ export default function Sidebar({ active }: SidebarProps) {
       </div>
 
       {/* Main Navigation */}
-      <div className="mt-3 space-y-2 text-sm">
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 text-sm [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent]">
+        <div className="space-y-2">
         <Link href="/dashboard" className={itemClass("home")}>
           <span className="flex items-center gap-2">
             <Home className="h-4 w-4" />
@@ -419,7 +501,7 @@ export default function Sidebar({ active }: SidebarProps) {
         <div className="my-2 border-t border-gray-100"></div>
 
         {/* Profile Section - Collapsible */}
-        <div className={isProfileExpanded ? "-mx-4" : ""}>
+        <div className={isProfileExpanded ? "rounded-xl bg-[#1f419a] p-1 shadow-inner ring-1 ring-white/15" : ""}>
           <button
             onClick={() => {
               if (!isProfileExpanded) {
@@ -430,7 +512,7 @@ export default function Sidebar({ active }: SidebarProps) {
             }}
             className={`w-full flex items-center justify-between px-3 py-2 transition-all duration-300 ease-in-out ${
               isProfileExpanded
-                ? "bg-[#1f419a] text-white" 
+                ? "rounded-lg bg-[#1f419a] text-white" 
                 : `rounded-xl ${
                     currentActive === "profile" || currentActive === "my-account" || currentActive === "preference" || currentActive === "edit"
                       ? "bg-[#eef2ff] text-[#1f419a]" 
@@ -456,7 +538,7 @@ export default function Sidebar({ active }: SidebarProps) {
               isProfileExpanded ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
             }`}
           >
-            <div className={`pl-2 pt-1 space-y-1 ${isProfileExpanded ? "bg-[#1f419a] pb-2" : ""}`}>
+            <div className="space-y-1 px-1 pb-1 pt-1">
               <Link 
                 href="/dashboard/profile" 
                 className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
@@ -518,7 +600,7 @@ export default function Sidebar({ active }: SidebarProps) {
         </div>
         
         {/* Appointments Section - Collapsible */}
-        <div className={isAppointmentsExpanded ? "-mx-4" : ""}>
+        <div className={isAppointmentsExpanded ? "rounded-xl bg-[#1f419a] p-1 shadow-inner ring-1 ring-white/15" : ""}>
           <button
             onClick={() => {
               if (!isAppointmentsExpanded) {
@@ -529,9 +611,9 @@ export default function Sidebar({ active }: SidebarProps) {
             }}
             className={`w-full flex items-center justify-between px-3 py-2 transition-all duration-300 ease-in-out ${
               isAppointmentsExpanded
-                ? "bg-[#1f419a] text-white" 
+                ? "rounded-lg bg-[#1f419a] text-white" 
                 : `rounded-xl ${
-                    currentActive === "appointments" || currentActive === "calendar" || currentActive === "notifications"
+                    currentActive === "appointments" || currentActive === "history" || currentActive === "calendar" || currentActive === "notifications"
                       ? "bg-[#eef2ff] text-[#1f419a]" 
                       : "text-gray-700 hover:bg-gray-50"
                   }`
@@ -545,7 +627,7 @@ export default function Sidebar({ active }: SidebarProps) {
             <ChevronDown 
               className={`h-4 w-4 transition-all duration-300 ${
                 isAppointmentsExpanded ? "rotate-180 text-white" : "rotate-0"
-              } ${!isAppointmentsExpanded && (currentActive === "appointments" || currentActive === "calendar" || currentActive === "notifications") ? "text-[#1f419a]" : !isAppointmentsExpanded ? "text-gray-400" : ""}`}
+              } ${!isAppointmentsExpanded && (currentActive === "appointments" || currentActive === "history" || currentActive === "calendar" || currentActive === "notifications") ? "text-[#1f419a]" : !isAppointmentsExpanded ? "text-gray-400" : ""}`}
             />
           </button>
           
@@ -555,7 +637,7 @@ export default function Sidebar({ active }: SidebarProps) {
               isAppointmentsExpanded ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
             }`}
           >
-            <div className={`pl-2 pt-1 space-y-1 ${isAppointmentsExpanded ? "bg-[#1f419a] pb-2" : ""}`}>
+            <div className="space-y-1 px-1 pb-1 pt-1">
               <Link 
                 href="/dashboard/calendar" 
                 className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
@@ -593,6 +675,25 @@ export default function Sidebar({ active }: SidebarProps) {
                 </span>
                 <ChevronRight className={`h-3 w-3 ${currentActive === "appointments" && !isAppointmentsExpanded ? "text-[#1f419a]" : isAppointmentsExpanded ? "text-white/80" : "text-gray-400"}`}/>
               </Link>
+
+              <Link
+                href="/dashboard/history"
+                className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
+                  currentActive === "history"
+                    ? isAppointmentsExpanded
+                      ? "bg-white/10 text-white hover:bg-white/20"
+                      : "bg-[#eef2ff] text-[#1f419a]"
+                    : isAppointmentsExpanded
+                    ? "text-white/90 hover:bg-white/10"
+                    : "text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <HistoryIcon className="h-3.5 w-3.5" />
+                  History
+                </span>
+                <ChevronRight className={`h-3 w-3 ${currentActive === "history" && !isAppointmentsExpanded ? "text-[#1f419a]" : isAppointmentsExpanded ? "text-white/80" : "text-gray-400"}`}/>
+              </Link>
               
               <Link 
                 href="/dashboard/notifications" 
@@ -626,7 +727,7 @@ export default function Sidebar({ active }: SidebarProps) {
         </div>
         
         {/* Subscription Section - Collapsible */}
-        <div className={isSubscriptionExpanded ? "-mx-4" : ""}>
+        <div className={isSubscriptionExpanded ? "rounded-xl bg-[#1f419a] p-1 shadow-inner ring-1 ring-white/15" : ""}>
           <button
             onClick={() => {
               if (!isSubscriptionExpanded) {
@@ -637,7 +738,7 @@ export default function Sidebar({ active }: SidebarProps) {
             }}
             className={`w-full flex items-center justify-between px-3 py-2 transition-all duration-300 ease-in-out ${
               isSubscriptionExpanded
-                ? "bg-[#1f419a] text-white" 
+                ? "rounded-lg bg-[#1f419a] text-white" 
                 : `rounded-xl ${
                     currentActive === "subscription" || currentActive === "wallet"
                       ? "bg-[#eef2ff] text-[#1f419a]" 
@@ -663,7 +764,7 @@ export default function Sidebar({ active }: SidebarProps) {
               isSubscriptionExpanded ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
             }`}
           >
-            <div className={`pl-2 pt-1 space-y-1 ${isSubscriptionExpanded ? "bg-[#1f419a] pb-2" : ""}`}>
+            <div className="space-y-1 px-1 pb-1 pt-1">
               <Link 
                 href="/dashboard/profile/subscription" 
                 className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
@@ -683,24 +784,26 @@ export default function Sidebar({ active }: SidebarProps) {
                 <ChevronRight className={`h-3 w-3 ${currentActive === "subscription" && !isSubscriptionExpanded ? "text-[#1f419a]" : isSubscriptionExpanded ? "text-white/80" : "text-gray-400"}`}/>
               </Link>
               
-              <Link 
-                href="/dashboard/profile/wallet" 
-                className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
-                  currentActive === "wallet"
-                    ? isSubscriptionExpanded 
-                      ? "bg-white/10 text-white hover:bg-white/20" 
-                      : "bg-[#eef2ff] text-[#1f419a]" 
-                    : isSubscriptionExpanded
-                    ? "text-white/90 hover:bg-white/10"
-                    : "text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <Wallet className="h-3.5 w-3.5" />
-                  My wallet
-                </span>
-                <ChevronRight className={`h-3 w-3 ${currentActive === "wallet" && !isSubscriptionExpanded ? "text-[#1f419a]" : isSubscriptionExpanded ? "text-white/80" : "text-gray-400"}`}/>
-              </Link>
+              {walletAccessEnabled && (
+                <Link 
+                  href="/dashboard/wallet" 
+                  className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
+                    currentActive === "wallet"
+                      ? isSubscriptionExpanded 
+                        ? "bg-white/10 text-white hover:bg-white/20"
+                        : "bg-[#eef2ff] text-[#1f419a]"
+                      : isSubscriptionExpanded
+                      ? "text-white/90 hover:bg-white/10"
+                      : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Wallet className="h-3.5 w-3.5" />
+                    My wallet
+                  </span>
+                  <ChevronRight className={`h-3 w-3 ${currentActive === "wallet" && !isSubscriptionExpanded ? "text-[#1f419a]" : isSubscriptionExpanded ? "text-white/80" : "text-gray-400"}`}/>
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -724,21 +827,25 @@ export default function Sidebar({ active }: SidebarProps) {
           </span>
           <ChevronRight className="h-4 w-4 text-gray-400"/>
         </button>
+        </div>
       </div>
 
       {/* Help Section */}
-      <div className="mt-auto rounded-xl bg-white shadow ring-1 ring-black/5 p-3 text-sm text-[#1f419a] flex items-center justify-between">
+      <Link
+        href="/contact-us"
+        className="mt-3 shrink-0 rounded-xl bg-white shadow ring-1 ring-black/5 p-3 text-sm text-[#1f419a] flex items-center justify-between transition hover:bg-[#f8faff]"
+      >
         <div className="flex items-center gap-2">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white shadow ring-2 ring-[#1f419a]">
             <HelpCircle className="h-4 w-4 text-[#1f419a]"/>
           </span>
           <div>
             <div className="font-medium">Online Help</div>
-            <div className="text-xs text-gray-600">Get support anytime</div>
+            <div className="text-xs text-gray-600">Contact support anytime</div>
           </div>
         </div>
         <ChevronRight className="h-4 w-4"/>
-      </div>
+      </Link>
     </aside>
   );
 }

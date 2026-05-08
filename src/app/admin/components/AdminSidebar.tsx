@@ -1,7 +1,14 @@
 "use client";
 
-import Link from "next/link";
+import NextLink from "next/link";
 import { usePathname } from "next/navigation";
+import type { ComponentProps } from "react";
+import {
+  ADMIN_BASE_PATH,
+  ADMIN_LOGIN_PATH,
+  adminPath,
+  matchesAdminPathname,
+} from "@/lib/admin/path";
 import {
   LayoutDashboard,
   Users,
@@ -22,12 +29,19 @@ import {
   ClipboardCheck,
   RotateCcw,
   Gauge,
+  KeyRound,
 } from "lucide-react";
+
+type NextLinkProps = ComponentProps<typeof NextLink>;
+
+function Link({ prefetch, ...props }: NextLinkProps) {
+  return <NextLink {...props} prefetch={prefetch ?? false} />;
+}
 
 /**
  * Admin role type
  */
-type AdminRole = "moderator" | "admin" | "superadmin";
+type AdminRole = "admin" | "superadmin";
 
 /**
  * Props for AdminSidebar
@@ -35,6 +49,7 @@ type AdminRole = "moderator" | "admin" | "superadmin";
 type AdminSidebarProps = {
   role: AdminRole;
   userName: string;
+  permissions: string[];
 };
 
 /**
@@ -45,6 +60,14 @@ type MenuItem = {
   label: string;
   icon: React.ReactNode;
   roles: AdminRole[];
+  anyPermissions?: string[];
+  section:
+    | "overview"
+    | "safety"
+    | "meetings"
+    | "operations"
+    | "configuration"
+    | "security";
 };
 
 /**
@@ -52,112 +75,189 @@ type MenuItem = {
  * 
  * Shows menu items based on user's admin role permissions.
  */
-export default function AdminSidebar({ role, userName }: AdminSidebarProps) {
+export default function AdminSidebar({
+  role,
+  userName,
+  permissions,
+}: AdminSidebarProps) {
   const pathname = usePathname();
+  const permissionSet = new Set(permissions);
+  const hasAnyPermission = (required: string[] = []) => {
+    if (role === "superadmin" || permissionSet.has("*")) return true;
+    if (required.length === 0) return true;
+    return required.some((permission) => permissionSet.has(permission));
+  };
 
   // Menu items with role-based access
   const menuItems: MenuItem[] = [
     {
-      href: "/admin",
+      href: ADMIN_BASE_PATH,
       label: "Dashboard",
       icon: <LayoutDashboard className="h-5 w-5" />,
-      roles: ["moderator", "admin", "superadmin"],
+      roles: ["admin", "superadmin"],
+      section: "overview",
     },
     {
-      href: "/admin/users",
+      href: adminPath("/users"),
       label: "Users",
       icon: <Users className="h-5 w-5" />,
-      roles: ["moderator", "admin", "superadmin"],
+      roles: ["admin", "superadmin"],
+      anyPermissions: ["view_users", "edit_users"],
+      section: "safety",
     },
     {
-      href: "/admin/calendar",
+      href: adminPath("/reports"),
+      label: "Reports",
+      icon: <AlertTriangle className="h-5 w-5" />,
+      roles: ["admin", "superadmin"],
+      anyPermissions: ["view_reports", "resolve_reports"],
+      section: "safety",
+    },
+    {
+      href: adminPath("/moderation"),
+      label: "Photo Moderation",
+      icon: <ImageIcon className="h-5 w-5" />,
+      roles: ["admin", "superadmin"],
+      anyPermissions: ["moderate_photos"],
+      section: "safety",
+    },
+    {
+      href: adminPath("/calendar"),
       label: "Calendar Management",
       icon: <Calendar className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["manage_calendar"],
+      section: "meetings",
     },
     {
-      href: "/admin/meetings",
+      href: adminPath("/meetings"),
       label: "Meeting Management",
       icon: <Video className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["view_meetings", "manage_meetings"],
+      section: "meetings",
     },
     {
-      href: "/admin/post-meetings",
+      href: adminPath("/post-meetings"),
       label: "Post-Meeting Review",
       icon: <ClipboardCheck className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["view_meetings", "manage_meetings"],
+      section: "meetings",
     },
     {
-      href: "/admin/wallet",
+      href: adminPath("/hosts"),
+      label: "Coordinators",
+      icon: <UserCheck className="h-5 w-5" />,
+      roles: ["admin", "superadmin"],
+      anyPermissions: ["manage_hosts", "manage_meetings"],
+      section: "meetings",
+    },
+    {
+      href: adminPath("/wallet"),
       label: "Wallet Management",
       icon: <Wallet className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["view_wallet", "manage_wallet"],
+      section: "operations",
     },
     {
-      href: "/admin/pricing",
-      label: "Pricing",
-      icon: <CreditCard className="h-5 w-5" />,
-      roles: ["admin", "superadmin"],
-    },
-    {
-      href: "/admin/moderation",
-      label: "Photo Moderation",
-      icon: <ImageIcon className="h-5 w-5" />,
-      roles: ["moderator", "admin", "superadmin"],
-    },
-    {
-      href: "/admin/reports",
-      label: "Reports",
-      icon: <AlertTriangle className="h-5 w-5" />,
-      roles: ["moderator", "admin", "superadmin"],
-    },
-    {
-      href: "/admin/reactivation",
+      href: adminPath("/reactivation"),
       label: "Profile Reactivation",
       icon: <RotateCcw className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["manage_reactivation"],
+      section: "operations",
     },
     {
-      href: "/admin/hosts",
-      label: "Hosts/Coordinators",
-      icon: <UserCheck className="h-5 w-5" />,
-      roles: ["admin", "superadmin"],
-    },
-    {
-      href: "/admin/subadmins",
+      href: adminPath("/subadmins"),
       label: "Sub-Admins",
       icon: <UserCog className="h-5 w-5" />,
       roles: ["superadmin"],
+      anyPermissions: ["manage_subadmins"],
+      section: "configuration",
     },
     {
-      href: "/admin/activity-limits",
+      href: adminPath("/activity-limits"),
       label: "Activity Limits",
       icon: <Gauge className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["manage_activity_limits"],
+      section: "configuration",
     },
     {
-      href: "/admin/analytics",
+      href: adminPath("/pricing"),
+      label: "Pricing",
+      icon: <CreditCard className="h-5 w-5" />,
+      roles: ["admin", "superadmin"],
+      anyPermissions: ["manage_pricing"],
+      section: "configuration",
+    },
+    {
+      href: adminPath("/analytics"),
       label: "Analytics",
       icon: <BarChart3 className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["view_analytics"],
+      section: "configuration",
     },
     {
-      href: "/admin/logs",
+      href: adminPath("/logs"),
       label: "Activity Logs",
       icon: <FileText className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
+      anyPermissions: ["view_logs"],
+      section: "configuration",
+    },
+    {
+      href: adminPath("/mfa-setup"),
+      label: "2FA Auth Setup",
+      icon: <KeyRound className="h-5 w-5" />,
+      roles: ["admin", "superadmin"],
+      anyPermissions: ["manage_2fa_auth"],
+      section: "security",
     },
   ];
 
   // Filter menu items based on role
-  const visibleItems = menuItems.filter((item) => item.roles.includes(role));
+  const visibleItems = menuItems.filter(
+    (item) => item.roles.includes(role) && hasAnyPermission(item.anyPermissions)
+  );
+  const sectionOrder: MenuItem["section"][] = [
+    "overview",
+    "safety",
+    "meetings",
+    "operations",
+    "configuration",
+    "security",
+  ];
+  const sectionLabels: Record<MenuItem["section"], string> = {
+    overview: "Overview",
+    safety: "Safety & Users",
+    meetings: "Meeting Ops",
+    operations: "Operations",
+    configuration: "Configuration",
+    security: "Security",
+  };
+  const groupedItems = sectionOrder
+    .map((section) => ({
+      section,
+      label: sectionLabels[section],
+      items: visibleItems.filter((item) => item.section === section),
+    }))
+    .filter((group) => group.items.length > 0);
 
   // Check if a path is active
   const isActive = (href: string): boolean => {
-    if (href === "/admin") {
-      return pathname === "/admin";
+    if (href === ADMIN_BASE_PATH) {
+      return matchesAdminPathname(pathname, ADMIN_BASE_PATH);
     }
-    return pathname.startsWith(href);
+    if (!pathname) return false;
+
+    return (
+      pathname.startsWith(href) ||
+      pathname.startsWith(`/admin${href.slice(ADMIN_BASE_PATH.length)}`)
+    );
   };
 
   // Get role badge color
@@ -167,8 +267,6 @@ export default function AdminSidebar({ role, userName }: AdminSidebarProps) {
         return "bg-purple-100 text-purple-700";
       case "admin":
         return "bg-blue-100 text-blue-700";
-      case "moderator":
-        return "bg-green-100 text-green-700";
       default:
         return "bg-gray-100 text-gray-700";
     }
@@ -207,27 +305,34 @@ export default function AdminSidebar({ role, userName }: AdminSidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1">
-        {visibleItems.map((item) => {
-          const active = isActive(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                ${active 
-                  ? "bg-[#1f419a] text-white" 
-                  : "text-gray-700 hover:bg-gray-100"
-                }
-              `}
-            >
-              {item.icon}
-              <span className="flex-1">{item.label}</span>
-              {active && <ChevronRight className="h-4 w-4" />}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 space-y-5 overflow-y-auto p-4">
+        {groupedItems.map((group) => (
+          <div key={group.section} className="space-y-1.5">
+            <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+              {group.label}
+            </p>
+            {group.items.map((item) => {
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`
+                    flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+                    ${active 
+                      ? "bg-[#1f419a] text-white" 
+                      : "text-gray-700 hover:bg-gray-100"
+                    }
+                  `}
+                >
+                  {item.icon}
+                  <span className="flex-1">{item.label}</span>
+                  {active && <ChevronRight className="h-4 w-4" />}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Footer Actions */}
@@ -240,7 +345,7 @@ export default function AdminSidebar({ role, userName }: AdminSidebarProps) {
           <span>Back to App</span>
         </Link>
         <Link
-          href="/admin/login?logout=true"
+          href={`${ADMIN_LOGIN_PATH}?logout=true`}
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
         >
           <LogOut className="h-5 w-5" />

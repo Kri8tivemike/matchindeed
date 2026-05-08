@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MatchIndeed API Inventory</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 14mm 18mm 14mm;
+    }
+    :root {
+      --ink: #172033;
+      --muted: #5d6b85;
+      --line: #dbe4f0;
+      --panel: #f7faff;
+      --brand: #2646a3;
+      --brand-soft: #eaf0ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.45;
+      background: white;
+    }
+    h1 {
+      font-size: 24pt;
+      line-height: 1.15;
+      margin: 0 0 8px;
+      color: var(--brand);
+      letter-spacing: -0.03em;
+    }
+    h2 {
+      margin: 20px 0 10px;
+      font-size: 14pt;
+      color: var(--brand);
+      padding: 8px 12px;
+      border-left: 4px solid var(--brand);
+      background: var(--brand-soft);
+      border-radius: 10px;
+      page-break-after: avoid;
+    }
+    p {
+      margin: 0 0 8px;
+      color: var(--ink);
+    }
+    ul.list {
+      margin: 0 0 10px 0;
+      padding-left: 18px;
+    }
+    ul.level-2 {
+      margin-top: 4px;
+      padding-left: 18px;
+    }
+    li {
+      margin: 0 0 4px;
+      color: var(--ink);
+    }
+    code {
+      padding: 1px 5px;
+      border-radius: 6px;
+      background: #eff3fa;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+    .table-wrap {
+      margin: 10px 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    thead th {
+      background: #eef3fb;
+      color: var(--brand);
+      font-size: 9pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--line);
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 8px 10px;
+      border-bottom: 1px solid #edf2f8;
+      word-break: break-word;
+    }
+    tbody tr:nth-child(even) td {
+      background: #fbfdff;
+    }
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+    tr, td, th, .table-wrap {
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <h1>MatchIndeed API Inventory</h1>
+<p>Date: April 27, 2026</p>
+<p>Base URL: <code>https://matchindeed.com</code></p>
+<p>Total active API routes in codebase: <code>74</code></p>
+<h2>Notes</h2>
+<ul class="list level-1">
+<li>This inventory is based on the current Next.js route files under <code>src/app/api</code>.</li>
+<li><code>Status</code> in this report means the route is currently present in the codebase and part of the active application surface.</li>
+<li><code>Access Level</code> indicates the expected audience:</li>
+<ul class="list level-2">
+<li><code>Public</code>: accessible without signed-in user context</li>
+<li><code>User</code>: intended for authenticated app users</li>
+<li><code>Admin</code>: intended for admin console users</li>
+<li><code>Coordinator</code>: intended for coordinator console users</li>
+<li><code>Internal</code>: cron jobs, maintenance, or system integrations</li>
+<li><code>Webhook</code>: provider callback endpoint</li>
+</ul>
+</ul>
+<h2>Public / Core</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/agreements</code></td>
+<td>Terms or rules acknowledgement data</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/auth/forgot-password</code></td>
+<td>Start password reset flow</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/auth/provision</code></td>
+<td>Auth/session provisioning helper</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/auth/register</code></td>
+<td>New account registration</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/auth/resend-verification</code></td>
+<td>Resend email verification</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/fingerprint</code></td>
+<td>Device or browser fingerprint support</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/geo</code></td>
+<td>Geo lookup for user experience or policy logic</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/health</code></td>
+<td>Application health check endpoint</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/subscription-pricing</code></td>
+<td>Public subscription pricing payload</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/support</code></td>
+<td>Support/contact form handling</td>
+<td>Public</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Discovery / User Engagement</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/activities</code></td>
+<td>Activity feed or engagement tracking</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/calendar</code></td>
+<td>Calendar slot create/read/update flow</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/lifecycle/profile-progress</code></td>
+<td>Onboarding/profile completion state</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/matches</code></td>
+<td>Match discovery and match records</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/messages</code></td>
+<td>User messaging and conversation actions</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/notifications</code></td>
+<td>Notification list and notification state</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/photo/upload</code></td>
+<td>Photo upload pipeline</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/reports</code></td>
+<td>User reporting and complaint submission</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/top-picks</code></td>
+<td>Top picks recommendation feed</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Profile / Account</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/profile/account</code></td>
+<td>Account profile details and updates</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/block</code></td>
+<td>Block or unblock another user</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/block/ids</code></td>
+<td>Fetch blocked user IDs</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/blocked-locations</code></td>
+<td>Manage blocked locations/preferences</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/heartbeat</code></td>
+<td>Presence/session heartbeat updates</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/notification-preferences</code></td>
+<td>Notification preference settings</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/reactivate</code></td>
+<td>Start account reactivation flow</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/reactivate/respond</code></td>
+<td>Submit reactivation response/action</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/view</code></td>
+<td>View user profile data</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/profile/visibility</code></td>
+<td>Manage profile visibility state</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/reactivation/send-notification</code></td>
+<td>Send reactivation-related notifications</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Meetings / Host Operations</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/meetings</code></td>
+<td>Create/list meeting records and requests</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/acknowledge-rules</code></td>
+<td>Save meeting rules acknowledgement</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/availability</code></td>
+<td>Meeting availability checks</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/cancel</code></td>
+<td>Cancel scheduled/requested meetings</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/finalize</code></td>
+<td>Finalize meeting state transition</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/notifications</code></td>
+<td>Meeting-related notifications</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/notifications/schedule</code></td>
+<td>Schedule reminder notifications</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/response</code></td>
+<td>Accept or decline meeting requests</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/meetings/video-link</code></td>
+<td>Fetch or validate meeting video link</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/host/meetings</code></td>
+<td>Host-facing meeting management</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/host/report</code></td>
+<td>Host/coordinator meeting report submission</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Payments / Wallet / Subscription</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/add-credits</code></td>
+<td>Add user meeting credits</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/correct-wallet-balance</code></td>
+<td>Wallet correction/repair utility</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/create-checkout-session</code></td>
+<td>Start Stripe checkout session</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/use-wallet-balance</code></td>
+<td>Apply wallet balance toward payment</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/verify-payment</code></td>
+<td>Verify completed payment status</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/verify-subscription</code></td>
+<td>Verify subscription activation/result</td>
+<td>User</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/webhook/stripe</code></td>
+<td>Stripe webhook receiver</td>
+<td>Webhook</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Admin APIs</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/admin/activity-limits</code></td>
+<td>Manage per-tier activity rate limits</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/analytics</code></td>
+<td>Admin analytics dashboard data</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/coordinators</code></td>
+<td>Coordinator listing and management</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/meetings</code></td>
+<td>Admin meeting list and management</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/meetings/approve</code></td>
+<td>Approve meetings and related readiness flow</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/meetings/coordinator</code></td>
+<td>Assign or remove coordinator from meeting</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/meetings/reschedule</code></td>
+<td>Admin reschedule action</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/meetings/resolve</code></td>
+<td>Post-meeting review or dispute resolution</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/mfa/recovery-code</code></td>
+<td>Admin 2FA recovery code management</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/mfa/recovery-code/verify</code></td>
+<td>Admin recovery-code sign-in verification</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/permissions</code></td>
+<td>Admin/sub-admin permission configuration</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/permissions/me</code></td>
+<td>Current admin effective permissions</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/test-integrations</code></td>
+<td>Integration diagnostics or checks</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/user-actions</code></td>
+<td>Admin user actions such as suspend/ban/update</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/user-profile</code></td>
+<td>Admin user profile inspection/update</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/admin/wallet</code></td>
+<td>Admin wallet management tools</td>
+<td>Admin</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Coordinator APIs</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/coordinator/access</code></td>
+<td>Validate coordinator access state</td>
+<td>Coordinator</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/coordinator/meetings</code></td>
+<td>Assigned coordinator meeting list</td>
+<td>Coordinator</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/coordinator/mfa/recovery-code</code></td>
+<td>Coordinator 2FA recovery code management</td>
+<td>Coordinator</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/coordinator/mfa/recovery-code/verify</code></td>
+<td>Coordinator recovery-code sign-in verification</td>
+<td>Coordinator</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/coordinator/permissions</code></td>
+<td>Current coordinator effective permissions</td>
+<td>Coordinator</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Cron / Integrations / Internal Operations</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>API URL</th>
+<th>Purpose</th>
+<th>Access Level</th>
+<th>Status</th>
+</tr></thead><tbody>
+<tr>
+<td><code>/api/cron/credits-reset</code></td>
+<td>Scheduled credit reset job</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/cron/meeting-notifications</code></td>
+<td>Scheduled meeting reminders and alerts</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/cron/reactivation-auto-approve</code></td>
+<td>Automated reactivation workflow</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/integrations/onesignal</code></td>
+<td>OneSignal integration endpoint</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+<tr>
+<td><code>/api/test-email</code></td>
+<td>Email delivery test endpoint</td>
+<td>Internal</td>
+<td>Active</td>
+</tr>
+</tbody></table></div>
+<h2>Summary by Access Level</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>Access Level</th>
+<th>Count</th>
+</tr></thead><tbody>
+<tr>
+<td>Public</td>
+<td>10</td>
+</tr>
+<tr>
+<td>User</td>
+<td>34</td>
+</tr>
+<tr>
+<td>Admin</td>
+<td>16</td>
+</tr>
+<tr>
+<td>Coordinator</td>
+<td>5</td>
+</tr>
+<tr>
+<td>Internal</td>
+<td>8</td>
+</tr>
+<tr>
+<td>Webhook</td>
+<td>1</td>
+</tr>
+<tr>
+<td>**Total**</td>
+<td>**74**</td>
+</tr>
+</tbody></table></div>
+</body>
+</html>

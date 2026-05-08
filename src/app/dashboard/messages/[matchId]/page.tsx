@@ -19,6 +19,19 @@ import { useRouter, useParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ToastProvider";
+import { getActiveStatus } from "@/lib/active-status";
+import {
+  isTransientRequestError,
+  shouldSkipBackgroundRequest,
+} from "@/lib/request-errors";
+import {
+  isRealtimeFailureStatus,
+  noteRealtimeFailure,
+  noteRealtimeSubscribed,
+  removeRealtimeChannelSafely,
+  shouldUseRealtime,
+} from "@/lib/realtime-fallback";
 import {
   ArrowLeft,
   Send,
@@ -47,6 +60,7 @@ type PartnerInfo = {
   name: string;
   photo: string | null;
   tier: string;
+  last_active_at: string | null;
 };
 
 // ---------------------------------------------------------------
@@ -100,6 +114,7 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const [partnerOnline, setPartnerOnline] = useState(false);
+  const { toast } = useToast();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -112,6 +127,10 @@ export default function ChatPage() {
   // Fetch
   // ---------------------------------------------------------------
   const fetchMessages = useCallback(async () => {
+    if (shouldSkipBackgroundRequest()) {
+      return;
+    }
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { router.push("/login"); return; }
@@ -138,13 +157,15 @@ export default function ChatPage() {
       if (match) {
         const pid = match.user1_id === session.user.id ? match.user2_id : match.user1_id;
         const { data: profile } = await supabase.from("user_profiles").select("first_name, last_name, profile_photo_url, photos").eq("user_id", pid).single();
-        const { data: account } = await supabase.from("accounts").select("tier").eq("id", pid).single();
+        const { data: account } = await supabase.from("accounts").select("tier, last_active_at").eq("id", pid).single();
         setPartner({
           id: pid,
           name: profile ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || "User" : "User",
           photo: profile?.profile_photo_url || (profile?.photos?.[0] ?? null),
           tier: account?.tier || "basic",
+          last_active_at: account?.last_active_at || null,
         });
+        setPartnerOnline(getActiveStatus(account?.last_active_at || null).isOnline);
       }
 
       // Mark read
@@ -154,6 +175,9 @@ export default function ChatPage() {
         body: JSON.stringify({ match_id: matchId }),
       });
     } catch (err) {
+      if (isTransientRequestError(err)) {
+        return;
+      }
       console.error("Error fetching messages:", err);
       setError("Failed to load messages");
     } finally {
@@ -186,6 +210,14 @@ export default function ChatPage() {
   // ---------------------------------------------------------------
   useEffect(() => { fetchMessages(); }, [fetchMessages]);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void fetchMessages();
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [fetchMessages]);
+
   // Auto-scroll on new messages
   useEffect(() => {
     if (shouldScrollRef.current && messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -195,6 +227,10 @@ export default function ChatPage() {
   // Realtime: messages, read receipts, typing, presence
   useEffect(() => {
     if (!currentUserId) return;
+
+    if (!shouldUseRealtime()) {
+      return;
+    }
 
     const channel = supabase
       .channel(`chat-${matchId}`, { config: { presence: { key: currentUserId } } })
@@ -226,11 +262,21 @@ export default function ChatPage() {
       })
       .on("presence", { event: "join" }, ({ key }) => { if (key !== currentUserId) setPartnerOnline(true); })
       .on("presence", { event: "leave" }, ({ key }) => { if (key !== currentUserId) setPartnerOnline(false); })
-      .subscribe(async (status) => { if (status === "SUBSCRIBED") await channel.track({ online_at: new Date().toISOString() }); });
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          noteRealtimeSubscribed();
+          await channel.track({ online_at: new Date().toISOString() });
+          return;
+        }
+
+        if (isRealtimeFailureStatus(status) && noteRealtimeFailure(status)) {
+          removeRealtimeChannelSafely(supabase, channel);
+        }
+      });
 
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      supabase.removeChannel(channel);
+      removeRealtimeChannelSafely(supabase, channel);
     };
   }, [matchId, currentUserId]);
 
@@ -265,9 +311,14 @@ export default function ChatPage() {
         const data = await res.json();
         setMessages((prev) => prev.map((m) => (m.id === opt.id ? data.message : m)));
       } else {
+        const data = await res.json().catch(() => ({}));
         setMessages((prev) => prev.filter((m) => m.id !== opt.id));
+        toast.error(data.error || "Unable to send your message right now.");
       }
-    } catch { setMessages((prev) => prev.filter((m) => m.id !== opt.id)); }
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== opt.id));
+      toast.error("Unable to send your message right now.");
+    }
     finally { setSending(false); inputRef.current?.focus(); }
   };
 
@@ -318,7 +369,11 @@ export default function ChatPage() {
                     {partner.name.charAt(0)}
                   </div>
                 )}
-                {partnerOnline && <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white" />}
+                <span
+                  className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${
+                    partnerOnline ? "bg-green-500" : "bg-gray-300"
+                  }`}
+                />
               </div>
 
               {/* Name + status */}
@@ -346,7 +401,10 @@ export default function ChatPage() {
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" /> Online
                     </span>
                   ) : (
-                    <span className="text-gray-400">Offline</span>
+                    <span className="flex items-center gap-1 text-gray-400">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-300" />
+                      Offline
+                    </span>
                   )}
                 </p>
               </div>

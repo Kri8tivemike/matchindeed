@@ -19,6 +19,7 @@ import {
   Shield,
   Search,
   UserX,
+  X,
 } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
@@ -45,13 +46,6 @@ export default function BlockedUsersPage() {
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  // Auto-dismiss toast after 3 seconds
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3000);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   /**
    * Fetch the blocked users list from the API
@@ -139,7 +133,7 @@ export default function BlockedUsersPage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/matchindeed.svg" alt="Matchindeed" width={140} height={36} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <div className="flex items-center gap-3">
             <Link
@@ -284,13 +278,21 @@ export default function BlockedUsersPage() {
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-full px-6 py-3 text-sm font-medium text-white shadow-lg transition-all ${
+          className={`fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full px-6 py-3 text-sm font-medium text-white shadow-lg transition-all ${
             toast.type === "success"
               ? "bg-green-600"
               : "bg-red-600"
           }`}
         >
-          {toast.text}
+          <span>{toast.text}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="rounded-full p-1 text-white/80 transition-colors hover:bg-white/15 hover:text-white"
+            aria-label="Close alert"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
     </div>

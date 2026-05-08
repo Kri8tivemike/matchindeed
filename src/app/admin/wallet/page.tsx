@@ -26,8 +26,13 @@ import {
   User,
   DollarSign,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
+
+const WALLET_PAGE_SIZE = 10;
 
 type WalletData = {
   user_id: string;
@@ -56,6 +61,7 @@ export default function AdminWalletPage() {
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [adjusting, setAdjusting] = useState(false);
   const [viewingTransactions, setViewingTransactions] = useState<WalletData | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   /**
    * Fetch all wallets - ensures fresh data from database
@@ -63,127 +69,38 @@ export default function AdminWalletPage() {
   const fetchWallets = async () => {
     setLoading(true);
     try {
-      // First verify admin status
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (authUser) {
-        const { data: account } = await supabase
-          .from("accounts")
-          .select("role, email")
-          .eq("id", authUser.id)
-          .single();
-        console.log("[Admin Wallet] Current admin user:", {
-          id: authUser.id,
-          email: account?.email,
-          role: account?.role,
-        });
-      }
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
-      // Use a fresh query with explicit timestamp to avoid caching
-      // RLS policy should allow admins to see all wallets
-      const { data: walletsData, error: walletsError } = await supabase
-        .from("wallets")
-        .select(`
-          user_id,
-          balance_cents,
-          updated_at
-        `)
-        .order("updated_at", { ascending: false });
-
-      // If the join fails, try fetching accounts separately
-      if (walletsData && walletsData.length > 0) {
-        const userIds = walletsData.map(w => w.user_id);
-        const { data: accountsData } = await supabase
-          .from("accounts")
-          .select("id, email, display_name")
-          .in("id", userIds);
-
-        // Merge accounts data with wallets
-        const walletsWithAccounts = walletsData.map(wallet => ({
-          ...wallet,
-          accounts: accountsData?.find(a => a.id === wallet.user_id) || null,
-        }));
-
-        // Update walletsData to include accounts
-        walletsData.forEach((wallet, index) => {
-          walletsData[index] = walletsWithAccounts[index];
-        });
-      }
-
-      if (walletsError) {
-        console.error("[Admin Wallet] Error fetching wallets:", walletsError);
-        console.error("[Admin Wallet] Error details:", {
-          code: walletsError.code,
-          message: walletsError.message,
-          details: walletsError.details,
-          hint: walletsError.hint,
-        });
+      if (sessionError || !session?.access_token) {
+        toast.error("Please log in again.");
+        setWallets([]);
         return;
       }
 
-      console.log("[Admin Wallet] Wallet details:", walletsData?.map(w => {
-        const wExt = w as { user_id: string; balance_cents: number; accounts?: { email?: string } | { email?: string }[] | null };
-        return {
-          user_id: w.user_id,
-          email: Array.isArray(wExt.accounts) ? wExt.accounts[0]?.email : wExt.accounts?.email,
-          balance: w.balance_cents,
-        };
-      }));
+      const query = searchQuery
+        ? `?q=${encodeURIComponent(searchQuery)}&limit=200`
+        : "?limit=200";
 
-      // Process wallets - handle cases where accounts might be null or array
-      const walletsWithTransactions = await Promise.all(
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (walletsData || []).map(async (wallet: any) => {
-          // Handle accounts data - could be array, object, or null
-          let userData = null;
-          if (wallet.accounts) {
-            if (Array.isArray(wallet.accounts)) {
-              userData = wallet.accounts[0] || null;
-            } else {
-              userData = wallet.accounts;
-            }
-          }
+      const response = await fetch(`/api/admin/wallet${query}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
 
-          // If no account data, try to fetch it separately (admin should have access)
-          if (!userData) {
-            console.log("[Admin Wallet] Account data missing for wallet:", wallet.user_id, "fetching separately");
-            const { data: account, error: accountError } = await supabase
-              .from("accounts")
-              .select("email, display_name")
-              .eq("id", wallet.user_id)
-              .single();
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to fetch wallets");
+      }
 
-            if (accountError) {
-              console.warn("[Admin Wallet] Could not fetch account for wallet:", wallet.user_id, accountError);
-              userData = {
-                email: `User ${wallet.user_id.substring(0, 8)}...`,
-                display_name: "Unknown",
-              };
-            } else {
-              userData = account;
-            }
-          }
-
-          // Fetch recent transactions for each wallet
-          const { data: transactions } = await supabase
-            .from("wallet_transactions")
-            .select("*")
-            .eq("user_id", wallet.user_id)
-            .order("created_at", { ascending: false })
-            .limit(10);
-
-          return {
-            user_id: wallet.user_id,
-            balance_cents: wallet.balance_cents || 0,
-            user: userData,
-            transactions: transactions || [],
-          };
-        })
-      );
-
-      console.log("[Admin Wallet] Processed wallets:", walletsWithTransactions.length);
-      setWallets(walletsWithTransactions);
+      setWallets(payload.wallets || []);
     } catch (error) {
-      console.error("Error:", error);
+      console.error("[Admin Wallet] Fetch error:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to fetch wallets"
+      );
     } finally {
       setLoading(false);
     }
@@ -191,7 +108,8 @@ export default function AdminWalletPage() {
 
   useEffect(() => {
     fetchWallets();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
 
   /**
    * Adjust wallet balance
@@ -212,9 +130,14 @@ export default function AdminWalletPage() {
     }
 
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      setAdjusting(true);
 
-      if (authError || !user) {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError || !session?.access_token) {
         toast.error("Authentication error. Please log in again.");
         return;
       }
@@ -230,99 +153,54 @@ export default function AdminWalletPage() {
         }
       }
 
-      const adjustmentInCents = adjustmentAmount;
-
-      console.log("[Admin Wallet] Adjusting wallet:", {
-        userId: selectedWallet.user_id,
-        currentBalance,
-        adjustmentAmount: adjustmentInCents,
-        calculatedBalance,
-        newBalance,
-        adminId: user.id,
+      const response = await fetch("/api/admin/wallet", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          user_id: selectedWallet.user_id,
+          adjustment_cents: adjustmentAmount,
+          reason: adjustmentReason.trim(),
+        }),
       });
 
-      // Update wallet balance
-      const { error: walletError } = await supabase
-        .from("wallets")
-        .upsert({
-          user_id: selectedWallet.user_id,
-          balance_cents: newBalance,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "user_id" });
-
-      if (walletError) {
-        console.error("[Admin Wallet] Error updating wallet:", walletError);
-        throw walletError;
-      }
-
-      const adjustmentDirection = adjustmentInCents > 0 ? "Added" : "Removed";
-      const adjustmentAbs = Math.abs(adjustmentInCents);
-
-      const { error: transError } = await supabase
-        .from("wallet_transactions")
-        .insert({
-          user_id: selectedWallet.user_id,
-          type: "admin_adjustment",
-          amount_cents: adjustmentAbs,
-          balance_before_cents: currentBalance,
-          balance_after_cents: newBalance,
-          description: `Admin ${adjustmentDirection}: ₦${(adjustmentAbs / 100).toFixed(2)} - ${adjustmentReason}${calculatedBalance < 0 ? ` (Balance capped at ₦0.00)` : ""}`,
-          admin_id: user.id,
-          reference_id: `admin_adjustment_${Date.now()}_${user.id}`,
-        });
-
-      if (transError) {
-        console.error("[Admin Wallet] Error creating transaction:", transError);
-        await supabase
-          .from("wallets")
-          .upsert({
-            user_id: selectedWallet.user_id,
-            balance_cents: currentBalance,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "user_id" });
-        throw transError;
-      }
-
-      try {
-        const { error: logError } = await supabase.from("admin_logs").insert({
-          admin_id: user.id,
-          target_user_id: selectedWallet.user_id,
-          action: "wallet_adjusted",
-          meta: {
-            adjustment_cents: adjustmentInCents,
-            old_balance_cents: currentBalance,
-            new_balance_cents: newBalance,
-            reason: adjustmentReason,
-          },
-        });
-
-        if (logError) {
-          console.warn("[Admin Wallet] Could not log admin action (table may not exist):", logError);
-        }
-      } catch (logErr) {
-        console.warn("[Admin Wallet] Admin log error (non-critical):", logErr);
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to adjust wallet");
       }
 
       setAdjustmentAmount(0);
       setAdjustmentReason("");
       setSelectedWallet(null);
       await fetchWallets();
-      toast.success(`Wallet adjusted successfully! New balance: ₦${(newBalance / 100).toLocaleString()}`);
+      toast.success(
+        `Wallet adjusted successfully! New balance: ₦${(
+          (payload?.wallet?.balance_after_cents || newBalance) / 100
+        ).toLocaleString()}`
+      );
     } catch (error: unknown) {
       console.error("[Admin Wallet] Error adjusting wallet:", error);
       const msg = error instanceof Error ? error.message : "Unknown error";
       toast.error(`Failed to adjust wallet: ${msg}`);
+    } finally {
+      setAdjusting(false);
     }
   };
 
-  const filteredWallets = wallets.filter(wallet => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      wallet.user?.email?.toLowerCase().includes(query) ||
-      wallet.user?.display_name?.toLowerCase().includes(query)
-    );
-  });
+  const filteredWallets = wallets;
+  const totalWalletPages = Math.max(
+    1,
+    Math.ceil(filteredWallets.length / WALLET_PAGE_SIZE)
+  );
+  const currentWalletPage = Math.min(currentPage, totalWalletPages);
+  const walletPageStart = (currentWalletPage - 1) * WALLET_PAGE_SIZE;
+  const paginatedWallets = filteredWallets.slice(
+    walletPageStart,
+    walletPageStart + WALLET_PAGE_SIZE
+  );
+  const walletPageEnd = walletPageStart + paginatedWallets.length;
 
   const totalBalance = wallets.reduce((sum, w) => sum + w.balance_cents, 0);
 
@@ -331,6 +209,14 @@ export default function AdminWalletPage() {
     tx.type === "topup" ||
     tx.type === "refund" ||
     (tx.type === "admin_adjustment" && tx.amount_cents > 0);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalWalletPages));
+  }, [totalWalletPages]);
 
   return (
     <div className="p-6 lg:p-8">
@@ -410,9 +296,10 @@ export default function AdminWalletPage() {
             <p className="text-gray-500">No wallets found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-100">
+          <>
+          <div className="max-h-[70vh] overflow-auto">
+            <table className="w-full min-w-[960px]">
+              <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100 shadow-sm">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
@@ -421,7 +308,7 @@ export default function AdminWalletPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredWallets.map((wallet) => (
+                {paginatedWallets.map((wallet) => (
                   <tr key={wallet.user_id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -466,7 +353,7 @@ export default function AdminWalletPage() {
                           Adjust
                         </button>
                         <Link
-                          href={`/admin/users/${wallet.user_id}`}
+                          href={adminPath(`/users/${wallet.user_id}`)}
                           className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-sm hover:bg-gray-50"
                         >
                           View User
@@ -478,6 +365,55 @@ export default function AdminWalletPage() {
               </tbody>
             </table>
           </div>
+          {totalWalletPages > 1 && (
+            <div className="flex flex-col gap-3 border-t border-gray-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-gray-500">
+                Showing {walletPageStart + 1} to {walletPageEnd} of{" "}
+                {filteredWallets.length} wallets
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(Math.max(1, currentWalletPage - 1))}
+                  disabled={currentWalletPage === 1}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </button>
+                <label className="sr-only" htmlFor="wallet-page-select">
+                  Select wallet page
+                </label>
+                <select
+                  id="wallet-page-select"
+                  value={currentWalletPage}
+                  onChange={(event) => setCurrentPage(Number(event.target.value))}
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20"
+                >
+                  {Array.from({ length: totalWalletPages }, (_, index) => {
+                    const pageNumber = index + 1;
+                    return (
+                      <option key={pageNumber} value={pageNumber}>
+                        Page {pageNumber} of {totalWalletPages}
+                      </option>
+                    );
+                  })}
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage(Math.min(totalWalletPages, currentWalletPage + 1))
+                  }
+                  disabled={currentWalletPage === totalWalletPages}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
 

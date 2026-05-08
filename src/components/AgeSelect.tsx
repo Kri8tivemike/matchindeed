@@ -57,19 +57,19 @@ export default function AgeSelect({ value, onChange, min = 18, max = 100, placeh
   }, [open]);
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative min-w-0 flex-1">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-28 items-center justify-between border-b border-gray-300 bg-transparent py-2 text-gray-700 focus:border-[#1f419a] focus:outline-none"
+        className="flex w-full min-w-0 items-center justify-between border-b border-gray-300 bg-transparent py-2 text-left text-gray-700 focus:border-[#1f419a] focus:outline-none"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span>{value ?? placeholder}</span>
-        <ChevronDown className="h-4 w-4 text-gray-500" />
+        <span className="truncate pr-3">{value ?? placeholder}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" />
       </button>
       {open && (
-        <div className="absolute z-30 mt-2 w-56 rounded-xl bg-white p-2 shadow-2xl ring-1 ring-black/5">
+        <div className="absolute left-0 right-0 z-30 mt-2 min-w-0 rounded-xl bg-white p-2 shadow-2xl ring-1 ring-black/5 sm:w-56 sm:min-w-[14rem] sm:left-auto sm:right-auto">
           <input
             ref={inputRef}
             value={query}
@@ -81,7 +81,7 @@ export default function AgeSelect({ value, onChange, min = 18, max = 100, placeh
             {filteredGroups.map((g) => (
               <div key={g.label} className="pb-2">
                 <div className="px-2 py-1 text-xs font-semibold text-gray-500">{g.label}</div>
-                <div className="grid grid-cols-4 gap-1 px-2">
+                <div className="grid grid-cols-3 gap-1 px-2 sm:grid-cols-4">
                   {g.items.map((n) => (
                     <button
                       key={n}
@@ -107,4 +107,3 @@ export default function AgeSelect({ value, onChange, min = 18, max = 100, placeh
     </div>
   );
 }
-

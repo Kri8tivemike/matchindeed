@@ -84,8 +84,7 @@ export default function HostDashboard() {
   const [loading, setLoading] = useState(true);
   const [host, setHost] = useState<HostProfile | null>(null);
   const [meetings, setMeetings] = useState<HostMeeting[]>([]);
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [earnings, setEarnings] = useState<HostEarning[]>([]);
+  const [, setEarnings] = useState<HostEarning[]>([]);
   const [stats, setStats] = useState<HostStats>({
     totalMeetings: 0,
     successfulMeetings: 0,
@@ -201,12 +200,24 @@ export default function HostDashboard() {
 
   const handleReportSubmit = async (
     success: boolean,
-    notes: string
+    notes: string,
+    videoRecordingUrl: string
   ) => {
     if (!selectedMeeting) return;
 
     try {
       setReportLoading(true);
+
+      const normalizedVideoUrl = videoRecordingUrl.trim();
+      if (normalizedVideoUrl && host?.host_type !== "vip") {
+        toast.error("Video recording links are available for VIP hosts only.");
+        return;
+      }
+
+      if (normalizedVideoUrl && !/^https?:\/\//i.test(normalizedVideoUrl)) {
+        toast.error("Video recording URL must be a valid http(s) link.");
+        return;
+      }
 
       const { error } = await supabase
         .from("host_meetings")
@@ -214,6 +225,7 @@ export default function HostDashboard() {
           success_marked: success,
           report_submitted: true,
           notes: notes || null,
+          ...(normalizedVideoUrl ? { video_recording_url: normalizedVideoUrl } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedMeeting.id);
@@ -509,6 +521,7 @@ export default function HostDashboard() {
           onSubmit={handleReportSubmit}
           onClose={() => setSelectedMeeting(null)}
           loading={reportLoading}
+          isVip={host.host_type === "vip"}
         />
       )}
     </div>
@@ -521,19 +534,26 @@ function ReportModal({
   onSubmit,
   onClose,
   loading,
+  isVip,
 }: {
   meeting: HostMeeting;
-  onSubmit: (success: boolean, notes: string) => Promise<void>;
+  onSubmit: (
+    success: boolean,
+    notes: string,
+    videoRecordingUrl: string
+  ) => Promise<void>;
   onClose: () => void;
   loading: boolean;
+  isVip: boolean;
 }) {
   const [success, setSuccess] = useState<boolean | null>(null);
   const [notes, setNotes] = useState("");
+  const [videoRecordingUrl, setVideoRecordingUrl] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (success === null) return;
-    await onSubmit(success, notes);
+    await onSubmit(success, notes, videoRecordingUrl);
   };
 
   return (
@@ -590,6 +610,21 @@ function ReportModal({
                 rows={3}
               />
             </div>
+
+            {isVip && (
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1">
+                  Video Recording URL (VIP Optional)
+                </label>
+                <input
+                  type="url"
+                  value={videoRecordingUrl}
+                  onChange={(e) => setVideoRecordingUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                />
+              </div>
+            )}
           </div>
 
           {/* Buttons */}

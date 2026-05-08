@@ -11,7 +11,6 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { supabase } from "../../lib/supabase";
 import { Mail, ArrowLeft, Loader2, Shield, Lock, KeyRound } from "lucide-react";
 import Image from "next/image";
 import CloudflareTurnstile from "@/components/CloudflareTurnstile";
@@ -21,9 +20,7 @@ export default function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const handleTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), []);
+  const handleTurnstileVerify = useCallback(() => {}, []);
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,11 +29,19 @@ export default function ForgotPasswordPage() {
     setSuccess(false);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
       });
+      const payload = await response.json().catch(() => ({} as { error?: string }));
 
-      if (error) throw error;
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to send reset email. Please try again.");
+      }
+
       setSuccess(true);
     } catch (error: unknown) {
       setError(
@@ -60,11 +65,11 @@ export default function ForgotPasswordPage() {
         {/* Logo */}
         <Link href="/" className="relative z-10">
           <Image
-            src="/matchindeed.svg"
+            src="/matchindeed-logo-white.png"
             alt="MatchIndeed"
             width={160}
             height={42}
-            className="brightness-0 invert"
+           
             style={{ width: "auto", height: "auto" }}
           />
         </Link>
@@ -112,7 +117,7 @@ export default function ForgotPasswordPage() {
           {/* Mobile logo */}
           <div className="mb-8 text-center lg:hidden">
             <Link href="/" className="inline-block">
-              <Image src="/matchindeed.svg" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
+              <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
             </Link>
           </div>
 

@@ -7,6 +7,11 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+type NotificationRow = {
+  read_at?: string | null;
+  [key: string]: unknown;
+};
+
 /**
  * Helper to get authenticated user from request
  */
@@ -50,10 +55,53 @@ export async function GET(request: NextRequest) {
     const offset = Number(searchParams.get("offset") || "0");
     const unreadOnly = searchParams.get("unread_only") === "true";
     const typeFilter = searchParams.get("type");
+    const summaryOnly = searchParams.get("summary") === "true";
+
+    if (summaryOnly) {
+      let countQuery = supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+
+      if (unreadOnly) {
+        countQuery = countQuery.is("read_at", null);
+      }
+
+      if (typeFilter) {
+        countQuery = countQuery.eq("type", typeFilter);
+      }
+
+      const { count, error } = await countQuery;
+
+      if (error) {
+        if (error.message?.includes("read_at") || error.code === "42703") {
+          return NextResponse.json({
+            notifications: [],
+            total: 0,
+            unread_count: unreadOnly ? 0 : count || 0,
+            limit: 0,
+            offset: 0,
+          });
+        }
+
+        console.error("Error fetching notification summary:", error);
+        return NextResponse.json(
+          { error: "Failed to fetch notifications" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        notifications: [],
+        total: unreadOnly ? count || 0 : 0,
+        unread_count: count || 0,
+        limit: 0,
+        offset: 0,
+      });
+    }
 
     // Build query — try with read_at column first, fallback without it
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let notifications: any[] = [];
+    let notifications: NotificationRow[] = [];
     let total = 0;
     let unreadCount = 0;
     let hasReadAtColumn = true;
@@ -92,8 +140,7 @@ export async function GET(request: NextRequest) {
         notifications = data || [];
         total = count || 0;
       }
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (err) {
+    } catch {
       hasReadAtColumn = false;
     }
 
@@ -138,10 +185,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Map notifications to include a computed `read` boolean
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mappedNotifications = notifications.map((n: any) => ({
-      ...n,
-      read: hasReadAtColumn ? !!n.read_at : false,
+    const mappedNotifications = notifications.map((notification) => ({
+      ...notification,
+      read: hasReadAtColumn ? !!notification.read_at : false,
     }));
 
     return NextResponse.json({

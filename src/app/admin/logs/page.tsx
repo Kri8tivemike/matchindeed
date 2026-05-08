@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
 import {
   FileText,
   Search,
@@ -376,9 +377,9 @@ export default function AdminLogsPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-100">
+            <div className="max-h-[70vh] overflow-auto">
+              <table className="w-full min-w-[1100px]">
+                <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Action
@@ -472,28 +473,47 @@ export default function AdminLogsPage() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
+              <div className="flex flex-col gap-3 border-t border-gray-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-gray-500">
                   Showing {(currentPage - 1) * pageSize + 1} to{" "}
                   {Math.min(currentPage * pageSize, totalLogs)} of {totalLogs}
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                     disabled={currentPage === 1}
-                    className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <ChevronLeft className="h-5 w-5" />
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
                   </button>
-                  <span className="text-sm text-gray-700">
-                    Page {currentPage} of {totalPages}
-                  </span>
+                  <label className="sr-only" htmlFor="logs-page-select">
+                    Select log page
+                  </label>
+                  <select
+                    id="logs-page-select"
+                    value={currentPage}
+                    onChange={(event) => setCurrentPage(Number(event.target.value))}
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20"
+                  >
+                    {Array.from({ length: totalPages }, (_, index) => {
+                      const pageNumber = index + 1;
+                      return (
+                        <option key={pageNumber} value={pageNumber}>
+                          Page {pageNumber} of {totalPages}
+                        </option>
+                      );
+                    })}
+                  </select>
                   <button
+                    type="button"
                     onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                     disabled={currentPage === totalPages}
-                    className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <ChevronRight className="h-5 w-5" />
+                    Next
+                    <ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -557,7 +577,7 @@ export default function AdminLogsPage() {
                             {selectedLog.target_user.display_name || selectedLog.target_user.email || "Unknown"}
                           </p>
                           <Link
-                            href={`/admin/users/${selectedLog.target_user_id}`}
+                            href={adminPath(`/users/${selectedLog.target_user_id}`)}
                             className="text-xs text-[#1f419a] hover:underline"
                           >
                             View User →

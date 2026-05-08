@@ -1,0 +1,321 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "MatchIndeed" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - img "MatchIndeed" [ref=e6]
+        - navigation [ref=e7]:
+          - link "Home" [ref=e8] [cursor=pointer]:
+            - /url: "#"
+          - link "How It Works" [ref=e9] [cursor=pointer]:
+            - /url: "#how-it-works"
+          - link "Features" [ref=e10] [cursor=pointer]:
+            - /url: "#features"
+          - link "FAQ" [ref=e11] [cursor=pointer]:
+            - /url: "#faq"
+          - link "About Us" [ref=e12] [cursor=pointer]:
+            - /url: /about-us
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]:
+          - img [ref=e19]
+          - text: Meet real people face-to-face
+        - heading "Meet Real People. Face-to-Face. Before You Match." [level=1] [ref=e22]:
+          - text: Meet Real People.
+          - generic [ref=e23]: Face-to-Face.
+          - generic [ref=e24]: Before You Match.
+        - paragraph [ref=e25]: Skip the swiping, small talk, and disappointment. Meet on a short video date first, then decide if you want to keep talking.
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - img [ref=e28]
+            - text: Verified Profiles
+          - generic [ref=e30]:
+            - img [ref=e31]
+            - text: Secure Video Calls
+          - generic [ref=e34]:
+            - img [ref=e35]
+            - text: Real Connections
+      - generic [ref=e38]:
+        - img "MatchIndeed" [ref=e40]
+        - paragraph [ref=e41]: Get Started - It's Free
+        - generic [ref=e42]:
+          - generic [ref=e44]:
+            - combobox [ref=e45]:
+              - option "Who are you interested in?" [disabled] [selected]
+              - option "I'm a man seeking a woman"
+              - option "I'm a woman seeking a man"
+              - option "I'm a man seeking a man"
+              - option "I'm a woman seeking a woman"
+            - img
+          - generic [ref=e46]:
+            - generic [ref=e47]: "Between Ages:"
+            - generic [ref=e48]:
+              - button "35" [ref=e50]:
+                - generic [ref=e51]: "35"
+                - img [ref=e52]
+              - generic [ref=e54]: and
+              - button "45" [ref=e56]:
+                - generic [ref=e57]: "45"
+                - img [ref=e58]
+          - generic [ref=e60]:
+            - textbox "Search city or region" [ref=e62]: London, United Kingdom
+            - paragraph [ref=e63]: Search by city or region, for example Sydney, Australia or Lagos, Nigeria.
+          - button "View Singles" [ref=e64]:
+            - text: View Singles
+            - img [ref=e65]
+    - generic [ref=e68]:
+      - generic [ref=e69]:
+        - generic [ref=e70]: 50K+
+        - generic [ref=e71]: Active Members
+      - generic [ref=e72]:
+        - generic [ref=e73]: 12K+
+        - generic [ref=e74]: Matches Made
+      - generic [ref=e75]:
+        - generic [ref=e76]: 8K+
+        - generic [ref=e77]: Video Dates
+      - generic [ref=e78]:
+        - generic [ref=e79]: 4.8/5
+        - generic [ref=e80]: User Rating
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - paragraph [ref=e84]: The MatchIndeed Journey
+        - heading "How It Works" [level=2] [ref=e85]
+        - paragraph [ref=e86]: From sign-up to video date and mutual chat unlock, everything is designed for meaningful connections.
+      - generic [ref=e89]:
+        - article [ref=e90]:
+          - generic [ref=e92]:
+            - img [ref=e94]
+            - generic [ref=e99]:
+              - generic [ref=e100]: Step 01
+              - heading "Sign Up" [level=3] [ref=e101]
+              - paragraph [ref=e102]: Create your profile in minutes with photos, a short bio, and your video-date availability.
+        - article [ref=e103]:
+          - generic [ref=e105]:
+            - img [ref=e107]
+            - generic [ref=e109]:
+              - generic [ref=e110]: Step 02
+              - heading "Book a Video Date" [level=3] [ref=e111]
+              - paragraph [ref=e112]: Browse members and request a video meeting using the integrated calendar.
+        - article [ref=e113]:
+          - generic [ref=e115]:
+            - img [ref=e117]
+            - generic [ref=e120]:
+              - generic [ref=e121]: Step 03
+              - heading "Invitation Accepted" [level=3] [ref=e122]
+              - paragraph [ref=e123]: Once accepted, your video date is automatically confirmed inside the platform.
+        - article [ref=e124]:
+          - generic [ref=e126]:
+            - img [ref=e128]
+            - generic [ref=e131]:
+              - generic [ref=e132]: Step 04
+              - heading "Meet Face-to-Face" [level=3] [ref=e133]
+              - paragraph [ref=e134]: Join directly from your dashboard. No downloads and no extra apps required.
+        - article [ref=e135]:
+          - generic [ref=e137]:
+            - img [ref=e139]
+            - generic [ref=e141]:
+              - generic [ref=e142]: Step 05
+              - heading "Chat Unlocks If It Clicks" [level=3] [ref=e143]
+              - paragraph [ref=e144]: Private chat opens only when both members say yes after the video date.
+    - generic [ref=e146]:
+      - generic [ref=e147]:
+        - heading "Why Singles and Serious Daters Love It" [level=2] [ref=e148]
+        - paragraph [ref=e149]: Real conversations. Real chemistry. Real people.
+      - generic [ref=e150]:
+        - generic [ref=e151]:
+          - img [ref=e153]
+          - heading "Authentic Connections" [level=3] [ref=e156]
+          - paragraph [ref=e157]: No filters, no surprises. Video-first dating helps reduce catfishing and misrepresentation.
+        - generic [ref=e158]:
+          - img [ref=e160]
+          - heading "Zero Endless Texting" [level=3] [ref=e162]
+          - paragraph [ref=e163]: Skip long chat threads and quickly see if you actually vibe in real conversation.
+        - generic [ref=e164]:
+          - img [ref=e166]
+          - heading "Instant Chemistry Check" [level=3] [ref=e168]
+          - paragraph [ref=e169]: Know in minutes whether the connection is worth pursuing.
+        - generic [ref=e170]:
+          - img [ref=e172]
+          - heading "Serious Daters Only" [level=3] [ref=e174]
+          - paragraph [ref=e175]: Built for members who value intentional, respectful interaction.
+        - generic [ref=e176]:
+          - img [ref=e178]
+          - heading "Built-in Scheduling" [level=3] [ref=e180]
+          - paragraph [ref=e181]: No scheduling headaches. Set availability and book dates inside the platform.
+        - generic [ref=e182]:
+          - img [ref=e184]
+          - heading "Time-Saving Flow" [level=3] [ref=e187]
+          - paragraph [ref=e188]: Avoid dead-end chats and focus only on promising connections.
+    - generic [ref=e190]:
+      - generic [ref=e191]:
+        - heading "Real Connections, Real Stories" [level=2] [ref=e192]
+        - paragraph [ref=e193]: What early members are saying.
+      - generic [ref=e194]:
+        - generic [ref=e195]:
+          - generic [ref=e196]:
+            - img [ref=e197]
+            - img [ref=e199]
+            - img [ref=e201]
+            - img [ref=e203]
+            - img [ref=e205]
+          - paragraph [ref=e207]: “Finally, a dating platform that actually leads to real dates. The video date format is a game changer.”
+          - generic [ref=e208]:
+            - generic [ref=e209]: A
+            - generic [ref=e210]:
+              - generic [ref=e211]: A Satisfied Member
+              - generic [ref=e212]: Early Member
+        - generic [ref=e213]:
+          - generic [ref=e214]:
+            - img [ref=e215]
+            - img [ref=e217]
+            - img [ref=e219]
+            - img [ref=e221]
+            - img [ref=e223]
+          - paragraph [ref=e225]: “I met someone who actually wanted to talk, not just text. The video date made all the difference.”
+          - generic [ref=e226]:
+            - generic [ref=e227]: E
+            - generic [ref=e228]:
+              - generic [ref=e229]: Early Member
+              - generic [ref=e230]: Verified User
+        - generic [ref=e231]:
+          - generic [ref=e232]:
+            - img [ref=e233]
+            - img [ref=e235]
+            - img [ref=e237]
+            - img [ref=e239]
+            - img [ref=e241]
+          - paragraph [ref=e243]: “I met someone amazing within my first week. It feels human again compared to swipe-only apps.”
+          - generic [ref=e244]:
+            - generic [ref=e245]: F
+            - generic [ref=e246]:
+              - generic [ref=e247]: Founding User
+              - generic [ref=e248]: MatchIndeed Community
+    - generic [ref=e250]:
+      - generic [ref=e251]:
+        - heading "Frequently Asked Questions" [level=2] [ref=e252]
+        - paragraph [ref=e253]: Got questions? We've got answers.
+      - generic [ref=e254]:
+        - button "What is MatchIndeed?" [ref=e256]:
+          - generic [ref=e257]: What is MatchIndeed?
+          - img [ref=e258]
+        - button "Do I need to download an app?" [ref=e261]:
+          - generic [ref=e262]: Do I need to download an app?
+          - img [ref=e263]
+        - button "How do I create an account?" [ref=e266]:
+          - generic [ref=e267]: How do I create an account?
+          - img [ref=e268]
+        - button "How do I schedule a video date?" [ref=e271]:
+          - generic [ref=e272]: How do I schedule a video date?
+          - img [ref=e273]
+        - button "What happens after I send a booking request?" [ref=e276]:
+          - generic [ref=e277]: What happens after I send a booking request?
+          - img [ref=e278]
+        - button "What if the other person does not respond?" [ref=e281]:
+          - generic [ref=e282]: What if the other person does not respond?
+          - img [ref=e283]
+        - button "Can I reschedule a video date?" [ref=e286]:
+          - generic [ref=e287]: Can I reschedule a video date?
+          - img [ref=e288]
+        - button "How does time-zone alignment work?" [ref=e291]:
+          - generic [ref=e292]: How does time-zone alignment work?
+          - img [ref=e293]
+        - button "What is the difference between a subscription, wallet, and credits?" [ref=e296]:
+          - generic [ref=e297]: What is the difference between a subscription, wallet, and credits?
+          - img [ref=e298]
+        - button "What are calendar slot days?" [ref=e301]:
+          - generic [ref=e302]: What are calendar slot days?
+          - img [ref=e303]
+        - button "How many calendar slot days come with each plan?" [ref=e306]:
+          - generic [ref=e307]: How many calendar slot days come with each plan?
+          - img [ref=e308]
+        - button "What happens when I use all my slot days?" [ref=e311]:
+          - generic [ref=e312]: What happens when I use all my slot days?
+          - img [ref=e313]
+        - button "Can I still book other people if my own slot days are finished?" [ref=e316]:
+          - generic [ref=e317]: Can I still book other people if my own slot days are finished?
+          - img [ref=e318]
+        - button "When are credits charged?" [ref=e321]:
+          - generic [ref=e322]: When are credits charged?
+          - img [ref=e323]
+        - button "Do credits expire?" [ref=e326]:
+          - generic [ref=e327]: Do credits expire?
+          - img [ref=e328]
+        - button "Is my video date private or recorded?" [ref=e331]:
+          - generic [ref=e332]: Is my video date private or recorded?
+          - img [ref=e333]
+        - button "How does chat unlock after a video date?" [ref=e336]:
+          - generic [ref=e337]: How does chat unlock after a video date?
+          - img [ref=e338]
+        - button "What happens if my profile is hidden?" [ref=e341]:
+          - generic [ref=e342]: What happens if my profile is hidden?
+          - img [ref=e343]
+        - button "Can I hide or delete my account?" [ref=e346]:
+          - generic [ref=e347]: Can I hide or delete my account?
+          - img [ref=e348]
+        - button "Why might a booking fail even if I have credits?" [ref=e351]:
+          - generic [ref=e352]: Why might a booking fail even if I have credits?
+          - img [ref=e353]
+        - button "How do I contact MatchIndeed support?" [ref=e356]:
+          - generic [ref=e357]: How do I contact MatchIndeed support?
+          - img [ref=e358]
+    - generic [ref=e361]:
+      - heading "Join Free and Start Meeting Face-to-Face" [level=2] [ref=e362]
+      - paragraph [ref=e363]: Founding members get early access benefits while spots remain. Create your account and start real conversations today.
+      - generic [ref=e364]:
+        - button "Join Free Now" [ref=e365]:
+          - text: Join Free Now
+          - img [ref=e366]
+        - link "I Already Have an Account" [ref=e368] [cursor=pointer]:
+          - /url: /login
+    - contentinfo [ref=e369]:
+      - generic [ref=e370]:
+        - generic [ref=e371]:
+          - generic [ref=e372]:
+            - img "MatchIndeed"
+            - paragraph [ref=e373]: Connecting hearts through meaningful video dates. Find genuine connections, not just swipes.
+          - generic [ref=e374]:
+            - heading "Quick Links" [level=4] [ref=e375]
+            - list [ref=e376]:
+              - listitem [ref=e377]:
+                - link "How It Works" [ref=e378] [cursor=pointer]:
+                  - /url: "#how-it-works"
+              - listitem [ref=e379]:
+                - link "Features" [ref=e380] [cursor=pointer]:
+                  - /url: "#features"
+              - listitem [ref=e381]:
+                - link "FAQ" [ref=e382] [cursor=pointer]:
+                  - /url: "#faq"
+              - listitem [ref=e383]:
+                - link "About Us" [ref=e384] [cursor=pointer]:
+                  - /url: /about-us
+          - generic [ref=e385]:
+            - heading "Legal" [level=4] [ref=e386]
+            - list [ref=e387]:
+              - listitem [ref=e388]:
+                - link "Privacy Policy" [ref=e389] [cursor=pointer]:
+                  - /url: /privacy-policy
+              - listitem [ref=e390]:
+                - link "Terms of Service" [ref=e391] [cursor=pointer]:
+                  - /url: /terms-of-service
+              - listitem [ref=e392]:
+                - link "Cookie Policy" [ref=e393] [cursor=pointer]:
+                  - /url: /cookie-policy
+              - listitem [ref=e394]:
+                - link "Refund Policy" [ref=e395] [cursor=pointer]:
+                  - /url: /refund-policy
+              - listitem [ref=e396]:
+                - link "Community Safety" [ref=e397] [cursor=pointer]:
+                  - /url: /community-safety
+          - generic [ref=e398]:
+            - heading "Contact" [level=4] [ref=e399]
+            - list [ref=e400]:
+              - listitem [ref=e401]:
+                - link "Contact MatchIndeed Support" [ref=e402] [cursor=pointer]:
+                  - /url: /contact-us
+              - listitem [ref=e403]:
+                - link "help@matchindeed.com" [ref=e404] [cursor=pointer]:
+                  - /url: mailto:help@matchindeed.com
+              - listitem [ref=e405]: London, United Kingdom
+        - generic [ref=e406]: © 2026 MatchIndeed. All rights reserved.
+  - alert [ref=e407]

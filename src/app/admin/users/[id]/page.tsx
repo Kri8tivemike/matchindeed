@@ -14,6 +14,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
 import Image from "next/image";
 import {
   ArrowLeft,
@@ -42,6 +43,7 @@ import {
   Send,
   Inbox,
 } from "lucide-react";
+import { formatRelationshipStatusLabel } from "@/lib/relationship-status";
 
 // ---------------------------------------------------------------
 // Types
@@ -190,7 +192,7 @@ export default function AdminUserDetailPage() {
         .single();
 
       if (accountError || !account) {
-        router.push("/admin/users");
+        router.push(adminPath("/users"));
         return;
       }
 
@@ -289,34 +291,54 @@ export default function AdminUserDetailPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const { error } = await supabase
-        .from("accounts")
-        .update({ tier: editedTier, role: editedRole })
-        .eq("id", userId);
-      if (error) throw error;
-
       const {
-        data: { user: adminUser },
-      } = await supabase.auth.getUser();
-      if (adminUser) {
-        await supabase.from("admin_logs").insert({
-          admin_id: adminUser.id,
-          target_user_id: userId,
-          action: "user_update",
-          meta: {
-            old_tier: user.tier,
-            new_tier: editedTier,
-            old_role: user.role,
-            new_role: editedRole,
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setMessage({ type: "error", text: "Please sign in again to save changes." });
+        return;
+      }
+
+      const runAdminAction = async (
+        action: "update_tier" | "update_role",
+        params: Record<string, string>
+      ) => {
+        const response = await fetch("/api/admin/user-actions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
           },
+          body: JSON.stringify({
+            action,
+            user_id: userId,
+            ...params,
+          }),
         });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to save changes.");
+        }
+      };
+
+      if (editedTier !== user.tier) {
+        await runAdminAction("update_tier", { tier: editedTier });
+      }
+
+      if (editedRole !== user.role) {
+        await runAdminAction("update_role", { role: editedRole });
       }
 
       setUser({ ...user, tier: editedTier, role: editedRole });
       setEditMode(false);
       setMessage({ type: "success", text: "Changes saved successfully!" });
-    } catch {
-      setMessage({ type: "error", text: "Failed to save changes." });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to save changes.",
+      });
     } finally {
       setSaving(false);
     }
@@ -502,7 +524,7 @@ export default function AdminUserDetailPage() {
       <div className="p-8 text-center">
         <p className="text-gray-500">User not found</p>
         <Link
-          href="/admin/users"
+          href={adminPath("/users")}
           className="text-[#1f419a] hover:underline mt-2 inline-block"
         >
           Back to Users
@@ -542,7 +564,7 @@ export default function AdminUserDetailPage() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link
-          href="/admin/users"
+          href={adminPath("/users")}
           className="p-2 rounded-lg hover:bg-gray-100 transition"
         >
           <ArrowLeft className="h-5 w-5 text-gray-600" />
@@ -710,7 +732,7 @@ export default function AdminUserDetailPage() {
                   },
                   {
                     label: "Status",
-                    value: user.profile?.relationship_status,
+                    value: formatRelationshipStatusLabel(user.profile?.relationship_status || ""),
                   },
                   {
                     label: "Languages",
@@ -802,7 +824,7 @@ export default function AdminUserDetailPage() {
                       className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-[#1f419a] outline-none"
                     >
                       <option value="user">User</option>
-                      <option value="moderator">Moderator</option>
+                      <option value="coordinator">Coordinator</option>
                       <option value="admin">Admin</option>
                       <option value="superadmin">Super Admin</option>
                     </select>

@@ -1,0 +1,491 @@
+001: https://matchindeed.com/dashboard/meetings
+002: As at yesterday , the link was open with count down time to the meeting ,now is not open again , the place has where a page that show all rules you accept
+003: Modal Title
+004: Before You Join Your Zoom Date
+005: Section: Meeting Rules
+006: A scrollable box containing:
+007: Respectful behavior
+008: No recording
+009: No screenshots
+010: No nudity or inappropriate content
+011: No sharing of personal contact details
+012: Follow MatchIndeed’s safety guidelines
+013: Report any suspicious behavior
+014: Violations may lead to account suspension
+015: Checkbox (Mandatory)
+016: [ ] I have read and agree to follow all rules for this meeting.
+017: Button (Disabled until checked)
+018: Continue to Meeting
+019: If meeting is not yet active:
+020: Show:
+021: Countdown timer
+022: “Your meeting starts at 7:00 PM”
+023: “You can review the rules while you wait”
+024: If meeting is active:
+025: Button becomes:
+026: Join Meeting Now
+027: NOTE – After making the date in the calendar ,  complete rules and guide should be sent to both user automatically to the email  after 30 times , time reminder should be sent to them and telling them to read about the rules and when its time , when its 10 minute another reminder should be sent to them
+028: NOTE ---Let the date and time  countdown show athomatically  no need of condition attached
+029: 2, sign up with google should request for user to accept conditions
+030: 3, date of birth retriction not working even if you are less that 18 of age
+031: 4, allow the form to have back button incase if user makes mistake
+032: https://matchindeed.com/dashboard/profile/edit .. All areas that lead to for , edit and al
+033: 5, whats your ethnic should not be ( I would rather not tell ) do not pre select anything and if user does select anything , it sould proceed further
+034: 6, most of the form should be not  allowed to be pre selections and should have back botton both preference and looking for form  NOTE – many places that leading to user to a pages like preference and form .. we have almost 7 places that lead to those page and some of them do not have back button
+035: 7a, allow the platform to log in 5 minute when no one is doing nothing
+036: 8, Tittle
+037: About Me
+038: Subtitle:
+039: “Write a short introduction about yourself. Keep it simple and real.”
+040: placeholder text:
+041: “Tell us a little about yourself — your personality, what you enjoy, and what you’re looking for.”  ……         NOTE -- This is very import   what the user is looking for
+042: Text Box:
+043: A large box where the user writes their own About Me.
+044: 80–200 characters           NOTE to be restricted  for character input
+045: Examples:
+046:   “Calm, intentional, and ready for a relationship that leads to marriage. I value peace, loyalty, and real partnership.”
+047:   “Ambitious and grounded — building a life I’m proud of and excited to share with someone who values family.”
+048:   “Guided by faith and emotional maturity. I believe in love that feels safe, respectful, and spiritually aligned.”
+049:   “Playful personality with serious intentions. I love laughter, good energy, and building something real.”
+050:   “Reflective, thoughtful, and driven by purpose. I’m looking for a connection that feels aligned and meaningful.”
+051:   “Home is my happy place. I love cozy nights, good food, and building a peaceful life with the right person.”
+052:   “Focused on growth in my career and in my relationships. Communication, honesty, and emotional awareness matter to me.”
+053:   “Proud of my roots and the values they gave me. I’m ready to build a loving home and a strong family foundation.”
+054:   “I love exploring new places and creating meaningful memories. Looking for someone intentional and ready for real connection.”
+055:   “Simple, honest, and intentional. I choose peace over chaos and I’m here for a mature, longterm relationship.”
+056: Note ..  I have sent all applicable sample on different doc. On your whatspp
+057: Note --- ✔ A single text box
+058: ✔ With 5–10 rotating examples underneath
+059: ✔ And a “Show More Examples” button
+060: HOW USERS CHOOSE OR SEE MORE EXAMPLES
+061: ✔ Option 1 — AutoRotate
+062: Every time the user opens the screen, they see a new set of 5–10 examples.
+063: ✔ Option 2 — “Show More Examples” button
+064: When clicked, a modal pops up:
+065: 7 a , ⭐ 4. FULL SAMPLE PROFILE (FINAL DISPLAY)
+066: Here is EXACTLY how it looks to someone visiting the profile.
+067: ⭐ ADEGBITE, 29
+068: Hornchurch, UK “Calm energy. Serious intentions.” ← Short Bio
+069: ⭐ About Me
+070: “Calm, intentional, and ready for a serious relationship. I value communication, loyalty, and building a peaceful home with the right person.”
+071: ⭐ My Prompts
+072: Prompt 1: My purpose in life is…
+073: “To build a meaningful life filled with love, growth, and peace.”
+074: Prompt 2: I’m known for…
+075: “My calm energy and thoughtful nature.”
+076: Prompt 3: I want a relationship that feels…
+077: “Safe, intentional, and emotionally connected.”
+078: 8a  HOW IT IS ARRANGED (ORDER)
+079: Here is the exact order:
+080: 1️⃣ Name, Age, Location
+081: 2️⃣ Short Bio
+082: 3️⃣ About Me
+083: 4️⃣ Prompt Answers
+084: 5️⃣ Photos
+085: 6️⃣ Interests & Values
+086: 7️⃣ Lifestyle Details
+087: NOTE … let add
+088: NOTE --- applied it show on the phone display  -- https://matchindeed.com/dashboard/search and other pages
+089: 8 , make it to display only location and country   no  something like Michael34
+090: Lagos - Ibadan Expressway, Ikeja, Nigeria
+091: 9, Remove Ravel your personality option from the form
+092: 10 , re arrange the  form on mobile view ,  lets the location and age be centered and aligned and bring the up and bring those text up a bit , change the menu icon to (MENU)
+093: 11,  make it design to be wide but let the like eharmony.com  but and take them under search widget , the vefiried profile  , secure video call and real connection
+094: NOTE – on mobile display alone , above picture  applied to it
+095: 12, make all tab their font deep and am giving you aother icon for logo  and upload the favicon above picture  applied to it  , I will give the logo
+096: 14, am giving you all about and copywriting  for about us
+097: 10,  search widget should be used for sign process not another sign up form , the seach widget should have name    NOTE .. what ever you need inside registration form must be part of the form that will continue from search widget
+098: NOTE – on mobile display alone , above picture  applied to it and I think I have discussed  this with you
+099: 11, if you correct the sign up flow , if sign up page with google sign page
+100: 12, the User must put at least 2 photos  and I discovered ai or irregular photo is succefully  uploaded which is not supposed to be and tell me what is responsible to detect it ? .  is a must   if not ,it wont go
+101: 13, Online Help connect with contact us for help@matchindeed.com and make a form ,  reason why reaching to us ,
+102: CONTACT MATCHINDEED SUPPORT
+103: Full Name
+104: [ Text input ]
+105: Email Address
+106: [ Text input ]
+107: subject === • Account Login Issue
+108: • Profile Verification
+109: • Payment / Subscription
+110: • Report a User
+111: • Technical Problem
+112: • Delete My Account
+113: • General Question
+114: • Other
+115: Describe Your Issue
+116: [ Large text box ]
+117: NOTE – anywhere is required of support
+118: 14, Delete of profile , should not user profile to be deleted from database but not to show again to use .. and user should be given a form for reason  , ( 50 charracter ) and put  password  or send otp to email to complete it
+119: 15, let the user know why they cant can have access to a particular features  that they needed to upgrade the features
+120: 16 , if you click in deactivate your profile when your account , it should give us account dia activated result to come on the screen to the user and return to the dashboard
+121: 17 , if  the form not complete  there should be a display with a colorful display as a reminder that catches user attention for ( please complete your profile to get perfect match)  -- for profile completion and for preference profile ( please complete idea date preference ) to get perfect match
+122: 18 , I noticed , even when I finished my profile , stil showing this ontop of the dashboard (Complete your profile to get the best Matchindeed experience!)
+123: 19 , am trying to toggle my profile to show to user is not woking under https://matchindeed.com/dashboard/calendar
+124: 20, lets add to this  Your credits are exhausted (0 remaining). Meet your date Face -to Face- Add credits to unlock video date calendar visibility and new bookings.
+125: 21, the maximum and mimum credit user must add ( 5  and 2000 dollar and get other currency and apply it
+126: 22, I notice when I want to pay . by taking you to stripe and you decide to cancel  and by going back , all the button do not respond again , I was stuck here https://matchindeed.com/dashboard/wallet?canceled=true    and stop until you close the page . please check
+127: 23. how does ( Top picks) work , is showing countdown and rolling icon
+128: 24, after profile completion is still bringing(Complete My Profile)  https://matchindeed.com/dashboard/profile      and user are not allowed to change name  more than one( once ) just one , even when you are coming to update your profile , it should be just that you can edit one .. the 3 edit is not allowed
+129: 25,  Ikeja General Hospital Road, Lagos, Nigeria , is not allowed ad used be only Ikeja Nigeria that d
+130: 26, Tell us about your current relationship status.
+131: Add  1, (i'd rather not say )  To (I'll tell you later)
+132: (Never married)  options and allow
+133: Note include  , Relationship Status around the search  filter
+134: 27 ,  Discover Filters  , bring the location to this page , bring google location  and the height around the Discover Filters not working
+135: 28,
+136: https://matchindeed.com/dashboard/likes   , edit is linking to (https://matchindeed.com/dashboard/discover) instead of  profile page  and despite that the profile has been completed still bringing to complete the profile
+137: 29, the https://matchindeed.com/dashboard/likes  .. the page that carry  subscriptions (Basic accounts can only request meetings with Basic users. Upgrade your subscription to contact this user.) should have a link to where user can upgrade the account and even buy credit   and if you have no credit it should take you where to buy even when you are arranging video meeting with same account holder  and applied to other pages
+138: 30, change all ( meeting to video meeting )
+139: 31, https://matchindeed.com/dashboard/profile/preferences/blocked-locations  .. user should be told where block location not applied to his or her plan and tell him or her to upgrade
+140: 32, https://matchindeed.com/dashboard/history  is not functioning well  , no search button
+141: 33, about in user dashboard , I will give you the write up
+142: 33a , use red colour like counter to count the number
+143: 34 , remove Christian or igbo . please follow what I asked to be there from above
+144: This place about us .. please call me for explantions  if you don’t get
+145: 33a, A clean grid or list of 60 prompts, for example:
+146: “I’m known for…”
+147: “My simple pleasures…”
+148: “On a Zoom date, you’ll notice that I…”
+149: Each prompt is displayed as a selectable card.
+150: When they click a prompt card:
+151: The card expands
+152: A text box appears
+153: 2–3 sample answers appear below the text box
+154: A character counter appears (e.g., 30–200 characters)
+155: STEP 3 — User writes their answer
+156: They type into the text box.
+157: STEP 4 — User clicks “Save Prompt”
+158: The prompt collapses into a “completed” state:
+159: Shows the prompt
+160: Shows the first 1–2 lines of their answer
+161: Shows a green checkmark
+162: Shows an “Edit” button
+163: STEP 5 — User must complete 3 prompts
+164: A progress indicator shows:
+165: Prompts completed: 1 / 3
+166: Once they complete 3 prompts:
+167: The “Continue” button becomes active
+168: They can move to the next onboarding step
+169: SUMMARY (THE QUICK VERSION)
+170: ✔ Users choose 3 prompt titles
+171: ✔ Each title opens a prompt
+172: ✔ Each prompt shows sample answers
+173: ✔ User writes their own answer
+174: ✔ User saves it
+175: ✔ Repeat until 3 prompts are completed
+176: ⭐ ALL PROMPT TITLES + PROMPTS + SAMPLE ANSWERS
+177: 🟪 SECTION A — CORE PERSONALITY PROMPTS (10)
+178: 1. I’m known for…
+179: “My calm energy and thoughtful nature.”
+180: “Making people feel comfortable and heard.”
+181: “Being reliable and emotionally steady.”
+182: 2. My simple pleasures…
+183: “Morning coffee and peaceful moments.”
+184: “Long walks, good music, and deep conversations.”
+185: “Cooking a meal and sharing it with someone I care about.”
+186: 3. A random fact I love…
+187: “Kindness is scientifically proven to be contagious.”
+188: “Laughter strengthens relationships.”
+189: “Most people fall in love through consistent small moments.”
+190: 4. My love language is…
+191: “Quality time and acts of service.”
+192: “Words of affirmation — I appreciate thoughtful communication.”
+193: “Physical touch and emotional presence.”
+194: 5. My ideal weekend…
+195: “Relaxing, cooking, and spending time with someone special.”
+196: “A mix of rest, good food, and meaningful conversations.”
+197: “Exploring new places or enjoying a peaceful day at home.”
+198: 6. Something I’m proud of…
+199: “My emotional growth and selfawareness.”
+200: “Building a stable, peaceful life for myself.”
+201: “How far I’ve come in my personal journey.”
+202: 7. My friends describe me as…
+203: “Calm, loyal, and dependable.”
+204: “Funny, thoughtful, and supportive.”
+205: “Honest, grounded, and emotionally mature.”
+206: 8. A green flag about me is…
+207: “I communicate clearly and respectfully.”
+208: “I’m consistent — my actions match my words.”
+209: “I value emotional safety and honesty.”
+210: 9. A boundary I have is…
+211: “No disrespect or emotional games.”
+212: “Clear communication — silence isn’t communication.”
+213: “I don’t tolerate inconsistency.”
+214: 10. You should message me if…
+215: “You’re intentional and ready for something real.”
+216: “You value communication, kindness, and growth.”
+217: “You’re looking for a serious relationship.”
+218: 🟦 SECTION B — RELATIONSHIP & MARRIAGE PROMPTS (10)
+219: 11. I’m looking for a partner who…
+220: “Values commitment, honesty, and emotional maturity.”
+221: “Wants a serious relationship that leads to marriage.”
+222: “Communicates openly and shows genuine effort.”
+223: 12. My vision for marriage is…
+224: “A peaceful, supportive partnership built on trust.”
+225: “Growing together, building a home, and choosing each other daily.”
+226: “A loving, stable relationship where both people feel safe.”
+227: 13. Family is important to me because…
+228: “It’s the foundation of love, support, and stability.”
+229: “I want to build a peaceful home with someone I love.”
+230: “Family shapes who we are and who we become.”
+231: 14. A serious relationship to me means…
+232: “Consistency, communication, and shared goals.”
+233: “Two people choosing each other with intention.”
+234: “Building something meaningful and longlasting.”
+235: 15. I want a relationship that feels…
+236: “Safe, peaceful, and emotionally connected.”
+237: “Supportive, loving, and full of growth.”
+238: “Like partnership, not pressure.”
+239: 16. My longterm goals include…
+240: “Marriage, family, and a stable, loving home.”
+241: “Building a peaceful life with the right partner.”
+242: “Growing emotionally, spiritually, and relationally.”
+243: 17. I’m ready for a relationship that…
+244: “Leads to marriage and a shared future.”
+245: “Feels intentional, mature, and emotionally safe.”
+246: “Is built on trust, loyalty, and communication.”
+247: 18. I value a partner who…
+248: “Is emotionally mature and consistent.”
+249: “Communicates openly and respectfully.”
+250: “Wants a serious, longterm relationship.”
+251: 19. I want to build a family because…
+252: “Creating a loving home is one of my biggest dreams.”
+253: “Family brings purpose, joy, and legacy.”
+254: “I want to raise children in a peaceful, supportive environment.”
+255: 20. I’m intentional about dating because…
+256: “I’m ready for something real and lasting.”
+257: “I value my time and want a meaningful connection.”
+258: “I’m looking for a partner, not a placeholder.”
+259: 🟩 SECTION C — EMOTIONAL INTELLIGENCE & COMMUNICATION (10)
+260: 21. My communication style is…
+261: “Calm, honest, and direct.”
+262: “Open, respectful, and solutionfocused.”
+263: “Emotionally aware and thoughtful.”
+264: 22. I feel most connected when…
+265: “We talk openly about life and feelings.”
+266: “We spend quality time together.”
+267: “There’s emotional safety and vulnerability.”
+268: 23. I appreciate people who…
+269: “Are kind, intentional, and emotionally mature.”
+270: “Communicate clearly and respectfully.”
+271: “Value growth and honesty.”
+272: 24. I show love by…
+273: “Acts of service and thoughtful gestures.”
+274: “Being present and supportive.”
+275: “Listening deeply and showing care.”
+276: 25. I feel loved when…
+277: “Someone is consistent and intentional.”
+278: “We spend quality time together.”
+279: “My partner communicates openly.”
+280: 26. Emotional maturity to me means…
+281: “Taking responsibility for your actions.”
+282: “Communicating with honesty and respect.”
+283: “Choosing growth over ego.”
+284: 27. I handle conflict by…
+285: “Staying calm and communicating clearly.”
+286: “Listening first, responding second.”
+287: “Focusing on solutions, not blame.”
+288: 28. I value emotional safety because…
+289: “It allows love to grow without fear.”
+290: “It creates trust and connection.”
+291: “It’s the foundation of healthy relationships.”
+292: 29. I express affection by…
+293: “Thoughtful gestures and quality time.”
+294: “Checking in and being present.”
+295: “Small acts that show I care.”
+296: 30. I connect best with people who…
+297: “Are emotionally aware and intentional.”
+298: “Communicate openly and honestly.”
+299: “Value peace, growth, and partnership.”
+300: 🟧 SECTION D — LIFESTYLE & PERSONALITY (10)
+301: 31. On weekends, you’ll find me…
+302: “Relaxing, cooking, or spending time with loved ones.”
+303: “Exploring new places or enjoying quiet time.”
+304: “Balancing rest and productivity.”
+305: 32. My daily routine looks like…
+306: “Work, selfcare, and meaningful conversations.”
+307: “A mix of productivity and peaceful moments.”
+308: “Staying active, learning, and connecting.”
+309: 33. I’m happiest when…
+310: “I’m around people I love.”
+311: “Life feels peaceful and intentional.”
+312: “I’m growing and connecting deeply.”
+313: 34. My hobbies include…
+314: “Cooking, reading, and exploring new places.”
+315: “Fitness, music, and meaningful conversations.”
+316: “Travel, creativity, and learning.”
+317: 35. Something unique about me is…
+318: “I stay calm in stressful situations.”
+319: “I’m deeply intuitive and emotionally aware.”
+320: “I remember the small details about people.”
+321: 36. My perfect day looks like…
+322: “Good food, good conversation, and peaceful moments.”
+323: “A mix of productivity, rest, and connection.”
+324: “Quality time with someone special.”
+325: 37. I enjoy staying active by…
+326: “Walking, gym sessions, or outdoor activities.”
+327: “Keeping my body and mind balanced.”
+328: “Mixing movement with mindfulness.”
+329: 38. My home feels like…
+330: “A peaceful, cozy space.”
+331: “A place of rest and comfort.”
+332: “Warm, calm, and welcoming.”
+333: 39. I recharge by…
+334: “Spending quiet time alone.”
+335: “Connecting with loved ones.”
+336: “Resting, reflecting, and resetting.”
+337: 40. I express creativity through…
+338: “Cooking, writing, or design.”
+339: “Music, art, or storytelling.”
+340: “Finding beauty in everyday moments.”
+341: 🟫 SECTION E — FUN & PLAYFUL (5)
+342: 41. Two truths and a lie…
+343: “I love cooking, I can’t swim, I’ve traveled to 10 countries.”
+344: “I’m lefthanded, I hate chocolate, I love hiking.”
+345: “I speak two languages, I’ve never broken a bone, I can’t ride a bike.”
+346: 42. My guilty pleasure is…
+347: “Latenight snacks and good movies.”
+348: “Listening to old love songs.”
+349: “Ordering food when I said I’d cook.”
+350: 43. A fun fact about me…
+351: “I laugh easily and love good energy.”
+352: “I can cook almost anything from scratch.”
+353: “I’m great at remembering birthdays.”
+354: 44. The quickest way to make me smile is…
+355: “A thoughtful message.”
+356: “Genuine kindness.”
+357: “A good joke or warm compliment.”
+358: 45. My sense of humor is…
+359: “Dry, subtle, and playful.”
+360: “Warm, lighthearted, and silly.”
+361: “A mix of sarcasm and kindness.”
+362: 🟨 SECTION F — MATCHINDEED EXCLUSIVE (ZOOMDATE PROMPTS) (5)
+363: 46. On a Zoom date, you’ll notice that I…
+364: “Smile a lot and stay fully present.”
+365: “Ask thoughtful questions.”
+366: “Make the conversation feel natural.”
+367: 47. I feel most comfortable on Zoom when…
+368: “The conversation flows effortlessly.”
+369: “We’re both relaxed and ourselves.”
+370: “There’s genuine interest on both sides.”
+371: 48. My ideal virtual date is…
+372: “A calm conversation with good energy.”
+373: “Talking about life, goals, and values.”
+374: “Laughing, connecting, and being ourselves.”
+375: 49. I enjoy video conversations because…
+376: “They feel personal and intentional.”
+377: “You can sense someone’s energy.”
+378: “It’s a great way to connect deeply.”
+379: 50. I’m great at virtual dates because…
+380: “I’m present, warm, and easy to talk to.”
+381: “I make conversations feel natural.”
+382: “I bring calm, positive energy.”
+383: 🟦 SECTION G — AMBITION, CAREER & PURPOSE (5)
+384: 51. My purpose in life is…
+385: “To build a meaningful life filled with love, growth, and impact.”
+386: “To become the best version of myself and uplift others.”
+387: “To create stability, peace, and a future I’m proud of.”
+388: 52. I’m passionate about…
+389: “Personal growth, meaningful relationships, and building a peaceful home.”
+390: “My career, my family, and becoming a better person every day.”
+391: “Helping others, learning new things, and living with intention.”
+392: 53. I’m driven by…
+393: “Purpose, ambition, and the desire to build a stable future.”
+394: “Growth, discipline, and creating a life filled with meaning.”
+395: “Love, family, and the vision of a peaceful home.”
+396: 54. My career matters to me because…
+397: “It allows me to build stability and support a future family.”
+398: “It challenges me and helps me grow.”
+399: “It gives me purpose and direction.”
+400: 55. Success to me means…
+401: “A peaceful home, a loving partner, and a meaningful life.”
+402: “Growth, stability, and emotional maturity.”
+403: “Balancing ambition with love and connection.”
+404: 🟩 SECTION H — CULTURE, IDENTITY & VALUES (5)
+405: 56. My cultural background means…
+406: “A lot to me — it shaped my values and identity.”
+407: “Family, tradition, and deep respect for where I come from.”
+408: “A strong foundation that guides my decisions.”
+409: 57. Traditions I value are…
+410: “Family gatherings and shared meals.”
+411: “Honoring my roots and keeping meaningful traditions alive.”
+412: “Acts of kindness, respect, and community.”
+413: 58. My core values are…
+414: “Honesty, loyalty, and emotional maturity.”
+415: “Family, faith, and intentional love.”
+416: “Respect, communication, and growth.”
+417: 59. Faith/spirituality is important to me because…
+418: “It grounds me and guides my decisions.”
+419: “It shapes my values and how I treat people.”
+420: “It gives me peace, purpose, and direction.”
+421: 60. A belief I live by…
+422: “Love should feel peaceful, not confusing.”
+423: “Consistency is the real love language.”
+424: “What’s meant for you won’t require chaos.”
+425: THE COMPLETE PROMPT TITLE LIST FOR MATCHINDEED
+426: 🟪 SECTION A — Core Personality Prompts
+427: I’m known for…
+428: My simple pleasures…
+429: A random fact I love…
+430: My love language is…
+431: My ideal weekend…
+432: Something I’m proud of…
+433: My friends describe me as…
+434: A green flag about me is…
+435: A boundary I have is…
+436: You should message me if…
+437: 🟦 SECTION B — Relationship & MarriageFocused Prompts
+438: I’m looking for a partner who…
+439: My vision for marriage is…
+440: Family is important to me because…
+441: A serious relationship to me means…
+442: I want a relationship that feels…
+443: My longterm goals include…
+444: I’m ready for a relationship that…
+445: I value a partner who…
+446: 🟩 SECTION C — Emotional Intelligence & Communication Prompts
+447: My communication style is…
+448: I feel most connected when…
+449: I appreciate people who…
+450: I show love by…
+451: I feel loved when…
+452: Emotional maturity to me means…
+453: 🟧 SECTION D — Lifestyle & Personality Prompts
+454: On weekends, you’ll find me…
+455: My daily routine looks like…
+456: I’m happiest when…
+457: My hobbies include…
+458: Something unique about me is…
+459: My perfect day looks like…
+460: 🟫 SECTION E — Fun, Playful, LightHearted Prompts
+461: Two truths and a lie…
+462: My guilty pleasure is…
+463: A fun fact about me…
+464: The quickest way to make me smile is…
+465: My sense of humor is…
+466: 🟨 SECTION F — MatchIndeed Exclusive
+467: On a Zoom date, you’ll notice that I…
+468: I feel most comfortable on Zoom when…
+469: My ideal virtual date is…
+470: I enjoy video conversations because…
+471: 🟪 SECTION G — Deep, Reflective Prompts
+472: Something I’m working on improving is…
+473: A life lesson that shaped me…
+474: I’m grateful for…
+475: I value people who…
+476: A belief I live by…
+477: 🟦 SECTION H — Ambition, Career, Purpose Prompts
+478: My purpose in life is…
+479: I’m passionate about…
+480: I’m driven by…
+481: My career matters to me because…
+482: 🟩 SECTION I — Culture, Identity & Values Prompts
+483: My cultural background means…
+484: Traditions I value are…
+485: My core values are…
+486: Faith/spirituality is important to me because…
+487: “Calm, funny, and ambitious. I love good conversations and meaningful connections.”
+488: “Tech professional, foodie, and traveler. Looking for someone kind and intentional.”
+489: “I enjoy deep conversations, laughter, and trying new things. Let’s see where this goes.”
+490: “Easygoing, curious, and always up for an adventure. Let’s create something real.”
+491: “I’m intentional, familyoriented, and ready for a meaningful relationship that leads to marriage.”

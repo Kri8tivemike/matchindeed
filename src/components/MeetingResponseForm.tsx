@@ -26,7 +26,16 @@ type MeetingResponseFormProps = {
   /** The meeting date string (ISO) */
   meetingDate?: string;
   /** Callback on successful submission */
-  onSuccess?: () => void;
+  onSuccess?: (result: MeetingResponseSubmitResult) => void;
+};
+
+type MeetingResponseSubmitResult = {
+  match_created?: boolean;
+  agreement_required?: boolean;
+  both_responded?: boolean;
+  response_outcome?: "both_yes" | "both_no" | "mismatch" | null;
+  match_id?: string | null;
+  agreement_id?: string | null;
 };
 
 /**
@@ -60,6 +69,8 @@ export default function MeetingResponseForm({
   const [success, setSuccess] = useState(false);
   // The generated agreement text shown after selection
   const [agreementPreview, setAgreementPreview] = useState<string>("");
+  const [submissionResult, setSubmissionResult] =
+    useState<MeetingResponseSubmitResult | null>(null);
 
   // Current date/time for the form signature
   const now = new Date();
@@ -170,16 +181,20 @@ export default function MeetingResponseForm({
         throw new Error(result.error || "Failed to submit response");
       }
 
+      setSubmissionResult(result as MeetingResponseSubmitResult);
       setSuccess(true);
 
       // Redirect after a short delay
       if (onSuccess) {
-        setTimeout(() => onSuccess(), 2500);
+        setTimeout(() => onSuccess(result as MeetingResponseSubmitResult), 2500);
       }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      console.error("Error submitting response:", err);
-      setError(err.message || "Failed to submit response. Please try again.");
+    } catch (error: unknown) {
+      console.error("Error submitting response:", error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to submit response. Please try again."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -187,6 +202,10 @@ export default function MeetingResponseForm({
 
   // ---------- SUCCESS STATE ----------
   if (success) {
+    const agreementRequired = !!submissionResult?.agreement_required;
+    const bothResponded = !!submissionResult?.both_responded;
+    const outcome = submissionResult?.response_outcome || null;
+
     return (
       <div className="rounded-2xl bg-white shadow-lg ring-1 ring-black/5 overflow-hidden">
         <div
@@ -208,14 +227,18 @@ export default function MeetingResponseForm({
             )}
             <div>
               <h3 className="text-lg font-bold text-gray-900">
-                {response === "yes"
-                  ? "Response Submitted — Match Pending!"
-                  : "Response Submitted"}
+                {response === "yes" && agreementRequired
+                  ? "Mutual YES Confirmed"
+                  : response === "yes"
+                    ? "Response Submitted — Match Pending!"
+                    : "Response Submitted"}
               </h3>
               <p className="text-sm text-gray-600 mt-1">
-                {response === "yes"
-                  ? `Your acceptance has been recorded. If ${partnerName} also accepts, messaging will be enabled between you.`
-                  : `Your response has been recorded. Your profile will remain active and visible.`}
+                {response === "yes" && agreementRequired
+                  ? `You and ${partnerName} selected YES. Sign the relationship agreement to enable messaging.`
+                  : response === "yes"
+                    ? `Your acceptance has been recorded. If ${partnerName} also accepts, you'll be prompted to sign the agreement.`
+                    : `Your response has been recorded. Your profile will remain active and visible.`}
               </p>
             </div>
           </div>
@@ -238,8 +261,12 @@ export default function MeetingResponseForm({
           </div>
 
           <p className="mt-4 text-xs text-gray-500">
-            A copy has been sent to your dashboard, to {partnerName}, and to the
-            MatchIndeed admin for records. Redirecting...
+            {bothResponded && outcome === "both_no"
+              ? "Both responses are NO. No match was created and profiles remain active."
+              : bothResponded && outcome === "mismatch"
+                ? "Responses did not match. No match was created and profiles remain active."
+                : "A copy has been sent to your dashboard and match workflow has been updated."}{" "}
+            Redirecting...
           </p>
         </div>
       </div>

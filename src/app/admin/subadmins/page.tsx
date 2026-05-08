@@ -12,35 +12,38 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/ToastProvider";
 import {
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  UserCog,
   Shield,
   Loader2,
   RefreshCw,
   Check,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  ChevronDown,
 } from "lucide-react";
-import { ALL_PERMISSIONS } from "@/lib/admin-permissions";
+import {
+  ACCOUNT_PERMISSION_LABELS,
+  ALL_PERMISSIONS,
+  COORDINATOR_PERMISSIONS,
+} from "@/lib/admin-permissions";
 
-type SubAdmin = {
+type PermissionSubject = {
   id: string;
   email: string;
   role: string;
   account_status: string;
   display_name: string | null;
+  created_at?: string | null;
 };
 
 export default function AdminSubAdminsPage() {
   const { toast } = useToast();
-  const [subAdmins, setSubAdmins] = useState<SubAdmin[]>([]);
+  const [subjects, setSubjects] = useState<PermissionSubject[]>([]);
   const [loading, setLoading] = useState(true);
-  const [permissionsByRole, setPermissionsByRole] = useState<Record<string, string[]>>({});
+  const [permissionsByUser, setPermissionsByUser] = useState<Record<string, string[]>>({});
+  const [configuredByUser, setConfiguredByUser] = useState<Record<string, boolean>>({});
   const [permsLoading, setPermsLoading] = useState(true);
-  const [editingRole, setEditingRole] = useState<string | null>(null);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [savingPerms, setSavingPerms] = useState(false);
 
   const fetchSubAdmins = async () => {
@@ -49,7 +52,7 @@ export default function AdminSubAdminsPage() {
       const { data, error } = await supabase
         .from("accounts")
         .select("*")
-        .in("role", ["admin", "moderator"])
+        .in("role", ["admin", "coordinator"])
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -57,7 +60,7 @@ export default function AdminSubAdminsPage() {
         return;
       }
 
-      setSubAdmins(data || []);
+      setSubjects(data || []);
     } catch (error) {
       console.error("Error:", error);
     } finally {
@@ -76,7 +79,22 @@ export default function AdminSubAdminsPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        setPermissionsByRole(data.by_role || {});
+        const byUser = data.by_user || {};
+        const nextPermissions: Record<string, string[]> = {};
+        const nextConfigured: Record<string, boolean> = {};
+        for (const [userId, entry] of Object.entries(byUser)) {
+          const value = entry as { permissions?: unknown; configured?: unknown };
+          nextPermissions[userId] = Array.isArray(value.permissions)
+            ? value.permissions.map(String)
+            : [];
+          nextConfigured[userId] = value.configured === true;
+        }
+        setPermissionsByUser(nextPermissions);
+        setConfiguredByUser(nextConfigured);
+
+        if (Array.isArray(data.subjects)) {
+          setSubjects(data.subjects);
+        }
       }
     } catch (err) {
       console.error("Error fetching permissions:", err);
@@ -85,7 +103,7 @@ export default function AdminSubAdminsPage() {
     }
   }, []);
 
-  const handleSavePermissions = async (role: string, perms: string[]) => {
+  const handleSavePermissions = async (subject: PermissionSubject, perms: string[]) => {
     setSavingPerms(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -100,16 +118,17 @@ export default function AdminSubAdminsPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ role, permissions: perms }),
+        body: JSON.stringify({ user_id: subject.id, permissions: perms }),
       });
 
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || "Failed to save");
       }
-      setPermissionsByRole((prev) => ({ ...prev, [role]: perms }));
-      setEditingRole(null);
-      toast.success(`Permissions for ${role} updated`);
+      setPermissionsByUser((prev) => ({ ...prev, [subject.id]: perms }));
+      setConfiguredByUser((prev) => ({ ...prev, [subject.id]: true }));
+      setEditingUserId(null);
+      toast.success(`Permissions for ${subject.display_name || subject.email} updated`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save permissions");
     } finally {
@@ -125,12 +144,26 @@ export default function AdminSubAdminsPage() {
     fetchPermissions();
   }, [fetchPermissions]);
 
+  const getSubjectPermissions = (subject: PermissionSubject) =>
+    subject.role === "coordinator" ? COORDINATOR_PERMISSIONS : ALL_PERMISSIONS;
+
+  const getRoleBadgeClass = (role: string) => {
+    switch (role) {
+      case "coordinator":
+        return "bg-purple-100 text-purple-700";
+      case "admin":
+        return "bg-blue-100 text-blue-700";
+      default:
+        return "bg-gray-100 text-gray-700";
+    }
+  };
+
   return (
     <div className="p-6 lg:p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Sub-Admins</h1>
-          <p className="text-gray-500">Manage sub-admin accounts and permissions</p>
+          <p className="text-gray-500">Manage individual admin and coordinator permissions</p>
         </div>
         <button
           onClick={() => fetchSubAdmins()}
@@ -158,12 +191,12 @@ export default function AdminSubAdminsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {subAdmins.map((admin) => (
+              {subjects.map((admin) => (
                 <tr key={admin.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">{admin.display_name || "—"}</td>
                   <td className="px-6 py-4">{admin.email}</td>
                   <td className="px-6 py-4">
-                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeClass(admin.role)}`}>
                       {admin.role}
                     </span>
                   </td>
@@ -176,7 +209,7 @@ export default function AdminSubAdminsPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <Link
-                      href={`/admin/users/${admin.id}`}
+                      href={adminPath(`/users/${admin.id}`)}
                       className="px-3 py-1 rounded-lg text-sm border border-gray-200 hover:bg-gray-50"
                     >
                       Manage
@@ -189,12 +222,12 @@ export default function AdminSubAdminsPage() {
         )}
       </div>
 
-      {/* Role Permissions Section */}
+      {/* Individual Permissions Section */}
       <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900">Role Permissions</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Individual Permissions</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Configure which permissions each role has. Superadmin only.
+            Configure permissions per admin or coordinator account. These settings do not affect other users with the same role.
           </p>
         </div>
         <div className="p-6">
@@ -204,20 +237,46 @@ export default function AdminSubAdminsPage() {
             </div>
           ) : (
             <div className="space-y-6">
-              {(["moderator", "admin"] as const).map((role) => (
-                <div key={role} className="border border-gray-200 rounded-lg p-4">
+              {subjects.map((subject) => {
+                const availablePermissions = getSubjectPermissions(subject);
+                const currentPermissions = permissionsByUser[subject.id] || [];
+                const isEditing = editingUserId === subject.id;
+
+                return (
+                <div key={subject.id} className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-medium text-gray-900 capitalize">{role}</h3>
-                    {editingRole === role ? (
+                    <div>
+                      <h3 className="font-medium text-gray-900">
+                        {subject.display_name || subject.email}
+                      </h3>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span>{subject.email}</span>
+                        <span className={`rounded-full px-2 py-0.5 font-medium capitalize ${getRoleBadgeClass(subject.role)}`}>
+                          {subject.role}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-medium ${
+                            configuredByUser[subject.id]
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          {configuredByUser[subject.id]
+                            ? "Individual permissions"
+                            : "Using default until saved"}
+                        </span>
+                      </div>
+                    </div>
+                    {isEditing ? (
                       <div className="flex gap-2">
                         <button
-                          onClick={() => setEditingRole(null)}
+                          onClick={() => setEditingUserId(null)}
                           className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 hover:bg-gray-50"
                         >
                           Cancel
                         </button>
                         <button
-                          onClick={() => handleSavePermissions(role, permissionsByRole[role] || [])}
+                          onClick={() => handleSavePermissions(subject, currentPermissions)}
                           disabled={savingPerms}
                           className="px-3 py-1.5 text-sm rounded-lg bg-[#1f419a] text-white hover:bg-[#183882] disabled:opacity-50 flex items-center gap-1"
                         >
@@ -227,7 +286,7 @@ export default function AdminSubAdminsPage() {
                       </div>
                     ) : (
                       <button
-                        onClick={() => setEditingRole(role)}
+                        onClick={() => setEditingUserId(subject.id)}
                         className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1"
                       >
                         <Shield className="h-4 w-4" />
@@ -236,34 +295,37 @@ export default function AdminSubAdminsPage() {
                     )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                    {ALL_PERMISSIONS.map((perm) => (
+                    {availablePermissions.map((perm) => (
                       <label
                         key={perm}
                         className={`flex items-center gap-2 text-sm ${
-                          editingRole === role ? "cursor-pointer" : "cursor-default opacity-75"
+                          isEditing ? "cursor-pointer" : "cursor-default opacity-75"
                         }`}
                       >
                         <input
-                          id={`perm-${role}-${perm}`}
+                          id={`perm-${subject.id}-${perm}`}
                           type="checkbox"
-                          checked={(permissionsByRole[role] || []).includes(perm)}
-                          disabled={editingRole !== role}
+                          checked={currentPermissions.includes(perm)}
+                          disabled={!isEditing}
                           onChange={(e) => {
-                            if (editingRole !== role) return;
-                            const current = permissionsByRole[role] || [];
+                            if (!isEditing) return;
+                            const current = permissionsByUser[subject.id] || [];
                             const next = e.target.checked
                               ? [...current, perm]
                               : current.filter((p) => p !== perm);
-                            setPermissionsByRole((prev) => ({ ...prev, [role]: next }));
+                            setPermissionsByUser((prev) => ({ ...prev, [subject.id]: next }));
                           }}
                           className="rounded border-gray-300 text-[#1f419a] focus:ring-[#1f419a]"
                         />
-                        <span className="text-gray-700">{perm.replace(/_/g, " ")}</span>
+                        <span className="text-gray-700">
+                          {ACCOUNT_PERMISSION_LABELS[perm] || perm.replace(/_/g, " ")}
+                        </span>
                       </label>
                     ))}
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdminAccess } from "@/lib/admin/permissions";
 
 /**
  * Admin Activity Limits API
@@ -26,7 +27,8 @@ const supabase = createClient(
 );
 
 // Valid tiers
-const VALID_TIERS = ["basic", "standard", "premium", "vip"];
+const VALID_TIERS = ["basic", "standard", "premium", "vip"] as const;
+type Tier = (typeof VALID_TIERS)[number];
 
 // Valid limit fields
 const LIMIT_FIELDS = [
@@ -39,32 +41,22 @@ const LIMIT_FIELDS = [
   "interesteds_per_day",
   "interesteds_per_week",
   "interesteds_per_month",
-];
+] as const;
+type LimitField = (typeof LIMIT_FIELDS)[number];
 
-/**
- * Verify the requesting user is an admin
- */
-async function verifyAdmin(request: NextRequest): Promise<boolean> {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return false;
-
-  const token = authHeader.substring(7);
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-
-  if (error || !user) return false;
-
-  // Check admin role
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  return ["admin", "superadmin"].includes(account?.role || "");
-}
+type ActivityLimitRow = {
+  tier: Tier;
+  winks_per_day: number;
+  winks_per_week: number;
+  winks_per_month: number;
+  likes_per_day: number;
+  likes_per_week: number;
+  likes_per_month: number;
+  interesteds_per_day: number;
+  interesteds_per_week: number;
+  interesteds_per_month: number;
+  updated_at?: string;
+};
 
 /**
  * GET /api/admin/activity-limits
@@ -72,9 +64,11 @@ async function verifyAdmin(request: NextRequest): Promise<boolean> {
  */
 export async function GET(request: NextRequest) {
   try {
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const guard = await requireAdminAccess(request, {
+      anyPermissions: ["manage_activity_limits"],
+    });
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
     const { data: limits, error } = await supabase
@@ -97,9 +91,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Ensure all tiers are represented
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const existingTiers = new Set((limits || []).map((l: any) => l.tier));
-    const allLimits = [...(limits || [])];
+    const existingTiers = new Set(((limits || []) as ActivityLimitRow[]).map((l) => l.tier));
+    const allLimits: ActivityLimitRow[] = [...((limits || []) as ActivityLimitRow[])];
 
     for (const tier of VALID_TIERS) {
       if (!existingTiers.has(tier)) {
@@ -109,8 +102,7 @@ export async function GET(request: NextRequest) {
 
     // Sort by tier order
     allLimits.sort(
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (a: any, b: any) =>
+      (a, b) =>
         VALID_TIERS.indexOf(a.tier) - VALID_TIERS.indexOf(b.tier)
     );
 
@@ -130,25 +122,29 @@ export async function GET(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const guard = await requireAdminAccess(request, {
+      anyPermissions: ["manage_activity_limits"],
+    });
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
-    const body = await request.json();
+    const body = (await request.json()) as { tier?: string } & Partial<
+      Record<LimitField, number | string>
+    >;
     const { tier, ...limitValues } = body;
 
     // Validate tier
-    if (!tier || !VALID_TIERS.includes(tier)) {
+    if (!tier || !VALID_TIERS.includes(tier as Tier)) {
       return NextResponse.json(
         { error: `Invalid tier. Must be one of: ${VALID_TIERS.join(", ")}` },
         { status: 400 }
       );
     }
+    const parsedTier = tier as Tier;
 
     // Validate and sanitize limit values
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = { tier };
+    const updateData: Partial<ActivityLimitRow> = { tier: parsedTier };
 
     for (const field of LIMIT_FIELDS) {
       if (field in limitValues) {
@@ -168,7 +164,7 @@ export async function PUT(request: NextRequest) {
     const { data: existing } = await supabase
       .from("user_activity_limits")
       .select("tier")
-      .eq("tier", tier)
+      .eq("tier", parsedTier)
       .maybeSingle();
 
     let result;
@@ -178,7 +174,7 @@ export async function PUT(request: NextRequest) {
       const { data, error } = await supabase
         .from("user_activity_limits")
         .update({ ...updateData, updated_at: new Date().toISOString() })
-        .eq("tier", tier)
+        .eq("tier", parsedTier)
         .select()
         .single();
 
@@ -192,7 +188,7 @@ export async function PUT(request: NextRequest) {
       result = data;
     } else {
       // Insert new row with defaults + overrides
-      const defaults = getDefaultForTier(tier);
+      const defaults = getDefaultForTier(parsedTier);
       const insertData = { ...defaults, ...updateData };
 
       const { data, error } = await supabase
@@ -227,9 +223,11 @@ export async function PUT(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const guard = await requireAdminAccess(request, {
+      anyPermissions: ["manage_activity_limits"],
+    });
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
     const body = await request.json();
@@ -295,9 +293,8 @@ export async function POST(request: NextRequest) {
  * Get default limits for a specific tier
  * Values: 0 = unlimited
  */
-function getDefaultForTier(tier: string) {
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const defaults: Record<string, any> = {
+function getDefaultForTier(tier: Tier): ActivityLimitRow {
+  const defaults: Record<Tier, ActivityLimitRow> = {
     basic: {
       tier: "basic",
       winks_per_day: 5,
@@ -348,20 +345,7 @@ function getDefaultForTier(tier: string) {
     },
   };
 
-  return (
-    defaults[tier] || {
-      tier,
-      winks_per_day: 5,
-      winks_per_week: 25,
-      winks_per_month: 80,
-      likes_per_day: 5,
-      likes_per_week: 25,
-      likes_per_month: 80,
-      interesteds_per_day: 3,
-      interesteds_per_week: 15,
-      interesteds_per_month: 50,
-    }
-  );
+  return defaults[tier];
 }
 
 /**

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { CREDIT_LOCKED_PROFILE_STATUS } from "@/lib/profile/credit-lock";
+import { getStarterTrialState } from "@/lib/starter-trial";
 
 /**
  * Profile Visibility API
@@ -35,6 +37,21 @@ async function getAuthUser(request: NextRequest) {
   return error || !user ? null : user;
 }
 
+function getAvailableCredits(
+  credits:
+    | {
+        total?: number | null;
+        used?: number | null;
+        rollover?: number | null;
+      }
+    | null
+) {
+  const total = credits?.total || 0;
+  const used = credits?.used || 0;
+  const rollover = credits?.rollover || 0;
+  return Math.max(0, total - used + rollover);
+}
+
 /**
  * GET /api/profile/visibility
  *
@@ -50,9 +67,9 @@ export async function GET(request: NextRequest) {
     // Try to fetch visibility columns
     const { data, error } = await supabase
       .from("accounts")
-      .select("profile_visible, calendar_enabled")
+      .select("profile_visible, calendar_enabled, profile_status")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
     if (error) {
       // If columns don't exist yet (migration not run), return defaults
@@ -60,6 +77,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
           profile_visible: true,
           calendar_enabled: true,
+          profile_status: "online",
           migration_pending: true,
         });
       }
@@ -72,8 +90,9 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      profile_visible: data.profile_visible ?? true,
-      calendar_enabled: data.calendar_enabled ?? true,
+      profile_visible: data?.profile_visible ?? true,
+      calendar_enabled: data?.calendar_enabled ?? true,
+      profile_status: data?.profile_status ?? "online",
       migration_pending: false,
     });
   } catch (error) {
@@ -105,16 +124,22 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { profile_visible, calendar_enabled } = body;
+    const { profile_visible, calendar_enabled, lock_reason } = body;
 
     // Build update object
-    const updateData: Record<string, boolean> = {};
+    const updateData: Record<string, boolean | string> = {};
 
     if (typeof calendar_enabled === "boolean") {
       updateData.calendar_enabled = calendar_enabled;
       // When calendar is toggled off, automatically hide profile
       // When calendar is toggled on, automatically show profile
       updateData.profile_visible = calendar_enabled;
+      updateData.profile_status =
+        calendar_enabled
+          ? "online"
+          : lock_reason === "credits_exhausted"
+            ? CREDIT_LOCKED_PROFILE_STATUS
+            : "hidden";
     }
 
     if (typeof profile_visible === "boolean") {
@@ -122,6 +147,9 @@ export async function PATCH(request: NextRequest) {
       // If profile is hidden, also disable calendar
       if (!profile_visible) {
         updateData.calendar_enabled = false;
+        updateData.profile_status = "hidden";
+      } else if (updateData.profile_status !== "offline_matched") {
+        updateData.profile_status = "online";
       }
     }
 
@@ -132,13 +160,96 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // Enforce calendar lock when credits are exhausted (except VIP users).
+    if (updateData.calendar_enabled === true) {
+      const starterTrialState = await getStarterTrialState(supabase, user.id, {
+        verifyActiveSlot: true,
+      });
+
+      if (starterTrialState.upgrade_required) {
+        return NextResponse.json(
+          {
+            error:
+              "Your free starter slot has already been used. Subscribe to create more availability and accept new bookings.",
+            code: "starter_trial_exhausted",
+          },
+          { status: 403 }
+        );
+      }
+
+      if (starterTrialState.eligible && !starterTrialState.consumed) {
+        // Starter-trial users can stay visible for their one free slot even with zero credits.
+      } else {
+      const { data: accountTier, error: tierError } = await supabase
+        .from("accounts")
+        .select("tier")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (tierError && tierError.code !== "PGRST116") {
+        console.error("Error fetching account tier:", tierError);
+        return NextResponse.json(
+          { error: "Failed to verify account tier" },
+          { status: 500 }
+        );
+      }
+
+      const tier = (accountTier?.tier || "basic").toLowerCase();
+      if (tier !== "vip") {
+        const { data: credits, error: creditsError } = await supabase
+          .from("credits")
+          .select("total, used, rollover")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (creditsError && creditsError.code !== "PGRST116") {
+          console.error("Error fetching credits:", creditsError);
+          return NextResponse.json(
+            { error: "Failed to verify credits" },
+            { status: 500 }
+          );
+        }
+
+        if (getAvailableCredits(credits || null) <= 0) {
+          return NextResponse.json(
+            {
+              error: "Calendar is locked because you have no available credits.",
+              code: "credits_exhausted",
+            },
+            { status: 403 }
+          );
+        }
+      }
+      }
+    }
+
     // Update the account
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("accounts")
       .update(updateData)
       .eq("id", user.id)
-      .select("profile_visible, calendar_enabled")
-      .single();
+      .select("profile_visible, calendar_enabled, profile_status")
+      .maybeSingle();
+
+    if (!error && !data) {
+      const repairResult = await supabase
+        .from("accounts")
+        .upsert(
+          {
+            id: user.id,
+            email: user.email || null,
+            display_name: user.email?.split("@")[0] || "User",
+            role: "user",
+            ...updateData,
+          },
+          { onConflict: "id" }
+        )
+        .select("profile_visible, calendar_enabled, profile_status")
+        .single();
+
+      data = repairResult.data;
+      error = repairResult.error;
+    }
 
     if (error) {
       // If columns don't exist yet
@@ -147,6 +258,8 @@ export async function PATCH(request: NextRequest) {
           success: true,
           profile_visible: updateData.profile_visible ?? true,
           calendar_enabled: updateData.calendar_enabled ?? true,
+          profile_status:
+            (updateData.profile_status as string | undefined) || "online",
           migration_pending: true,
           message:
             "Visibility preference saved locally. Database migration pending.",
@@ -154,6 +267,13 @@ export async function PATCH(request: NextRequest) {
       }
 
       console.error("Error updating visibility:", error);
+      return NextResponse.json(
+        { error: "Failed to update visibility" },
+        { status: 500 }
+      );
+    }
+
+    if (!data) {
       return NextResponse.json(
         { error: "Failed to update visibility" },
         { status: 500 }
@@ -172,6 +292,7 @@ export async function PATCH(request: NextRequest) {
       data: {
         profile_visible: data.profile_visible,
         calendar_enabled: data.calendar_enabled,
+        profile_status: data.profile_status || "online",
       },
     });
 
@@ -179,6 +300,7 @@ export async function PATCH(request: NextRequest) {
       success: true,
       profile_visible: data.profile_visible,
       calendar_enabled: data.calendar_enabled,
+      profile_status: data.profile_status || "online",
       migration_pending: false,
     });
   } catch (error) {

@@ -22,6 +22,36 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function mergeWithDefaults(source: unknown): UserNotificationPrefs {
+  const prefs = { ...DEFAULTS };
+  if (!isObject(source)) return prefs;
+
+  for (const key of Object.keys(DEFAULTS) as (keyof UserNotificationPrefs)[]) {
+    const value = source[key];
+    if (typeof value === "boolean") {
+      prefs[key] = value;
+    }
+  }
+
+  return prefs;
+}
+
+function isMissingModernTableError(error: unknown): boolean {
+  if (!isObject(error)) return false;
+  const code = String(error.code ?? "");
+  const message = String(error.message ?? "").toLowerCase();
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code.startsWith("PGRST20") ||
+    message.includes("notification_preferences")
+  );
+}
+
 // ---------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------
@@ -75,12 +105,12 @@ const DEFAULTS: UserNotificationPrefs = {
   meetings_email: true,
   meetings_push: true,
   views_inapp: true,
-  views_email: false,
-  views_push: false,
+  views_email: true,
+  views_push: true,
   system_inapp: true,
   system_email: true,
   system_push: true,
-  marketing_email: false,
+  marketing_email: true,
 };
 
 // ---------------------------------------------------------------
@@ -130,25 +160,33 @@ export async function getUserNotificationPrefs(
   userId: string
 ): Promise<UserNotificationPrefs> {
   try {
-    const { data, error } = await supabaseAdmin
+    const modernResult = await supabaseAdmin
       .from("notification_preferences")
       .select("*")
       .eq("user_id", userId)
       .maybeSingle();
 
-    // Table doesn't exist or other error → return defaults
-    if (error || !data) {
+    if (!modernResult.error && modernResult.data) {
+      return mergeWithDefaults(modernResult.data);
+    }
+
+    if (modernResult.error && !isMissingModernTableError(modernResult.error)) {
+      console.error("Error loading notification_preferences:", modernResult.error);
+    }
+
+    // Backward-compatible fallback for environments with notification_prefs JSONB
+    const legacyResult = await supabaseAdmin
+      .from("notification_prefs")
+      .select("prefs")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (legacyResult.error) {
+      console.error("Error loading notification_prefs:", legacyResult.error);
       return { ...DEFAULTS };
     }
 
-    // Merge with defaults to fill any missing columns
-    const prefs = { ...DEFAULTS };
-    for (const key of Object.keys(DEFAULTS) as (keyof UserNotificationPrefs)[]) {
-      if (data[key] !== undefined && data[key] !== null) {
-        prefs[key] = data[key];
-      }
-    }
-    return prefs;
+    return mergeWithDefaults(legacyResult.data?.prefs);
   } catch {
     return { ...DEFAULTS };
   }
@@ -199,6 +237,16 @@ export async function shouldSendInApp(
   type: string
 ): Promise<boolean> {
   return shouldSend(userId, type, "inapp");
+}
+
+/**
+ * Convenience: check if push notification should be sent.
+ */
+export async function shouldSendPush(
+  userId: string,
+  type: string
+): Promise<boolean> {
+  return shouldSend(userId, type, "push");
 }
 
 /**

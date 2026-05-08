@@ -3,16 +3,30 @@ import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { processSubscriptionCheckoutSession } from "@/lib/subscription/checkout-processing";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Stripe apiVersion varies by package version
-  apiVersion: "2026-01-28.clover" as any,
+  apiVersion: "2026-01-28.clover" as Stripe.StripeConfig["apiVersion"],
   typescript: true,
 });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+const getErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
+
+function isRetryableStripeError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const type = String((error as { type?: unknown }).type || "");
+  return (
+    type === "StripeRateLimitError" ||
+    type === "StripeAPIError" ||
+    type === "StripeConnectionError"
+  );
+}
 
 /**
  * Verify a Stripe subscription session and process subscription if webhook hasn't fired yet
@@ -34,8 +48,7 @@ export async function POST(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) => {
                 cookieStore.set(name, value, options);
               });
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-            } catch (error) {
+            } catch {
               // Ignore cookie setting errors
             }
           },
@@ -55,114 +68,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Session ID is required" }, { status: 400 });
     }
 
-    // Retrieve the checkout session
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    // Retrieve the checkout session and expand subscription for more reliable status checks.
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["subscription"],
+    });
+    const sessionUserId = session.metadata?.userId || session.client_reference_id || user.id;
 
-    // Check if payment was successful and it's a subscription
-    if (session.payment_status === "paid" && session.mode === "subscription") {
-      const tier = session.metadata?.tier;
-      const userId = session.metadata?.userId || user.id;
+    if (sessionUserId !== user.id) {
+      return NextResponse.json(
+        { error: "Unauthorized subscription session access" },
+        { status: 403 }
+      );
+    }
 
-      if (!tier) {
-        return NextResponse.json({ error: "Tier not found in session metadata" }, { status: 400 });
-      }
+    const result = await processSubscriptionCheckoutSession(supabase, session);
 
-      // Check if subscription was already processed
-      const { data: existingMembership } = await supabase
-        .from("memberships")
-        .select("id, status")
-        .eq("user_id", userId)
-        .eq("tier", tier)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // If membership exists and is active, webhook already processed it
-      if (existingMembership && existingMembership.status === "active") {
-        return NextResponse.json({
-          success: true,
-          message: "Subscription already processed",
-          alreadyProcessed: true,
-        });
-      }
-
-      // Process subscription manually
-      const startsAt = new Date();
-      const expiresAt = new Date();
-      expiresAt.setMonth(expiresAt.getMonth() + 1);
-
-      const amountTotal = session.amount_total || 0;
-
-      // Update account tier
-      await supabase.from("accounts").update({ tier }).eq("id", userId);
-
-      // Create/update membership
-      const membershipData = {
-        user_id: userId,
-        tier,
-        status: "active",
-        starts_at: startsAt.toISOString(),
-        expires_at: expiresAt.toISOString(),
-        price_cents: amountTotal,
-        updated_at: new Date().toISOString(),
-      };
-
-      if (existingMembership) {
-        await supabase.from("memberships").update(membershipData).eq("id", existingMembership.id);
-      } else {
-        await supabase.from("memberships").insert(membershipData);
-      }
-
-      // Allocate credits
-      const creditAllocation: Record<string, number> = {
-        basic: 5,
-        standard: 15,
-        premium: 30,
-        vip: 999999, // Unlimited
-      };
-
-      const creditsToAdd = creditAllocation[tier.toLowerCase()] || 0;
-
-      if (creditsToAdd > 0) {
-        const { data: currentCredits } = await supabase
-          .from("credits")
-          .select("total, used, rollover")
-          .eq("user_id", userId)
-          .single();
-
-        const totalBefore = currentCredits?.total || 0;
-        const totalAfter = tier.toLowerCase() === "vip" ? 999999 : totalBefore + creditsToAdd;
-
-        await supabase
-          .from("credits")
-          .upsert({
-            user_id: userId,
-            total: totalAfter,
-            used: currentCredits?.used || 0,
-            rollover: currentCredits?.rollover || 0,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "user_id" });
-      }
-
+    return NextResponse.json({
+      ...result,
+      payment_status: session.payment_status,
+      status: session.status,
+      mode: session.mode,
+    });
+  } catch (error: unknown) {
+    console.error("Error verifying subscription:", error);
+    if (isRetryableStripeError(error)) {
       return NextResponse.json({
-        success: true,
-        message: "Subscription processed successfully",
-        tier,
-        creditsAdded: creditsToAdd,
+        success: false,
+        message:
+          "Subscription verification is processing. Please refresh in a few seconds.",
+        retryable: true,
       });
     }
 
-    return NextResponse.json({
-      success: false,
-      message: "Payment not completed or not a subscription",
-      payment_status: session.payment_status,
-      mode: session.mode,
-    });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
-    console.error("Error verifying subscription:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to verify subscription" },
+      { error: getErrorMessage(error, "Failed to verify subscription") },
       { status: 500 }
     );
   }

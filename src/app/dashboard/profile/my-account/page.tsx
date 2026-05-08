@@ -3,6 +3,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
+  ArrowLeft,
+  Home,
+  Compass,
+  CalendarCheck,
+  Wallet,
+  Bell,
   User,
   Pencil,
   Shield,
@@ -22,6 +28,11 @@ import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserSafe } from "@/lib/auth-helpers";
+import { formatRelationshipStatusLabel } from "@/lib/relationship-status";
+import {
+  getPersonalityDisplayText,
+  parseStoredPersonalityPrompts,
+} from "@/lib/profile/personality-prompts";
 import { useRouter } from "next/navigation";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
@@ -61,8 +72,9 @@ type AccountInfo = {
   email: string | null;
   display_name: string | null;
   tier: string | null;
+  active_tier: string | null;
   created_at: string | null;
-  status: string | null;
+  account_status: string | null;
   email_verified: boolean;
 };
 
@@ -109,6 +121,48 @@ const formatDate = (date: string | null): string => {
   }
 };
 
+const getErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
+
+const normalizeAuthProvider = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const extractUserAuthProviders = (user: {
+  app_metadata?: Record<string, unknown> | null;
+  identities?: Array<{ provider?: string | null }> | null;
+  email?: string | null;
+}) => {
+  const providers = new Set<string>();
+  const appMetadata = user.app_metadata || {};
+  const fromMeta = appMetadata.providers;
+
+  if (Array.isArray(fromMeta)) {
+    for (const provider of fromMeta) {
+      const normalized = normalizeAuthProvider(provider);
+      if (normalized) providers.add(normalized);
+    }
+  }
+
+  const primaryProvider = normalizeAuthProvider(appMetadata.provider);
+  if (primaryProvider) providers.add(primaryProvider);
+
+  if (Array.isArray(user.identities)) {
+    for (const identity of user.identities) {
+      const normalized = normalizeAuthProvider(identity?.provider);
+      if (normalized) providers.add(normalized);
+    }
+  }
+
+  if (providers.size === 0 && user.email) {
+    providers.add("email");
+  }
+
+  return Array.from(providers);
+};
+
 /* ─── Password validation rules ──────────────────────────────────── */
 
 function getPasswordStrength(pw: string) {
@@ -132,6 +186,7 @@ export default function MyAccountPage() {
   const [loading, setLoading] = useState(true);
   const [age, setAge] = useState<number | null>(null);
   const [accessToken, setAccessToken] = useState<string>("");
+  const [authProviders, setAuthProviders] = useState<string[]>([]);
 
   // Password change state
   const [showPasswordSection, setShowPasswordSection] = useState(false);
@@ -145,9 +200,21 @@ export default function MyAccountPage() {
   // Account actions state
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDeleteSuccessModal, setShowDeleteSuccessModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+  const [deleteSuccessMessage, setDeleteSuccessMessage] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const personalityPromptEntries = parseStoredPersonalityPrompts(
+    profile?.personality_type
+  );
+  const legacyPersonalityText =
+    personalityPromptEntries.length === 0
+      ? getPersonalityDisplayText(profile?.personality_type)
+      : null;
 
   /* ── Fetch data ──────────────────────────────────────────────────── */
 
@@ -173,6 +240,7 @@ export default function MyAccountPage() {
         }
 
         const user = session.user;
+        setAuthProviders(extractUserAuthProviders(user));
 
         // Fetch profile
         const { data: profileData } = await supabase
@@ -196,9 +264,24 @@ export default function MyAccountPage() {
         // Fetch account
         const { data: accountData, error: accountError } = await supabase
           .from("accounts")
-          .select("id, email, display_name, tier, created_at, status, email_verified")
+          .select("id, email, display_name, tier, created_at, account_status, email_verified")
           .eq("id", user.id)
           .maybeSingle();
+
+        const { data: membershipData } = await supabase
+          .from("memberships")
+          .select("tier, status, expires_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const activeTier =
+          membershipData &&
+          membershipData.status === "active" &&
+          (!membershipData.expires_at || new Date(membershipData.expires_at) > new Date())
+            ? membershipData.tier || null
+            : null;
 
         if (accountError || !accountData) {
           setAccount({
@@ -206,8 +289,9 @@ export default function MyAccountPage() {
             email: user.email || null,
             display_name: user.email?.split("@")[0] || null,
             tier: null,
+            active_tier: activeTier,
             created_at: null,
-            status: "active",
+            account_status: "active",
             email_verified: !!user.email_confirmed_at,
           });
         } else {
@@ -216,8 +300,9 @@ export default function MyAccountPage() {
             email: accountData.email,
             display_name: accountData.display_name,
             tier: accountData.tier || null,
+            active_tier: activeTier,
             created_at: accountData.created_at || null,
-            status: accountData.status || "active",
+            account_status: accountData.account_status || "active",
             email_verified: accountData.email_verified ?? !!user.email_confirmed_at,
           });
         }
@@ -291,13 +376,12 @@ export default function MyAccountPage() {
       if (error) {
         setPwMessage({ type: "error", text: error.message });
       } else {
-        setPwMessage({ type: "success", text: "Password updated successfully!" });
+        setPwMessage({ type: "success", text: "Your password has been successfully changed." });
         setNewPassword("");
         setConfirmPassword("");
         setShowPasswordSection(false);
       }
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    } catch (err) {
+    } catch {
       setPwMessage({ type: "error", text: "An unexpected error occurred." });
     } finally {
       setPwLoading(false);
@@ -307,6 +391,7 @@ export default function MyAccountPage() {
   /* ── Account deactivation ─────────────────────────────────────── */
 
   const handleDeactivate = async () => {
+    const nextAction = account?.account_status === "deactivated" ? "reactivate" : "deactivate";
     try {
       setActionLoading(true);
       setActionMessage(null);
@@ -317,23 +402,37 @@ export default function MyAccountPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ action: "deactivate" }),
+        body: JSON.stringify({ action: nextAction }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to deactivate");
+      if (!res.ok) throw new Error(data.error || `Failed to ${nextAction}`);
 
-      setActionMessage({ type: "success", text: "Account deactivated. Signing you out..." });
+      const updatedAccountStatus = data?.account?.account_status;
+      if (typeof updatedAccountStatus === "string") {
+        setAccount((prev) =>
+          prev
+            ? {
+                ...prev,
+                account_status: updatedAccountStatus,
+              }
+            : prev
+        );
+      }
+
+      setActionMessage({
+        type: "success",
+        text:
+          nextAction === "deactivate"
+            ? "Account deactivated successfully."
+            : "Account reactivated successfully.",
+      });
       setShowDeactivateModal(false);
-
-      // Sign out after a short delay
-      setTimeout(async () => {
-        await supabase.auth.signOut();
-        router.push("/login");
-      }, 2000);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      setActionMessage({ type: "error", text: err.message || "Failed to deactivate account" });
+    } catch (error: unknown) {
+      setActionMessage({
+        type: "error",
+        text: getErrorMessage(error, "Failed to update account status"),
+      });
     } finally {
       setActionLoading(false);
     }
@@ -343,6 +442,20 @@ export default function MyAccountPage() {
 
   const handleDelete = async () => {
     if (deleteConfirmText !== "DELETE") return;
+    if (deleteReason.trim().length < 50) {
+      setActionMessage({
+        type: "error",
+        text: "Please provide at least 50 characters describing why you want to delete your account.",
+      });
+      return;
+    }
+    if (requiresDeletePassword && !deletePassword.trim()) {
+      setActionMessage({
+        type: "error",
+        text: "Please enter your password to confirm deletion request.",
+      });
+      return;
+    }
 
     try {
       setActionLoading(true);
@@ -354,22 +467,46 @@ export default function MyAccountPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ confirm: true }),
+        body: JSON.stringify({
+          confirm: true,
+          reason: deleteReason.trim(),
+          ...(requiresDeletePassword ? { password: deletePassword } : {}),
+        }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to delete account");
+      if (!res.ok) throw new Error(data.error || "Failed to submit deletion request");
 
-      setActionMessage({ type: "success", text: "Account deleted. Redirecting..." });
+      if (typeof data?.account?.account_status === "string") {
+        setAccount((prev) =>
+          prev
+            ? {
+                ...prev,
+                account_status: data.account.account_status,
+              }
+            : prev
+        );
+      }
+
+      const successText = data?.confirmation_email_sent
+        ? "Your deletion request has been submitted successfully. We’ve sent a confirmation email, and your profile is now hidden while support reviews it."
+        : "Your deletion request has been submitted successfully. Your profile is now hidden while support reviews it.";
+
+      setActionMessage({
+        type: "success",
+        text: successText,
+      });
+      setDeleteSuccessMessage(successText);
       setShowDeleteModal(false);
-
-      setTimeout(async () => {
-        await supabase.auth.signOut();
-        router.push("/login");
-      }, 2000);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      setActionMessage({ type: "error", text: err.message || "Failed to delete account" });
+      setShowDeleteSuccessModal(true);
+      setDeleteConfirmText("");
+      setDeleteReason("");
+      setDeletePassword("");
+    } catch (error: unknown) {
+      setActionMessage({
+        type: "error",
+        text: getErrorMessage(error, "Failed to submit deletion request"),
+      });
     } finally {
       setActionLoading(false);
     }
@@ -385,15 +522,39 @@ export default function MyAccountPage() {
   const customerNumber = profile?.user_id ? profile.user_id.substring(0, 9).toUpperCase() : "N/A";
 
   const pwStrength = getPasswordStrength(newPassword);
+  const requiresDeletePassword = authProviders.includes("email");
+
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push("/dashboard/profile");
+  };
+
+  const handleDeleteCompletion = async () => {
+    setShowDeleteSuccessModal(false);
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
+
+  const quickNavItems = [
+    { href: "/dashboard", label: "Home", icon: Home },
+    { href: "/dashboard/discover", label: "Discover", icon: Compass },
+    { href: "/dashboard/meetings", label: "Meetings", icon: CalendarCheck },
+    { href: "/dashboard/wallet", label: "Wallet", icon: Wallet },
+    { href: "/dashboard/notifications", label: "Alerts", icon: Bell },
+    { href: "/dashboard/profile", label: "Profile", icon: User },
+  ] as const;
 
   /* ── InfoField helper component ────────────────────────────────── */
 
   const InfoField = ({ label, value }: { label: string; value: string }) => (
-    <div className="group relative rounded-lg border border-gray-200 bg-gray-50/50 p-2.5 sm:p-3 lg:p-4 hover:border-[#1f419a]/30 hover:bg-gray-50 transition-all">
-      <div className="mb-1 sm:mb-1.5 lg:mb-2">
-        <span className="text-[9px] sm:text-[10px] lg:text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+    <div className="group relative rounded-xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4 transition-colors hover:border-[#1f419a]/30 hover:bg-white">
+      <div>
+        <span className="text-[11px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wide">{label}</span>
       </div>
-      <div className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900 break-words">{value}</div>
+      <div className="mt-1.5 text-sm sm:text-base font-semibold leading-snug text-slate-900 break-words">{value}</div>
     </div>
   );
 
@@ -410,134 +571,173 @@ export default function MyAccountPage() {
   /* ── Render ─────────────────────────────────────────────────────── */
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <Link href="/" className="flex items-center gap-2">
-            <Image src="/matchindeed.svg" alt="Matchindeed" width={140} height={36} style={{ width: "auto", height: "auto" }} />
-          </Link>
+        <div className="mx-auto flex max-w-[1440px] items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleBack}
+              aria-label="Go back"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <Link href="/" className="flex items-center gap-2">
+              <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
+            </Link>
+          </div>
           <NotificationBell />
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl gap-6 px-4 py-6">
+      <div className="mx-auto grid max-w-[1440px] grid-cols-1 gap-6 px-4 py-5 sm:px-6 lg:grid-cols-[260px_minmax(0,1fr)] lg:px-8 lg:py-7 xl:grid-cols-[280px_minmax(0,1fr)]">
         {/* Sidebar */}
-        <aside className="hidden md:block w-56 flex-shrink-0">
+        <aside className="hidden lg:block lg:w-[260px] xl:w-[280px]">
           <Sidebar active="my-account" />
         </aside>
 
         {/* Main Content */}
-        <section className="min-w-0 flex-1 space-y-4 sm:space-y-6 pb-6 sm:pb-8">
+        <section className="min-w-0 pb-8">
+
+            {/* ─── Quick Navigation ─── */}
+            <div className="mb-5 rounded-2xl border border-slate-200/80 bg-white/90 p-2.5 shadow-sm backdrop-blur md:hidden sm:mb-6">
+              <div className="flex gap-2 overflow-x-auto pb-1.5">
+                {quickNavItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:border-[#1f419a]/20 hover:bg-[#eef2ff] hover:text-[#1f419a]"
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* ─── Profile Header Card ─── */}
-            <div className="rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#1f419a] to-[#4463cf] p-4 sm:p-6 lg:p-8 text-white shadow-xl">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-                <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
+            <div className="relative mb-5 overflow-hidden rounded-3xl border border-white/15 bg-gradient-to-br from-[#1f419a] via-[#2d4db0] to-[#4463cf] p-5 text-white shadow-xl sm:mb-6 sm:p-6 lg:sticky lg:top-[5.25rem] lg:z-20 lg:p-7">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex w-full items-start gap-4 sm:gap-5 lg:w-auto lg:flex-1">
                   <div className="relative flex-shrink-0">
-                    <div className="h-16 w-16 sm:h-20 sm:w-20 lg:h-24 lg:w-24 rounded-lg sm:rounded-xl overflow-hidden ring-2 sm:ring-4 ring-white/20 shadow-lg">
+                    <div className="h-20 w-20 overflow-hidden rounded-2xl ring-4 ring-white/20 shadow-lg sm:h-24 sm:w-24">
                       <Image src={primaryPhoto} alt="Profile" width={96} height={96} className="h-full w-full object-cover" unoptimized />
                     </div>
-                    <div className="absolute -bottom-0.5 -right-0.5 sm:-bottom-1 sm:-right-1 h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 rounded-full bg-green-500 border-2 border-white" />
+                    <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full border-2 border-white bg-green-500 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold truncate">
+                  <div className="min-w-0 flex-1">
+                    <h1 className="truncate text-2xl font-bold tracking-tight sm:text-3xl">
                       {profile?.first_name || account?.display_name || "User"}
                     </h1>
-                    <p className="text-white/90 mt-1 text-xs sm:text-sm lg:text-base truncate">
+                    <p className="mt-1.5 truncate text-sm text-white/90 sm:text-base">
                       {age !== null && `Age ${age}`}
                       {profile?.location && ` • ${profile.location}`}
                     </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
-                      <span className="inline-flex items-center rounded-full bg-white/20 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium">
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center rounded-full bg-white/20 px-2.5 py-1 text-xs font-medium">
                         {formatGender(profile?.gender || null)}
                       </span>
                       {profile?.relationship_status && (
-                        <span className="inline-flex items-center rounded-full bg-white/20 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-xs font-medium">
-                          {formatValue(profile.relationship_status)}
+                        <span className="inline-flex items-center rounded-full bg-white/20 px-2.5 py-1 text-xs font-medium">
+                          {formatRelationshipStatusLabel(profile.relationship_status)}
                         </span>
                       )}
                     </div>
                   </div>
                 </div>
-                <Link
-                  href="/dashboard/profile/edit"
-                  className="inline-flex items-center gap-2 rounded-lg sm:rounded-xl bg-white text-[#1f419a] px-3 sm:px-4 lg:px-5 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold hover:bg-gray-50 transition-all shadow-lg hover:shadow-xl w-full sm:w-auto justify-center"
-                >
-                  <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                  Edit Profile
-                </Link>
+                <div className="grid w-full grid-cols-2 gap-2.5 sm:w-auto sm:min-w-[300px]">
+                  <Link
+                    href="/dashboard/profile"
+                    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-white/40 bg-white/10 px-3.5 py-2.5 text-xs font-semibold text-white transition-all hover:bg-white/20 sm:min-h-[44px] sm:text-sm"
+                  >
+                    <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    View Profile
+                  </Link>
+                  <Link
+                    href="/dashboard/profile/edit"
+                    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl bg-white px-3.5 py-2.5 text-xs font-semibold text-[#1f419a] shadow-lg transition-all hover:bg-gray-50 hover:shadow-xl sm:min-h-[44px] sm:text-sm"
+                  >
+                    <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    Edit Profile
+                  </Link>
+                </div>
               </div>
             </div>
 
-            {/* ─── Three Column Layout ─── */}
-            <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+            {/* ─── Content Layout ─── */}
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
 
               {/* ─── Left Column: Quick Info + Security ─── */}
-              <div className="lg:col-span-1 space-y-4">
+              <div className="order-2 space-y-5 xl:order-1 xl:sticky xl:top-24 xl:self-start">
 
                 {/* Quick Info Card */}
-                <div className="rounded-lg sm:rounded-xl bg-white p-4 sm:p-5 shadow-sm ring-1 ring-gray-200">
-                  <h3 className="text-[10px] sm:text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 sm:mb-4">Quick Info</h3>
-                  <div className="space-y-2.5 sm:space-y-3">
-                    <div className="flex items-center justify-between py-1.5 sm:py-2 border-b border-gray-100">
-                      <span className="text-[10px] sm:text-xs lg:text-sm text-gray-600">Customer ID</span>
-                      <span className="text-[10px] sm:text-xs lg:text-sm font-semibold text-gray-900 break-all text-right ml-2">{customerNumber}</span>
+                <div className="rounded-2xl bg-white p-4 sm:p-5 shadow-sm ring-1 ring-slate-200">
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:mb-4">Quick Info</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 py-2">
+                      <span className="text-sm text-slate-600">Customer ID</span>
+                      <span className="ml-2 break-all text-right text-sm font-semibold text-slate-900">{customerNumber}</span>
                     </div>
-                    <div className="flex items-center justify-between py-1.5 sm:py-2 border-b border-gray-100">
-                      <span className="text-[10px] sm:text-xs lg:text-sm text-gray-600">Email</span>
+                    <div className="flex items-center justify-between border-b border-slate-100 py-2">
+                      <span className="text-sm text-slate-600">Email</span>
                       <div className="flex items-center gap-1.5 ml-2">
-                        <span className="text-[10px] sm:text-xs lg:text-sm font-medium text-gray-900 truncate max-w-[100px] sm:max-w-[120px] lg:max-w-[150px]">
+                        <span className="max-w-[180px] truncate text-sm font-medium text-slate-900">
                           {account?.email || "Not set"}
                         </span>
                         {account?.email_verified ? (
-                          <span className="flex items-center gap-0.5 rounded-full bg-green-50 px-1.5 py-0.5 text-[9px] font-medium text-green-700 border border-green-200" title="Email verified">
+                          <span className="flex items-center gap-0.5 rounded-full border border-green-200 bg-green-50 px-1.5 py-0.5 text-[10px] font-medium text-green-700" title="Email verified">
                             <BadgeCheck className="h-3 w-3" />
                           </span>
                         ) : (
-                          <span className="flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 border border-amber-200" title="Email not verified">
+                          <span className="flex items-center gap-0.5 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700" title="Email not verified">
                             <XCircle className="h-3 w-3" />
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center justify-between py-1.5 sm:py-2 border-b border-gray-100">
-                      <span className="text-[10px] sm:text-xs lg:text-sm text-gray-600">Member Since</span>
-                      <span className="text-[10px] sm:text-xs lg:text-sm font-medium text-gray-900">
+                    <div className="flex items-center justify-between border-b border-slate-100 py-2">
+                      <span className="text-sm text-slate-600">Member Since</span>
+                      <span className="text-sm font-medium text-slate-900">
                         {account?.created_at
                           ? new Date(account.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })
                           : "N/A"}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between py-1.5 sm:py-2 border-b border-gray-100">
-                      <span className="text-[10px] sm:text-xs lg:text-sm text-gray-600">Account Status</span>
-                      <span className={`text-[10px] sm:text-xs lg:text-sm font-semibold capitalize px-2 py-0.5 rounded-full ${
-                        account?.status === "active"
+                    <div className="flex items-center justify-between border-b border-slate-100 py-2">
+                      <span className="text-sm text-slate-600">Account Status</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${
+                        account?.account_status === "active"
                           ? "bg-green-50 text-green-700 border border-green-200"
-                          : account?.status === "deactivated"
+                          : account?.account_status === "deactivated"
                           ? "bg-amber-50 text-amber-700 border border-amber-200"
                           : "bg-red-50 text-red-700 border border-red-200"
                       }`}>
-                        {account?.status || "Active"}
+                        {account?.account_status || "active"}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between py-1.5 sm:py-2">
-                      <span className="text-[10px] sm:text-xs lg:text-sm text-gray-600">Subscription</span>
-                      <span className={`text-[10px] sm:text-xs lg:text-sm font-semibold capitalize px-2 py-0.5 rounded-full ${
-                        account?.tier === "vip" ? "bg-purple-100 text-purple-700" :
-                        account?.tier === "premium" ? "bg-yellow-100 text-yellow-700" :
-                        account?.tier === "standard" ? "bg-blue-100 text-blue-700" :
-                        "bg-gray-100 text-gray-700"
+                    <div className="flex items-center justify-between py-2">
+                      <span className="text-sm text-slate-600">Subscription</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${
+                        account?.active_tier === "vip" ? "bg-purple-100 text-purple-700" :
+                        account?.active_tier === "premium" ? "bg-yellow-100 text-yellow-700" :
+                        account?.active_tier === "standard" ? "bg-blue-100 text-blue-700" :
+                        account?.active_tier === "basic" ? "bg-gray-100 text-gray-700" :
+                        "bg-amber-100 text-amber-700"
                       }`}>
-                        {account?.tier || "Basic"}
+                        {account?.active_tier || "Not subscribed"}
                       </span>
                     </div>
                   </div>
                 </div>
 
                 {/* ─── Security & Privacy Card ─── */}
-                <div className="rounded-lg sm:rounded-xl bg-white p-4 sm:p-5 shadow-sm ring-1 ring-gray-200">
-                  <h3 className="text-[10px] sm:text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 sm:mb-4 flex items-center gap-1.5">
+                <div className="rounded-2xl bg-white p-4 sm:p-5 shadow-sm ring-1 ring-slate-200">
+                  <h3 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:mb-4">
                     <Shield className="h-3.5 w-3.5" />
                     Security & Privacy
                   </h3>
@@ -549,7 +749,7 @@ export default function MyAccountPage() {
                         setShowPasswordSection(!showPasswordSection);
                         setPwMessage(null);
                       }}
-                      className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50/50 p-3 text-left hover:border-[#1f419a]/30 hover:bg-gray-50 transition-all"
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-all hover:border-[#1f419a]/30 hover:bg-white"
                     >
                       <div className="flex items-center gap-2.5">
                         <Lock className="h-4 w-4 text-gray-500" />
@@ -558,8 +758,19 @@ export default function MyAccountPage() {
                       <ChevronIcon open={showPasswordSection} />
                     </button>
 
+                    {pwMessage && (
+                      <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
+                        pwMessage.type === "success"
+                          ? "bg-green-50 text-green-700 border border-green-200"
+                          : "bg-red-50 text-red-700 border border-red-200"
+                      }`}>
+                        {pwMessage.type === "success" ? <CheckCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                        {pwMessage.text}
+                      </div>
+                    )}
+
                     {showPasswordSection && (
-                      <div className="rounded-lg border border-[#1f419a]/10 bg-[#1f419a]/[0.02] p-3 sm:p-4 space-y-3">
+                      <div className="space-y-3 rounded-xl border border-[#1f419a]/10 bg-[#1f419a]/[0.02] p-3 sm:p-4">
                         {/* New Password */}
                         <div>
                           <label className="text-[10px] sm:text-xs font-medium text-gray-600 mb-1 block">New Password</label>
@@ -641,16 +852,6 @@ export default function MyAccountPage() {
                           )}
                         </div>
 
-                        {/* Message */}
-                        {pwMessage && (
-                          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
-                            pwMessage.type === "success" ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"
-                          }`}>
-                            {pwMessage.type === "success" ? <CheckCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                            {pwMessage.text}
-                          </div>
-                        )}
-
                         <button
                           type="button"
                           onClick={handleChangePassword}
@@ -666,7 +867,7 @@ export default function MyAccountPage() {
                     {/* Links to other settings */}
                     <Link
                       href="/dashboard/profile/preferences"
-                      className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50/50 p-3 text-left hover:border-[#1f419a]/30 hover:bg-gray-50 transition-all"
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-all hover:border-[#1f419a]/30 hover:bg-white"
                     >
                       <div className="flex items-center gap-2.5">
                         <User className="h-4 w-4 text-gray-500" />
@@ -677,7 +878,7 @@ export default function MyAccountPage() {
 
                     <Link
                       href="/dashboard/profile/subscription"
-                      className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50/50 p-3 text-left hover:border-[#1f419a]/30 hover:bg-gray-50 transition-all"
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-all hover:border-[#1f419a]/30 hover:bg-white"
                     >
                       <div className="flex items-center gap-2.5">
                         <Sparkles className="h-4 w-4 text-gray-500" />
@@ -689,8 +890,8 @@ export default function MyAccountPage() {
                 </div>
 
                 {/* ─── Danger Zone ─── */}
-                <div className="rounded-lg sm:rounded-xl bg-white p-4 sm:p-5 shadow-sm ring-1 ring-red-200/50">
-                  <h3 className="text-[10px] sm:text-xs font-semibold text-red-600 uppercase tracking-wide mb-3 sm:mb-4 flex items-center gap-1.5">
+                <div className="rounded-2xl bg-white p-4 sm:p-5 shadow-sm ring-1 ring-red-200/60">
+                  <h3 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-red-600 sm:mb-4">
                     <AlertTriangle className="h-3.5 w-3.5" />
                     Danger Zone
                   </h3>
@@ -714,8 +915,14 @@ export default function MyAccountPage() {
                     >
                       <Power className="h-4 w-4 text-amber-600" />
                       <div>
-                        <div className="text-xs sm:text-sm font-medium text-amber-800">Deactivate Account</div>
-                        <div className="text-[9px] sm:text-[10px] text-amber-600">Temporarily hide your profile. You can reactivate anytime.</div>
+                        <div className="text-xs sm:text-sm font-medium text-amber-800">
+                          {account?.account_status === "deactivated" ? "Reactivate Account" : "Deactivate Account"}
+                        </div>
+                        <div className="text-[9px] sm:text-[10px] text-amber-600">
+                          {account?.account_status === "deactivated"
+                            ? "Make your profile visible again and resume matching."
+                            : "Temporarily hide your profile. You can reactivate anytime."}
+                        </div>
                       </div>
                     </button>
 
@@ -726,8 +933,8 @@ export default function MyAccountPage() {
                     >
                       <Trash2 className="h-4 w-4 text-red-600" />
                       <div>
-                        <div className="text-xs sm:text-sm font-medium text-red-800">Delete Account</div>
-                        <div className="text-[9px] sm:text-[10px] text-red-600">Permanently delete your account and all data. This cannot be undone.</div>
+                        <div className="text-xs sm:text-sm font-medium text-red-800">Request Account Deletion</div>
+                        <div className="text-[9px] sm:text-[10px] text-red-600">Submit a deletion request. Your profile is hidden while support reviews it.</div>
                       </div>
                     </button>
                   </div>
@@ -735,7 +942,7 @@ export default function MyAccountPage() {
               </div>
 
               {/* ─── Right Column: Profile Sections ─── */}
-              <div className="lg:col-span-2 space-y-3 sm:space-y-4 lg:space-y-6">
+              <div className="order-1 space-y-5 lg:max-h-[calc(100dvh-12.5rem)] lg:overflow-y-auto lg:pr-2 lg:scroll-smooth lg:overscroll-contain xl:order-2 [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent]">
 
                 {/* Basic Information */}
                 <ProfileSection title="Basic Information">
@@ -757,7 +964,7 @@ export default function MyAccountPage() {
 
                 {/* Relationship & Family */}
                 <ProfileSection title="Relationship & Family">
-                  <InfoField label="Relationship Status" value={formatValue(profile?.relationship_status || null)} />
+                  <InfoField label="Relationship Status" value={formatRelationshipStatusLabel(profile?.relationship_status || null) || "Not set"} />
                   <InfoField label="Have Children" value={formatValue(profile?.have_children || null)} />
                   <InfoField label="Want Children" value={formatValue(profile?.want_children || null)} />
                   <InfoField label="Relationship Type" value={formatValue(profile?.relationship_type || null)} />
@@ -779,45 +986,47 @@ export default function MyAccountPage() {
                 </ProfileSection>
 
                 {/* About & Personality */}
-                <div className="rounded-lg sm:rounded-xl bg-white p-4 sm:p-5 lg:p-6 shadow-sm ring-1 ring-gray-200">
-                  <div className="flex items-center justify-between mb-3 sm:mb-4 lg:mb-5">
-                    <h3 className="text-sm sm:text-base lg:text-lg font-bold text-gray-900">About & Personality</h3>
-                    <Link href="/dashboard/profile/edit" className="text-[10px] sm:text-xs lg:text-sm text-[#1f419a] hover:text-[#17357b] font-medium">
+                <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5 lg:p-6">
+                  <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 className="text-base font-bold text-slate-900 sm:text-lg">About & Personality</h3>
+                    <Link href="/dashboard/profile/edit" className="text-xs font-semibold text-[#1f419a] hover:text-[#17357b] sm:text-sm">
                       Edit
                     </Link>
                   </div>
-                  <div className="space-y-2.5 sm:space-y-3 lg:space-y-4">
-                    <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 sm:p-4 lg:p-5">
-                      <span className="text-[9px] sm:text-[10px] lg:text-xs font-medium text-gray-500 uppercase tracking-wide">About Yourself</span>
-                      <p className="mt-2 text-xs sm:text-sm lg:text-base text-gray-700 leading-relaxed break-words">
-                        {profile?.about_yourself || profile?.personality_type || "Not set"}
+                  <div className="space-y-3.5 sm:space-y-4">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4 lg:p-5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs">About Yourself</span>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-700 break-words sm:text-base">
+                        {profile?.about_yourself || legacyPersonalityText || "Not set"}
                       </p>
                     </div>
-                    <InfoField label="Personality Type" value={formatValue(profile?.personality_type || null)} />
+                    {personalityPromptEntries.length > 0 ? (
+                      <div className="grid gap-2">
+                        {personalityPromptEntries.map((prompt) => (
+                          <div
+                            key={prompt.id}
+                            className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4"
+                          >
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs">
+                              {prompt.title}
+                            </span>
+                            <p className="mt-2 text-sm leading-relaxed text-slate-700 break-words sm:text-base">
+                              {prompt.answer}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <InfoField
+                        label="Personality Type"
+                        value={formatValue(legacyPersonalityText)}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex flex-row gap-2 sm:gap-3 pt-3 sm:pt-4 pb-4">
-              <Link
-                href="/dashboard/profile/edit"
-                className="flex-1 rounded-lg sm:rounded-xl bg-gray-900 text-[10px] sm:text-xs lg:text-sm font-semibold text-white shadow-lg hover:bg-gray-800 transition-all h-10 sm:h-11 lg:h-12 flex items-center justify-center gap-1 sm:gap-1.5 lg:gap-2 min-w-0"
-              >
-                <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
-                <span className="hidden sm:inline truncate">Edit Profile</span>
-                <span className="sm:hidden truncate">Edit</span>
-              </Link>
-              <Link
-                href="/dashboard/profile"
-                className="flex-1 rounded-lg sm:rounded-xl bg-[#1f419a] text-[10px] sm:text-xs lg:text-sm font-semibold text-white shadow-lg hover:bg-[#17357b] transition-all h-10 sm:h-11 lg:h-12 flex items-center justify-center gap-1 sm:gap-1.5 lg:gap-2 min-w-0"
-              >
-                <User className="h-3 w-3 sm:h-3.5 sm:w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
-                <span className="hidden sm:inline truncate">View Profile</span>
-                <span className="sm:hidden truncate">View</span>
-              </Link>
-            </div>
         </section>
       </div>
 
@@ -830,13 +1039,16 @@ export default function MyAccountPage() {
                 <Power className="h-5 w-5 text-amber-600" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-gray-900">Deactivate Account</h3>
+                <h3 className="text-lg font-bold text-gray-900">
+                  {account?.account_status === "deactivated" ? "Reactivate Account" : "Deactivate Account"}
+                </h3>
                 <p className="text-xs text-gray-500">This action is reversible</p>
               </div>
             </div>
             <p className="text-sm text-gray-600 mb-6">
-              Your profile will be hidden from other users and you will be signed out. You can reactivate your account
-              at any time by logging back in. Your data will be preserved.
+              {account?.account_status === "deactivated"
+                ? "Your profile will be visible to other users again, and your matching activity will resume."
+                : "Your profile will be hidden from other users. You can reactivate your account at any time."}
             </p>
             <div className="flex gap-3">
               <button
@@ -853,7 +1065,13 @@ export default function MyAccountPage() {
                 className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
               >
                 {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
-                {actionLoading ? "Deactivating..." : "Deactivate"}
+                {actionLoading
+                  ? account?.account_status === "deactivated"
+                    ? "Reactivating..."
+                    : "Deactivating..."
+                  : account?.account_status === "deactivated"
+                  ? "Reactivate"
+                  : "Deactivate"}
               </button>
             </div>
           </div>
@@ -869,16 +1087,58 @@ export default function MyAccountPage() {
                 <Trash2 className="h-5 w-5 text-red-600" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-gray-900">Delete Account Permanently</h3>
-                <p className="text-xs text-red-500 font-medium">This action cannot be undone</p>
+                <h3 className="text-lg font-bold text-gray-900">Request Account Deletion</h3>
+                <p className="text-xs text-red-500 font-medium">Your profile will be hidden immediately</p>
               </div>
             </div>
             <div className="rounded-lg bg-red-50 border border-red-200 p-3 mb-4">
               <p className="text-xs text-red-800 leading-relaxed">
-                <strong>Warning:</strong> This will permanently delete your profile, messages, matches, meeting history,
-                wallet balance, credits, and all associated data. You will not be able to recover any of this information.
+                <strong>Important:</strong> This submits a support review request. Your account will be moved to
+                <span className="font-semibold"> deletion requested</span> and hidden from other users.
               </p>
             </div>
+            <div className="mb-4">
+              <label className="text-xs font-medium text-gray-600 mb-1.5 block">
+                Reason for deletion request (minimum 50 characters)
+              </label>
+              <textarea
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="Please tell us why you want to delete your account..."
+                rows={4}
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400"
+              />
+              <p className={`mt-1 text-[11px] ${deleteReason.trim().length >= 50 ? "text-green-600" : "text-gray-500"}`}>
+                {deleteReason.trim().length} / 50 minimum characters
+              </p>
+            </div>
+            {requiresDeletePassword ? (
+              <div className="mb-4">
+                <label className="text-xs font-medium text-gray-600 mb-1.5 block">Confirm with your password</label>
+                <div className="relative">
+                  <input
+                    type={showDeletePassword ? "text" : "password"}
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDeletePassword((prev) => !prev)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showDeletePassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                <p className="text-xs leading-relaxed text-blue-800">
+                  This account uses Google sign-in. Password confirmation is not required for this deletion request.
+                </p>
+              </div>
+            )}
             <div className="mb-4">
               <label className="text-xs font-medium text-gray-600 mb-1.5 block">
                 Type <strong>DELETE</strong> to confirm
@@ -897,6 +1157,8 @@ export default function MyAccountPage() {
                 onClick={() => {
                   setShowDeleteModal(false);
                   setDeleteConfirmText("");
+                  setDeleteReason("");
+                  setDeletePassword("");
                 }}
                 className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
@@ -905,11 +1167,54 @@ export default function MyAccountPage() {
               <button
                 type="button"
                 onClick={handleDelete}
-                disabled={actionLoading || deleteConfirmText !== "DELETE"}
+                disabled={
+                  actionLoading ||
+                  deleteConfirmText !== "DELETE" ||
+                  deleteReason.trim().length < 50 ||
+                  (requiresDeletePassword && !deletePassword.trim())
+                }
                 className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                {actionLoading ? "Deleting..." : "Delete Forever"}
+                {actionLoading ? "Submitting..." : "Submit Request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteSuccessModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Request Submitted</h3>
+                <p className="text-xs text-green-600 font-medium">Your profile is now hidden</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+              <p className="text-sm leading-relaxed text-green-900">
+                {deleteSuccessMessage ||
+                  "Your deletion request has been submitted successfully. Your profile is now hidden while support reviews it."}
+              </p>
+            </div>
+
+            <p className="mt-4 text-xs leading-relaxed text-gray-500">
+              You’ll be signed out now. If we need more information, MatchIndeed support will contact you by email.
+            </p>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={handleDeleteCompletion}
+                className="flex-1 rounded-lg bg-[#1f419a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#17357b] transition-colors flex items-center justify-center gap-2"
+              >
+                <CheckCircle className="h-4 w-4" />
+                Continue
               </button>
             </div>
           </div>
@@ -939,17 +1244,16 @@ function ChevronIcon({ open }: { open: boolean }) {
 /** Reusable profile section wrapper */
 function ProfileSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg sm:rounded-xl bg-white p-4 sm:p-5 lg:p-6 shadow-sm ring-1 ring-gray-200">
-      <div className="flex items-center justify-between mb-3 sm:mb-4 lg:mb-5">
-        <h3 className="text-sm sm:text-base lg:text-lg font-bold text-gray-900">{title}</h3>
-        <Link href="/dashboard/profile/edit" className="text-[10px] sm:text-xs lg:text-sm text-[#1f419a] hover:text-[#17357b] font-medium">
+    <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5 lg:p-6">
+      <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 className="text-base font-bold text-slate-900 sm:text-lg">{title}</h3>
+        <Link href="/dashboard/profile/edit" className="text-xs font-semibold text-[#1f419a] hover:text-[#17357b] sm:text-sm">
           Edit
         </Link>
       </div>
-      <div className="grid grid-cols-1 gap-2.5 sm:gap-3 lg:gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-3.5 lg:gap-4">
         {children}
       </div>
     </div>
   );
 }
-

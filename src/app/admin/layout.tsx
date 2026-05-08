@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { ADMIN_LOGIN_PATH, matchesAdminPathname } from "@/lib/admin/path";
 import AdminSidebar from "./components/AdminSidebar";
 import { Loader2 } from "lucide-react";
 
 /**
  * Admin role type
  */
-type AdminRole = "moderator" | "admin" | "superadmin";
+type AdminRole = "admin" | "superadmin";
 
 /**
  * Admin user data
@@ -19,6 +20,7 @@ type AdminUser = {
   email: string;
   role: AdminRole;
   display_name: string | null;
+  permissions: string[];
 };
 
 /**
@@ -40,7 +42,7 @@ export default function AdminLayout({
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
 
   // Skip auth check for login page
-  const isLoginPage = pathname === "/admin/login";
+  const isLoginPage = matchesAdminPathname(pathname, ADMIN_LOGIN_PATH);
 
   useEffect(() => {
     // Don't check auth on login page
@@ -56,7 +58,7 @@ export default function AdminLayout({
         
         if (sessionError || !session) {
           console.debug("No admin session found");
-          router.push("/admin/login");
+          router.push(ADMIN_LOGIN_PATH);
           return;
         }
 
@@ -69,28 +71,50 @@ export default function AdminLayout({
 
         if (accountError || !account) {
           console.error("Error fetching admin account:", accountError);
-          router.push("/admin/login");
+          router.push(ADMIN_LOGIN_PATH);
           return;
         }
 
         // Check if user has admin role
-        const adminRoles = ["moderator", "admin", "superadmin"];
+        const adminRoles = ["admin", "superadmin"];
         if (!adminRoles.includes(account.role)) {
           console.debug("User does not have admin role:", account.role);
-          router.push("/admin/login?error=unauthorized");
+          router.push(`${ADMIN_LOGIN_PATH}?error=unauthorized`);
           return;
         }
 
-        // Set admin user data
+        let permissions: string[] = [];
+        if (account.role === "superadmin") {
+          permissions = ["*"];
+        } else {
+          const permissionsResponse = await fetch("/api/admin/permissions/me", {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+          const permissionsData = await permissionsResponse.json().catch(() => ({}));
+
+          if (!permissionsResponse.ok) {
+            console.error("Error fetching admin permissions:", permissionsData);
+            router.push(`${ADMIN_LOGIN_PATH}?error=unauthorized`);
+            return;
+          }
+
+          permissions = Array.isArray(permissionsData.permissions)
+            ? permissionsData.permissions
+            : [];
+        }
+
         setAdminUser({
           id: account.id,
           email: account.email,
           role: account.role as AdminRole,
           display_name: account.display_name,
+          permissions,
         });
       } catch (error) {
         console.error("Admin auth error:", error);
-        router.push("/admin/login");
+        router.push(ADMIN_LOGIN_PATH);
       } finally {
         setLoading(false);
       }
@@ -128,6 +152,7 @@ export default function AdminLayout({
       <AdminSidebar 
         role={adminUser.role} 
         userName={adminUser.display_name || adminUser.email}
+        permissions={adminUser.permissions}
       />
 
       {/* Main Content */}

@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getAuthenticatedAdmin } from "@/lib/auth-helpers";
+import { DEFAULT_SUBSCRIPTION_PRICING } from "@/lib/subscription/config";
+
+type SubscriptionPricingRow = {
+  tier_id: string;
+  price_ngn: number;
+  price_usd: number;
+  price_gbp: number;
+};
+
+type UpdatePricingBody = {
+  tier_id: string;
+  price_ngn: number;
+  price_usd: number;
+  price_gbp: number;
+};
 
 /**
  * GET /api/subscription-pricing
@@ -9,8 +24,7 @@ import { getAuthenticatedAdmin } from "@/lib/auth-helpers";
  * This endpoint allows administrators to configure pricing that overrides
  * the base pricing in the subscription page.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     // Check if admin pricing exists in database
     // You would need to create a 'subscription_pricing' table with columns:
@@ -33,8 +47,7 @@ export async function GET(request: NextRequest) {
 
     // If admin pricing exists, return it
     if (adminPricing && adminPricing.length > 0) {
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tiers = adminPricing.map((p: any) => ({
+      const tiers = (adminPricing as SubscriptionPricingRow[]).map((p) => ({
         id: p.tier_id,
         pricing: {
           ngn: p.price_ngn,
@@ -51,24 +64,23 @@ export async function GET(request: NextRequest) {
       tiers: [
         {
           id: "basic",
-          pricing: { ngn: 10000, usd: 7, gbp: 5.5 },
+          pricing: DEFAULT_SUBSCRIPTION_PRICING.basic,
         },
         {
           id: "standard",
-          pricing: { ngn: 31500, usd: 20, gbp: 16 },
+          pricing: DEFAULT_SUBSCRIPTION_PRICING.standard,
         },
         {
           id: "premium",
-          pricing: { ngn: 63000, usd: 43, gbp: 34 },
+          pricing: DEFAULT_SUBSCRIPTION_PRICING.premium,
         },
         {
           id: "vip",
-          pricing: { ngn: 1500000, usd: 1000, gbp: 800 },
+          pricing: DEFAULT_SUBSCRIPTION_PRICING.vip,
         },
       ],
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in subscription-pricing API:", error);
     return NextResponse.json(
       { error: "Failed to fetch pricing" },
@@ -96,7 +108,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
+    const body = (await request.json()) as Partial<UpdatePricingBody>;
     const { tier_id, price_ngn, price_usd, price_gbp } = body;
 
     if (!tier_id || price_ngn === undefined || price_usd === undefined || price_gbp === undefined) {
@@ -166,11 +178,11 @@ export async function POST(request: NextRequest) {
       pricing: data,
       message: `Pricing for ${tier_id} tier updated successfully`,
     });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to update pricing";
     console.error("Error updating subscription pricing:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to update pricing" },
+      { error: message },
       { status: 500 }
     );
   }

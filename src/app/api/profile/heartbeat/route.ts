@@ -14,6 +14,19 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+let hasLastActiveAtColumn: boolean | null = null;
+
+function isMissingLastActiveAtColumn(error: { code?: string; message?: string } | null) {
+  if (!error) return false;
+  const code = error.code ?? "";
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    code === "42703" || // postgres undefined_column
+    code === "PGRST204" || // postgrest schema cache missing column
+    message.includes("last_active_at")
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get("authorization");
@@ -31,19 +44,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // If we already know the column is unavailable, skip write attempts.
+    if (hasLastActiveAtColumn === false) {
+      return NextResponse.json({ ok: true });
+    }
+
     // Update last_active_at — gracefully handle missing column
     const { error: updateError } = await supabaseAdmin
       .from("accounts")
       .update({ last_active_at: new Date().toISOString() })
       .eq("id", user.id);
 
-    if (updateError && updateError.code === "42703") {
-      // Column doesn't exist yet — migration not run, silently skip
+    if (isMissingLastActiveAtColumn(updateError)) {
+      // Column doesn't exist in the current DB/schema cache.
+      // Memoize to avoid logging the same non-critical error on every heartbeat.
+      hasLastActiveAtColumn = false;
       return NextResponse.json({ ok: true });
     }
 
     if (updateError) {
       console.error("Heartbeat update error:", updateError);
+    } else {
+      hasLastActiveAtColumn = true;
     }
 
     return NextResponse.json({ ok: true });

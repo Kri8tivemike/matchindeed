@@ -9,15 +9,26 @@
  * All business logic (auth, account/wallet/credit setup, progress routing) preserved.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, type ComponentProps } from "react";
 import { useRouter } from "next/navigation";
 export const dynamic = "force-dynamic";
-import Link from "next/link";
+import NextLink from "next/link";
 import { supabase } from "../../lib/supabase";
-import { Eye, EyeOff, Mail, Lock, Loader2, Video, Shield, Heart } from "lucide-react";
+import {
+  resolvePostLoginRedirect,
+  resolveUserProgressState,
+} from "@/lib/user-progress";
+import { COORDINATOR_LOGIN_PATH } from "@/lib/coordinator/path";
+import { Eye, EyeOff, Mail, Lock, Loader2, Video, Shield, Heart, CheckCircle2 } from "lucide-react";
 import Image from "next/image";
 import CloudflareTurnstile from "@/components/CloudflareTurnstile";
 import { GoogleSignInButton } from "@/components/SocialAuthButtons";
+
+type NextLinkProps = ComponentProps<typeof NextLink>;
+
+function Link({ prefetch, ...props }: NextLinkProps) {
+  return <NextLink {...props} prefetch={prefetch ?? false} />;
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -26,10 +37,20 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const authDisabled = process.env.NEXT_PUBLIC_AUTH_DISABLED === "true";
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const handleTurnstileVerify = useCallback((token: string) => setTurnstileToken(token), []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    const message = url.searchParams.get("message");
+    if (!message) return;
+
+    setSuccessMessage(message);
+  }, []);
 
   // ---------------------------------------------------------------
   // Handle Login — all existing logic preserved
@@ -44,6 +65,20 @@ export default function LoginPage() {
         router.push("/dashboard/discover");
         return;
       }
+
+      if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) {
+        const verifyRes = await fetch("/api/auth/verify-turnstile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: turnstileToken }),
+        });
+        if (!verifyRes.ok) {
+          setError("Security check failed. Please try again.");
+          setLoading(false);
+          return;
+        }
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
       if (error) {
@@ -64,76 +99,63 @@ export default function LoginPage() {
 
       if (data.user && !data.user.email_confirmed_at) {
         setError("Please verify your email before signing in. Check your inbox for the verification link.");
-        await supabase.auth.resend({ type: "signup", email: data.user.email! });
+        if (data.user.email) {
+          await fetch("/api/auth/resend-verification", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: data.user.email }),
+          }).catch(() => undefined);
+        }
         return;
       }
 
-      // Create or update account, wallet, credits
       if (data.user) {
-        const { data: existingAccount } = await supabase
-          .from("accounts")
-          .select("id")
-          .eq("id", data.user.id)
-          .single();
-
-        if (!existingAccount) {
-          await supabase.from("accounts").insert({
-            id: data.user.id,
-            email: data.user.email,
-            display_name: data.user.email?.split("@")[0] || "User",
-            tier: "basic",
-          });
-        } else {
-          await supabase
-            .from("accounts")
-            .update({ email: data.user.email })
-            .eq("id", data.user.id);
+        const accessToken = data.session?.access_token;
+        if (!accessToken) {
+          setError("We couldn't verify your session. Please try signing in again.");
+          setLoading(false);
+          return;
         }
 
-        const { data: existingWallet } = await supabase
-          .from("wallets")
-          .select("user_id")
-          .eq("user_id", data.user.id)
-          .single();
-        if (!existingWallet) {
-          await supabase.from("wallets").insert({ user_id: data.user.id, balance_cents: 0 });
-        }
+        const provisionRes = await fetch("/api/auth/provision", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
 
-        const { data: existingCredits } = await supabase
-          .from("credits")
-          .select("user_id")
-          .eq("user_id", data.user.id)
-          .single();
-        if (!existingCredits) {
-          await supabase.from("credits").insert({ user_id: data.user.id, total: 0, used: 0, rollover: 0 });
+        if (!provisionRes.ok) {
+          const provisionData = await provisionRes.json().catch(() => null);
+          await supabase.auth.signOut().catch(() => undefined);
+          setError(
+            provisionData?.error ||
+              "We couldn't finish preparing your account. Please try again."
+          );
+          setLoading(false);
+          return;
         }
       }
 
       // Route based on progress
-      const next = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("next") : null;
-      if (next) {
-        router.push(next);
-      } else if (data.user) {
-        let { data: progress } = await supabase
-          .from("user_progress")
-          .select("profile_completed, preferences_completed")
-          .eq("user_id", data.user.id)
+      const next =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("next")
+          : null;
+      if (data.user) {
+        const { data: account } = await supabase
+          .from("accounts")
+          .select("role")
+          .eq("id", data.user.id)
           .maybeSingle();
 
-        if (!progress) {
-          const { data: newProgress } = await supabase.from("user_progress").upsert([
-            { user_id: data.user.id, profile_completed: false, preferences_completed: false }
-          ], { onConflict: "user_id" }).select().single();
-          progress = newProgress || { profile_completed: false, preferences_completed: false };
+        if (account?.role === "coordinator") {
+          await supabase.auth.signOut().catch(() => undefined);
+          router.push(`${COORDINATOR_LOGIN_PATH}?error=use_coordinator_login`);
+          return;
         }
 
-        if (!progress?.profile_completed) {
-          router.push("/dashboard/profile/edit");
-        } else if (!progress?.preferences_completed) {
-          router.push("/dashboard/profile/preferences");
-        } else {
-          router.push("/dashboard/discover");
-        }
+        const progress = await resolveUserProgressState(supabase, data.user.id);
+        router.push(resolvePostLoginRedirect(progress, next));
       } else {
         router.push("/dashboard/discover");
       }
@@ -158,11 +180,11 @@ export default function LoginPage() {
         {/* Logo */}
         <Link href="/" className="relative z-10">
           <Image
-            src="/matchindeed.svg"
+            src="/matchindeed-logo-white.png"
             alt="MatchIndeed"
             width={160}
             height={42}
-            className="brightness-0 invert"
+           
             style={{ width: "auto", height: "auto" }}
           />
         </Link>
@@ -207,7 +229,7 @@ export default function LoginPage() {
           {/* Mobile logo */}
           <div className="mb-8 text-center lg:hidden">
             <Link href="/" className="inline-block">
-              <Image src="/matchindeed.svg" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
+              <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
             </Link>
           </div>
 
@@ -226,6 +248,18 @@ export default function LoginPage() {
               {error && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {error}
+                </div>
+              )}
+
+              {successMessage && (
+                <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+                    <div>
+                      <p className="font-medium">Password updated successfully</p>
+                      <p>{successMessage}</p>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -292,12 +326,12 @@ export default function LoginPage() {
               </div>
 
               {/* Bot Protection */}
-              <CloudflareTurnstile onVerify={handleTurnstileVerify} />
+              <CloudflareTurnstile onVerify={handleTurnstileVerify} onExpire={() => setTurnstileToken(null)} />
 
               {/* Submit */}
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !!(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-3 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
@@ -338,7 +372,7 @@ export default function LoginPage() {
 
             {/* Register Link */}
             <Link
-              href="/register"
+              href="/?focusSignup=1"
               className="flex w-full items-center justify-center rounded-xl border border-gray-200 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
             >
               Create new account

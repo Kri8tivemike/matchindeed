@@ -14,6 +14,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Calendar,
   Clock,
@@ -21,18 +22,18 @@ import {
   Video,
   Check,
   X,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  ChevronRight,
   RefreshCw,
   Ban,
   CreditCard,
   ClipboardCheck,
   Loader2,
   ArrowRight,
+  Eye,
 } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
 import CancellationConfirmModal from "@/components/CancellationConfirmModal";
 import NotificationBell from "@/components/NotificationBell";
+import ProfileDetailModal from "@/components/ProfileDetailModal";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
 
@@ -44,7 +45,10 @@ type Meeting = {
   host_id: string;
   type: "group" | "one_on_one";
   status: "pending" | "confirmed" | "canceled" | "completed";
+  workflow_state?: string | null;
   scheduled_at: string;
+  canceled_at?: string | null;
+  completed_at?: string | null;
   location_pref: string | null;
   fee_cents: number | null;
   charge_status: "pending" | "captured" | "refunded" | "pending_review";
@@ -69,6 +73,17 @@ type MeetingParticipant = {
 
 type TabType = "upcoming" | "pending" | "past" | "all";
 
+const resolveMeetingTab = (tab: string | null): TabType => {
+  if (tab === "pending" || tab === "past" || tab === "all") {
+    return tab;
+  }
+
+  return "upcoming";
+};
+
+const BUY_CREDITS_HREF = "/dashboard/wallet?open=credits&source=meeting_insufficient_credits";
+const TOP_UP_WALLET_HREF = "/dashboard/wallet?open=topup&source=meeting_insufficient_credits";
+
 // ---------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------
@@ -86,6 +101,147 @@ const formatTime = (dateString: string): string =>
     hour12: true,
   });
 
+const formatStatusDateTime = (dateString: string): string =>
+  new Date(dateString).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+const isValidTimestamp = (value: string | null | undefined): value is string => {
+  if (!value) return false;
+  return !Number.isNaN(new Date(value).getTime());
+};
+
+const getMeetingAcceptedAt = (meeting: Meeting): string | null => {
+  const decisionParticipants =
+    meeting.participants?.filter((participant) => participant.role !== "coordinator") || [];
+
+  if (
+    decisionParticipants.length === 0 ||
+    !decisionParticipants.every(
+      (participant) =>
+        participant.response === "accepted" &&
+        isValidTimestamp(participant.responded_at)
+    )
+  ) {
+    return null;
+  }
+
+  return decisionParticipants.reduce((latest, participant) => {
+    if (!participant.responded_at) return latest;
+    if (!latest) return participant.responded_at;
+    return new Date(participant.responded_at) > new Date(latest)
+      ? participant.responded_at
+      : latest;
+  }, null as string | null);
+};
+
+const getMeetingCanceledAt = (meeting: Meeting): string | null => {
+  if (isValidTimestamp(meeting.canceled_at)) {
+    return meeting.canceled_at;
+  }
+
+  const participantDecisionTimes =
+    meeting.participants
+      ?.map((participant) => participant.responded_at)
+      .filter(isValidTimestamp) || [];
+
+  if (participantDecisionTimes.length === 0) {
+    return null;
+  }
+
+  return participantDecisionTimes.reduce((latest, timestamp) =>
+    new Date(timestamp) > new Date(latest) ? timestamp : latest
+  );
+};
+
+const getMeetingActivityTimestamp = (meeting: Meeting): string => {
+  if (meeting.status === "canceled") {
+    return (
+      getMeetingCanceledAt(meeting) ||
+      meeting.finalized_at ||
+      meeting.completed_at ||
+      meeting.created_at ||
+      meeting.scheduled_at
+    );
+  }
+
+  if (meeting.status === "completed") {
+    return (
+      meeting.finalized_at ||
+      meeting.completed_at ||
+      getMeetingAcceptedAt(meeting) ||
+      meeting.created_at ||
+      meeting.scheduled_at
+    );
+  }
+
+  return (
+    getMeetingAcceptedAt(meeting) ||
+    meeting.created_at ||
+    meeting.scheduled_at
+  );
+};
+
+const compareMeetingsByRecentActivity = (a: Meeting, b: Meeting): number =>
+  new Date(getMeetingActivityTimestamp(b)).getTime() -
+  new Date(getMeetingActivityTimestamp(a)).getTime();
+
+const getParticipantDisplayName = (participant?: MeetingParticipant): string => {
+  if (!participant) return "MatchIndeed member";
+  return (
+    participant.user_profile?.first_name ||
+    participant.user?.display_name ||
+    participant.user?.email?.split("@")[0] ||
+    "MatchIndeed member"
+  );
+};
+
+const getCancellationActorLabel = (
+  meeting: Meeting,
+  currentUserId: string | null
+): string | null => {
+  if (!meeting.canceled_by) return null;
+  if (meeting.canceled_by === currentUserId) return "you";
+
+  if (["host", "guest", "coordinator"].includes(meeting.canceled_by)) {
+    const roleParticipant = meeting.participants?.find(
+      (participant) => participant.role === meeting.canceled_by
+    );
+
+    if (roleParticipant) {
+      return roleParticipant.user_id === currentUserId
+        ? "you"
+        : getParticipantDisplayName(roleParticipant);
+    }
+  }
+
+  const cancelingParticipant = meeting.participants?.find(
+    (participant) => participant.user_id === meeting.canceled_by
+  );
+
+  if (cancelingParticipant) {
+    return getParticipantDisplayName(cancelingParticipant);
+  }
+
+  return "MatchIndeed team";
+};
+
+const isPastMeeting = (meeting: Meeting): boolean => {
+  const scheduledAt = new Date(meeting.scheduled_at);
+  const hasStarted = !Number.isNaN(scheduledAt.getTime()) && scheduledAt < new Date();
+
+  return (
+    meeting.status === "completed" ||
+    meeting.status === "canceled" ||
+    (meeting.status === "confirmed" && hasStarted)
+  );
+};
+
 const statusConfig: Record<string, { bg: string; text: string; dot: string }> = {
   confirmed: { bg: "bg-green-50", text: "text-green-700", dot: "bg-green-500" },
   pending: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-500" },
@@ -97,21 +253,34 @@ const statusConfig: Record<string, { bg: string; text: string; dot: string }> = 
 // Component
 // ---------------------------------------------------------------
 export default function MeetingsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabType>("upcoming");
+  const [activeTab, setActiveTab] = useState<TabType>(
+    resolveMeetingTab(searchParams.get("tab"))
+  );
   const [processing, setProcessing] = useState<string | null>(null);
+  const [profilePreviewUserId, setProfilePreviewUserId] = useState<string | null>(null);
 
   // Cancellation modal
   const [cancelModal, setCancelModal] = useState<{
     isOpen: boolean;
     meetingId: string;
     isConfirmed: boolean;
-    cancellationFeeCents: number;
-  }>({ isOpen: false, meetingId: "", isConfirmed: false, cancellationFeeCents: 0 });
+    cancellationFeeCredits: number;
+    creditRefunded: boolean;
+  }>({
+    isOpen: false,
+    meetingId: "",
+    isConfirmed: false,
+    cancellationFeeCredits: 0,
+    creditRefunded: false,
+  });
 
   // Finalization modal
   const [finalizeModal, setFinalizeModal] = useState<{ isOpen: boolean; meetingId: string }>({
@@ -133,106 +302,99 @@ export default function MeetingsPage() {
     const fetchMeetings = async () => {
       try {
         const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-        if (userError || !user) {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
+        if (sessionError || !user) {
           setLoading(false);
           return;
         }
         setUserId(user.id);
-
-        // Host meetings
-        const { data: hostMeetings } = await supabase
-          .from("meetings")
-          .select(
-            `*, meeting_participants (user_id, role, response, responded_at, user:accounts!meeting_participants_user_id_fkey(id, tier, display_name, email))`
-          )
-          .eq("host_id", user.id)
-          .order("scheduled_at", { ascending: false });
-
-        // Participant meetings
-        const { data: participantMeetings } = await supabase
-          .from("meeting_participants")
-          .select(
-            `meeting_id, role, response, responded_at, meetings!meeting_id (id, host_id, type, status, scheduled_at, location_pref, fee_cents, charge_status, created_at, meeting_participants (user_id, role, response, user:accounts!meeting_participants_user_id_fkey(id, tier, display_name, email)))`
-          )
-          .eq("user_id", user.id)
-          .neq("role", "host");
-
-        const allMeetings: Meeting[] = [];
-
-        (hostMeetings || []).forEach((m: Record<string, unknown>) => {
-          const parts = (m.meeting_participants as Array<Record<string, unknown>>) || [];
-          allMeetings.push({
-            ...(m as unknown as Meeting),
-            participants: parts.map((p) => ({
-              user_id: p.user_id as string,
-              role: p.role as MeetingParticipant["role"],
-              response: p.response as MeetingParticipant["response"],
-              responded_at: p.responded_at as string | null,
-              user: (p.user as MeetingParticipant["user"]) || undefined,
-            })),
-          });
+        const response = await fetch("/api/meetings", {
+          headers: {
+            Authorization: `Bearer ${user ? session?.access_token || "" : ""}`,
+          },
         });
 
-        (participantMeetings || []).forEach((p: Record<string, unknown>) => {
-          const meeting = p.meetings as Record<string, unknown> | null;
-          if (!meeting || allMeetings.find((m) => m.id === meeting.id)) return;
-          const parts =
-            (meeting.meeting_participants as Array<Record<string, unknown>>) || [];
-          allMeetings.push({
-            ...(meeting as unknown as Meeting),
-            participants: parts.map((pt) => ({
-              user_id: pt.user_id as string,
-              role: pt.role as MeetingParticipant["role"],
-              response: pt.response as MeetingParticipant["response"],
-              responded_at: pt.responded_at as string | null,
-              user: (pt.user as MeetingParticipant["user"]) || undefined,
-            })),
-          });
-        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(
+            typeof data?.error === "string"
+              ? data.error
+              : "Failed to load appointments."
+          );
+        }
 
-        setMeetings(allMeetings);
+        const apiMeetings = Array.isArray(data?.meetings)
+          ? (data.meetings as Meeting[])
+          : [];
+
+        setMeetings(
+          apiMeetings.map((meeting) => ({
+            ...meeting,
+            canceled_at: meeting.canceled_at || null,
+            completed_at: meeting.completed_at || null,
+            finalized_at: meeting.finalized_at || meeting.completed_at || null,
+          }))
+        );
       } catch (error) {
         console.error("Error fetching meetings:", error);
+        toast.error("We couldn't load your appointments right now. Please refresh and try again.");
       } finally {
         setLoading(false);
       }
     };
 
     fetchMeetings();
-  }, []);
+  }, [toast]);
+
+  useEffect(() => {
+    setActiveTab(resolveMeetingTab(searchParams.get("tab")));
+  }, [searchParams]);
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "upcoming") {
+      params.delete("tab");
+    } else {
+      params.set("tab", tab);
+    }
+
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+      scroll: false,
+    });
+  };
 
   // ---------------------------------------------------------------
   // Filtered meetings
   // ---------------------------------------------------------------
-  const filteredMeetings = meetings.filter((m) => {
-    const now = new Date();
-    const d = new Date(m.scheduled_at);
-    switch (activeTab) {
-      case "upcoming":
-        return m.status === "confirmed" && d > now;
-      case "pending":
-        return m.status === "pending";
-      case "past":
-        return d < now || m.status === "completed" || m.status === "canceled";
-      default:
-        return true;
-    }
-  });
+  const filteredMeetings = meetings
+    .filter((m) => {
+      const now = new Date();
+      const d = new Date(m.scheduled_at);
+      switch (activeTab) {
+        case "upcoming":
+          return m.status === "confirmed" && d > now;
+        case "pending":
+          return m.status === "pending";
+        case "past":
+          return isPastMeeting(m);
+        default:
+          return true;
+      }
+    })
+    .sort(compareMeetingsByRecentActivity);
 
   const counts = {
     upcoming: meetings.filter(
       (m) => m.status === "confirmed" && new Date(m.scheduled_at) > new Date()
     ).length,
     pending: meetings.filter((m) => m.status === "pending").length,
-    past: meetings.filter(
-      (m) =>
-        new Date(m.scheduled_at) < new Date() ||
-        m.status === "completed" ||
-        m.status === "canceled"
-    ).length,
+    past: meetings.filter((m) => isPastMeeting(m)).length,
     all: meetings.length,
   };
 
@@ -244,30 +406,57 @@ export default function MeetingsPage() {
     setProcessing(meetingId);
 
     try {
-      const { error: participantError } = await supabase
-        .from("meeting_participants")
-        .update({ response: "accepted", responded_at: new Date().toISOString() })
-        .eq("meeting_id", meetingId)
-        .eq("user_id", userId);
-      if (participantError) throw participantError;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      const { data: participants } = await supabase
-        .from("meeting_participants")
-        .select("response")
-        .eq("meeting_id", meetingId);
-
-      const allAccepted = participants?.every((p) => p.response === "accepted");
-
-      if (allAccepted) {
-        await supabase.from("meetings").update({ status: "confirmed" }).eq("id", meetingId);
+      if (!session) {
+        toast.error("Please log in and try again.");
+        return;
       }
+
+      const response = await fetch("/api/meetings", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ meeting_id: meetingId, action: "accept" }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 402) {
+          toast.errorActions(
+            data.error || "Insufficient credits to accept this meeting.",
+            [
+              { label: "Buy Credits", href: BUY_CREDITS_HREF },
+              { label: "Top Up Wallet", href: TOP_UP_WALLET_HREF },
+            ]
+          );
+          return;
+        }
+        if (response.status === 403) {
+          toast.error(data.message || "Your current subscription cannot accept this meeting.");
+          return;
+        }
+        toast.error(data.error || "Failed to accept meeting. Please try again.");
+        return;
+      }
+
+      const nextStatus =
+        data.meeting_status === "confirmed" ? ("confirmed" as const) : ("pending" as const);
 
       setMeetings((prev) =>
         prev.map((m) =>
           m.id === meetingId
             ? {
                 ...m,
-                status: allAccepted ? ("confirmed" as const) : m.status,
+                status: nextStatus,
+                workflow_state:
+                  typeof data.workflow_state === "string"
+                    ? data.workflow_state
+                    : m.workflow_state || null,
                 participants: m.participants?.map((p) =>
                   p.user_id === userId
                     ? { ...p, response: "accepted" as const, responded_at: new Date().toISOString() }
@@ -278,27 +467,13 @@ export default function MeetingsPage() {
         )
       );
 
-      if (allAccepted) {
-        try {
-          const {
-            data: { session },
-          } = await supabase.auth.getSession();
-          if (session) {
-            await fetch("/api/meetings/notifications/schedule", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({ meeting_id: meetingId }),
-            });
-          }
-        } catch {
-          // Non-critical
-        }
-      }
-
-      toast.success("Meeting request accepted!");
+      toast.success(
+        data.starter_trial_consumed
+          ? "Meeting accepted. Your free starter slot is now used, and MatchIndeed admin will review this booking next."
+          : data.requires_admin_approval
+            ? "Meeting accepted. Waiting for admin approval before the Zoom meeting is created."
+            : "Meeting request accepted!"
+      );
     } catch {
       toast.error("Failed to accept meeting. Please try again.");
     } finally {
@@ -311,13 +486,29 @@ export default function MeetingsPage() {
     setProcessing(meetingId);
 
     try {
-      await supabase
-        .from("meeting_participants")
-        .update({ response: "declined", responded_at: new Date().toISOString() })
-        .eq("meeting_id", meetingId)
-        .eq("user_id", userId);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      await supabase.from("meetings").update({ status: "canceled" }).eq("id", meetingId);
+      if (!session) {
+        toast.error("Please log in and try again.");
+        return;
+      }
+
+      const response = await fetch("/api/meetings", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ meeting_id: meetingId, action: "decline" }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        toast.error(data.error || "Failed to decline meeting.");
+        return;
+      }
 
       setMeetings((prev) =>
         prev.map((m) =>
@@ -325,6 +516,8 @@ export default function MeetingsPage() {
             ? {
                 ...m,
                 status: "canceled" as const,
+                workflow_state: "canceled",
+                canceled_at: new Date().toISOString(),
                 participants: m.participants?.map((p) =>
                   p.user_id === userId
                     ? { ...p, response: "declined" as const, responded_at: new Date().toISOString() }
@@ -346,26 +539,70 @@ export default function MeetingsPage() {
   // ---------------------------------------------------------------
   // Cancel
   // ---------------------------------------------------------------
-  const openCancelModal = (meeting: Meeting) => {
-    setCancelModal({
-      isOpen: true,
-      meetingId: meeting.id,
-      isConfirmed: meeting.status === "confirmed",
-      cancellationFeeCents: meeting.cancellation_fee_cents || meeting.fee_cents || 0,
-    });
+  const openCancelModal = async (meeting: Meeting) => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const response = await fetch(
+        `/api/meetings/cancel?meeting_id=${encodeURIComponent(meeting.id)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session?.access_token || ""}`,
+          },
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        toast.error(data.error || data.message || "Unable to load cancellation details.");
+        return;
+      }
+
+      setCancelModal({
+        isOpen: true,
+        meetingId: meeting.id,
+        isConfirmed: meeting.status === "confirmed",
+        cancellationFeeCredits:
+          data.cancellation_fee_credits || 0,
+        creditRefunded: Boolean(data.fee_details?.credit_refund),
+      });
+    } catch {
+      toast.error("Unable to load cancellation details.");
+    }
   };
 
   const handleCanceled = (result: { cancellation_fee_applied: boolean; credit_refunded: boolean }) => {
-    setCancelModal({ isOpen: false, meetingId: "", isConfirmed: false, cancellationFeeCents: 0 });
+    setCancelModal({
+      isOpen: false,
+      meetingId: "",
+      isConfirmed: false,
+      cancellationFeeCredits: 0,
+      creditRefunded: false,
+    });
     setMeetings((prev) =>
       prev.map((m) =>
-        m.id === cancelModal.meetingId ? { ...m, status: "canceled" as const, canceled_by: userId } : m
+        m.id === cancelModal.meetingId
+          ? {
+              ...m,
+              status: "canceled" as const,
+              workflow_state: "canceled",
+              canceled_by: userId,
+              canceled_at: new Date().toISOString(),
+            }
+          : m
       )
     );
     toast.success(
       result.cancellation_fee_applied
-        ? "Meeting canceled. A cancellation fee has been charged."
-        : "Meeting canceled successfully."
+        ? result.credit_refunded
+          ? "Meeting canceled. Cancellation credits have been charged and the other participant has been refunded."
+          : "Meeting canceled. Cancellation credits have been charged."
+        : result.credit_refunded
+          ? "Meeting canceled. The other participant has been refunded."
+          : "Meeting canceled successfully."
     );
   };
 
@@ -445,7 +682,7 @@ export default function MeetingsPage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/dashboard">
-            <Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>
@@ -462,8 +699,8 @@ export default function MeetingsPage() {
           {/* Page header */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
-                <Video className="h-7 w-7 text-[#1f419a]" />
+              <h1 className="flex items-center gap-2 text-[26px] font-bold leading-tight text-gray-900 sm:text-2xl">
+                <Video className="h-6 w-6 text-[#1f419a] sm:h-7 sm:w-7" />
                 My Appointments
               </h1>
               <p className="mt-1 text-sm text-gray-500">
@@ -472,7 +709,7 @@ export default function MeetingsPage() {
             </div>
             <Link
               href="/dashboard/calendar"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] px-4 py-3 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg sm:w-auto sm:rounded-xl sm:px-4 sm:py-2.5"
             >
               <Calendar className="h-4 w-4" />
               Set Availability
@@ -480,12 +717,12 @@ export default function MeetingsPage() {
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-1.5 sm:overflow-x-auto sm:pb-1">
             {(["upcoming", "pending", "past", "all"] as TabType[]).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                onClick={() => handleTabChange(tab)}
+                className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-2xl px-3.5 py-2.5 text-sm font-medium transition-colors sm:justify-center sm:gap-1.5 sm:rounded-lg sm:py-2 ${
                   activeTab === tab
                     ? "bg-[#1f419a] text-white shadow-sm"
                     : "bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50"
@@ -529,115 +766,181 @@ export default function MeetingsPage() {
               {filteredMeetings.map((meeting) => {
                 const isHost = meeting.host_id === userId;
                 const myPart = meeting.participants?.find((p) => p.user_id === userId);
-                const needsResponse = myPart?.response === "requested" && !isHost;
+                const needsResponse = myPart?.response === "requested";
+                const otherParticipant =
+                  meeting.participants?.find(
+                    (participant) =>
+                      participant.user_id !== userId && participant.role !== "coordinator"
+                  ) ||
+                  meeting.participants?.find((participant) => participant.user_id !== userId);
+                const requesterName = getParticipantDisplayName(otherParticipant);
+                const requesterTier = otherParticipant?.user?.tier
+                  ? otherParticipant.user.tier.charAt(0).toUpperCase() +
+                    otherParticipant.user.tier.slice(1)
+                  : null;
+                const canceledByLabel = getCancellationActorLabel(meeting, userId);
+                const acceptedAt = getMeetingAcceptedAt(meeting);
+                const canceledAt = getMeetingCanceledAt(meeting);
+                const awaitingAdminApproval =
+                  meeting.status === "pending" &&
+                  Boolean(meeting.participants?.length) &&
+                  meeting.participants?.every((participant) => participant.response === "accepted");
                 const sc = statusConfig[meeting.status] || statusConfig.completed;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const isPastMeeting =
-                  new Date(meeting.scheduled_at) < new Date() || meeting.status === "completed";
 
                 return (
                   <div
                     key={meeting.id}
-                    className={`overflow-hidden rounded-xl bg-white shadow-sm ring-1 transition-all ${
-                      needsResponse ? "ring-amber-300 ring-2" : "ring-black/5"
+                    className={`overflow-hidden rounded-2xl bg-white shadow-sm ring-1 transition-all ${
+                      needsResponse ? "ring-amber-300 ring-[1.5px]" : "ring-black/5"
                     }`}
                   >
                     {/* Card body */}
-                    <div className="p-4 sm:p-5">
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="p-3 sm:p-5">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         {/* Left: info */}
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#1f419a] to-[#4463cf]">
-                            <Video className="h-5 w-5 text-white" />
-                          </div>
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h4 className="font-semibold text-gray-900">
-                                {meeting.type === "one_on_one" ? "1-on-1 Meeting" : "Group Meeting"}
-                              </h4>
-                              {/* Status badge */}
-                              <span
-                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${sc.bg} ${sc.text}`}
-                              >
-                                <span className={`h-1.5 w-1.5 rounded-full ${sc.dot}`} />
-                                {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
-                              </span>
-                              {isHost && (
-                                <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[11px] font-semibold text-purple-700">
-                                  Host
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start gap-2.5">
+                            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#1f419a] to-[#4463cf] shadow-sm">
+                              <Video className="h-5 w-5 text-white" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="text-[15px] font-semibold leading-5 text-gray-900 sm:text-base">
+                                  {meeting.type === "one_on_one" ? "1-on-1 Meeting" : "Video Meeting"}
+                                </h4>
+                                {/* Status badge */}
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${sc.bg} ${sc.text}`}
+                                >
+                                  <span className={`h-1.5 w-1.5 rounded-full ${sc.dot}`} />
+                                  {awaitingAdminApproval
+                                    ? "Awaiting Admin Approval"
+                                    : meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
                                 </span>
-                              )}
-                            </div>
+                                {isHost && (
+                                  <span className="rounded-full bg-purple-50 px-2.5 py-1 text-[11px] font-semibold text-purple-700">
+                                    Host
+                                  </span>
+                                )}
+                              </div>
 
-                            <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                              <span className="flex items-center gap-1">
-                                <Calendar className="h-3.5 w-3.5" />
-                                {formatDate(meeting.scheduled_at)}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3.5 w-3.5" />
-                                {formatTime(meeting.scheduled_at)}
-                              </span>
-                              {meeting.location_pref && (
-                                <span className="text-gray-400">{meeting.location_pref}</span>
-                              )}
+                              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-gray-500">
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="h-3.5 w-3.5" />
+                                  {formatDate(meeting.scheduled_at)}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3.5 w-3.5" />
+                                  {formatTime(meeting.scheduled_at)}
+                                </span>
+                                {meeting.location_pref && (
+                                  <span className="truncate text-gray-400">{meeting.location_pref}</span>
+                                )}
+                                {meeting.status === "canceled" && canceledAt && (
+                                  <span className="text-red-500">
+                                    Canceled {formatStatusDateTime(canceledAt)}
+                                  </span>
+                                )}
+                                {meeting.status !== "canceled" && acceptedAt && (
+                                  <span className="text-green-600">
+                                    Accepted {formatStatusDateTime(acceptedAt)}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-
-                            {/* Requester tier for pending */}
-                            {needsResponse &&
-                              meeting.participants &&
-                              (() => {
-                                const requester = meeting.participants.find((p) => p.role === "guest");
-                                const tier = requester?.user?.tier;
-                                return tier ? (
-                                  <p className="mt-1.5 text-xs font-medium text-blue-600">
-                                    Request from {tier.charAt(0).toUpperCase() + tier.slice(1)} account
-                                  </p>
-                                ) : null;
-                              })()}
                           </div>
+
+                          {needsResponse && otherParticipant && (
+                            <div className="mt-2 rounded-2xl border border-[#1f419a]/10 bg-gradient-to-br from-[#1f419a]/[0.035] to-[#2a44a3]/[0.02] px-2.5 py-2 shadow-[0_8px_24px_rgba(31,65,154,0.05)] sm:p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                                  <div className="relative flex h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#1f419a]/10 ring-2 ring-white">
+                                    {otherParticipant.user_profile?.profile_photo_url ? (
+                                      <Image
+                                        src={otherParticipant.user_profile.profile_photo_url}
+                                        alt={requesterName}
+                                        fill
+                                        className="object-cover"
+                                        unoptimized
+                                      />
+                                    ) : (
+                                      <User className="h-5 w-5 text-[#1f419a]" />
+                                    )}
+                                  </div>
+
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold leading-5 text-gray-900">
+                                      {requesterName}
+                                    </p>
+                                    <p className="text-[12px] leading-4 text-gray-500">
+                                      Meeting request
+                                      {requesterTier ? ` · ${requesterTier}` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setProfilePreviewUserId(otherParticipant.user_id)}
+                                    aria-label="View requester profile"
+                                    title="View Profile"
+                                    className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border border-[#1f419a]/15 bg-white text-[#1f419a] shadow-sm transition-colors hover:bg-[#1f419a]/5"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => acceptMeeting(meeting.id)}
+                                    disabled={processing === meeting.id}
+                                    aria-label="Accept meeting request"
+                                    title="Accept"
+                                    className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-green-500 text-white shadow-sm transition-colors hover:bg-green-600 disabled:opacity-50"
+                                  >
+                                    {processing === meeting.id ? (
+                                      <RefreshCw className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Check className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => declineMeeting(meeting.id)}
+                                    disabled={processing === meeting.id}
+                                    aria-label="Decline meeting request"
+                                    title="Decline"
+                                    className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-red-500 text-white shadow-sm transition-colors hover:bg-red-600 disabled:opacity-50"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {awaitingAdminApproval && (
+                            <div className="mt-2.5 rounded-2xl border border-[#1f419a]/10 bg-[#1f419a]/[0.035] px-3 py-2.5">
+                              <p className="text-[12px] font-medium leading-5 text-[#1f419a]">
+                                Both parties accepted this meeting. MatchIndeed admin will approve it and create the Zoom link automatically.
+                              </p>
+                            </div>
+                          )}
                         </div>
 
                         {/* Right: actions */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          {needsResponse && (
-                            <>
-                              <button
-                                onClick={() => acceptMeeting(meeting.id)}
-                                disabled={processing === meeting.id}
-                                className="flex items-center gap-1.5 rounded-lg bg-green-500 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-green-600 disabled:opacity-50"
-                              >
-                                {processing === meeting.id ? (
-                                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Check className="h-3.5 w-3.5" />
-                                )}
-                                Accept
-                              </button>
-                              <button
-                                onClick={() => declineMeeting(meeting.id)}
-                                disabled={processing === meeting.id}
-                                className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-50"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                                Decline
-                              </button>
-                            </>
-                          )}
+                        <div className="flex w-full flex-row items-center gap-2 pt-0.5 sm:flex-row sm:flex-wrap lg:w-auto lg:min-w-0 lg:flex-row lg:items-center">
 
                           {meeting.status === "confirmed" &&
                             new Date(meeting.scheduled_at) > new Date() && (
                               <>
                                 <Link
                                   href={`/dashboard/meetings/join?id=${meeting.id}`}
-                                  className="flex items-center gap-1.5 rounded-lg bg-[#1f419a] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#17357b]"
+                                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md hover:from-[#17357b] hover:to-[#2340a0] sm:flex-1 sm:rounded-xl sm:py-2.5 lg:w-auto lg:flex-none lg:min-w-[144px]"
                                 >
                                   <Video className="h-3.5 w-3.5" />
                                   Join
                                 </Link>
                                 <button
                                   onClick={() => openCancelModal(meeting)}
-                                  className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl border border-red-200 bg-red-50/60 px-4 py-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 sm:flex-1 sm:rounded-xl sm:py-2.5 lg:w-auto lg:flex-none lg:min-w-[144px]"
                                 >
                                   <Ban className="h-3 w-3" />
                                   Cancel
@@ -648,7 +951,7 @@ export default function MeetingsPage() {
                           {meeting.status === "pending" && !needsResponse && (
                             <button
                               onClick={() => openCancelModal(meeting)}
-                              className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl border border-red-200 bg-red-50/60 px-4 py-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 sm:w-auto sm:rounded-xl sm:py-2.5 lg:w-auto lg:min-w-[144px]"
                             >
                               <Ban className="h-3 w-3" />
                               Cancel
@@ -658,7 +961,7 @@ export default function MeetingsPage() {
                           {meeting.status === "completed" && !meeting.finalized_at && isHost && (
                             <Link
                               href={`/dashboard/meetings/${meeting.id}/conclude`}
-                              className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-600"
+                              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-amber-600 sm:w-auto sm:rounded-xl sm:py-2.5"
                             >
                               <ClipboardCheck className="h-3.5 w-3.5" />
                               Conclude
@@ -668,7 +971,7 @@ export default function MeetingsPage() {
                           {meeting.status === "completed" && (
                             <Link
                               href={`/dashboard/meetings/${meeting.id}/response`}
-                              className="flex items-center gap-1.5 rounded-lg bg-[#1f419a] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#17357b]"
+                              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-[#1f419a] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#17357b] sm:w-auto sm:rounded-xl sm:py-2.5"
                             >
                               <Check className="h-3.5 w-3.5" />
                               Respond
@@ -680,21 +983,21 @@ export default function MeetingsPage() {
 
                     {/* Card footer — participants + charge status */}
                     {(meeting.participants?.length || meeting.charge_status || meeting.status === "canceled") && (
-                      <div className="border-t border-gray-100 bg-gray-50/50 px-4 py-3 sm:px-5">
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                      <div className="border-t border-gray-100 bg-gray-50/60 px-3 py-2.5 sm:px-5 sm:py-3">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                           {/* Participants */}
                           {meeting.participants && meeting.participants.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-gray-400">
                                 Participants
                               </span>
-                              <div className="flex items-center gap-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
                                 {meeting.participants.map((p, idx) => (
-                                  <div key={idx} className="flex items-center gap-1">
-                                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-200">
+                                  <div key={idx} className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-1 ring-1 ring-gray-100 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                                    <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-200">
                                       <User className="h-3 w-3 text-gray-500" />
                                     </div>
-                                    <span className="text-xs text-gray-600">
+                                    <span className="text-[11px] font-medium text-gray-600">
                                       {p.role === "host" ? "Host" : "Guest"}
                                     </span>
                                     <span
@@ -707,9 +1010,6 @@ export default function MeetingsPage() {
                                       }`}
                                       title={p.response}
                                     />
-                                    {idx < (meeting.participants?.length || 0) - 1 && (
-                                      <span className="mx-1 text-gray-300">·</span>
-                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -717,7 +1017,7 @@ export default function MeetingsPage() {
                           )}
 
                           {/* Charge status */}
-                          {meeting.charge_status && (
+                          {meeting.charge_status && meeting.charge_status !== "pending" && (
                             <span
                               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                                 meeting.charge_status === "captured"
@@ -748,9 +1048,9 @@ export default function MeetingsPage() {
                           )}
 
                           {/* Canceled info */}
-                          {meeting.status === "canceled" && meeting.canceled_by && (
+                          {meeting.status === "canceled" && canceledByLabel && (
                             <span className="text-[11px] text-red-400">
-                              Canceled by {meeting.canceled_by === userId ? "you" : "other party"}
+                              Canceled by {canceledByLabel}
                             </span>
                           )}
                         </div>
@@ -768,12 +1068,18 @@ export default function MeetingsPage() {
       <CancellationConfirmModal
         isOpen={cancelModal.isOpen}
         onClose={() =>
-          setCancelModal({ isOpen: false, meetingId: "", isConfirmed: false, cancellationFeeCents: 0 })
+          setCancelModal({
+            isOpen: false,
+            meetingId: "",
+            isConfirmed: false,
+            cancellationFeeCredits: 0,
+            creditRefunded: false,
+          })
         }
         meetingId={cancelModal.meetingId}
         isConfirmed={cancelModal.isConfirmed}
-        cancellationFeeCents={cancelModal.cancellationFeeCents}
-        creditRefunded={!cancelModal.isConfirmed}
+        cancellationFeeCredits={cancelModal.cancellationFeeCredits}
+        creditRefunded={cancelModal.creditRefunded}
         onCanceled={handleCanceled}
       />
 
@@ -892,6 +1198,12 @@ export default function MeetingsPage() {
           </div>
         </div>
       )}
+
+      <ProfileDetailModal
+        userId={profilePreviewUserId}
+        isOpen={Boolean(profilePreviewUserId)}
+        onClose={() => setProfilePreviewUserId(null)}
+      />
     </div>
   );
 }

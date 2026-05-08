@@ -29,14 +29,14 @@ import {
   BookOpen,
   Globe,
   MessageCircle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
   calculateCompleteness,
   getTopMissingFields,
   type CompletenessResult,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  type ProfileField,
 } from "@/lib/profile-completeness";
 
 // Map field keys to icons for visual appeal
@@ -71,6 +71,9 @@ export default function ProfileCompletenessCard({
 }: ProfileCompletenessCardProps) {
   const [result, setResult] = useState<CompletenessResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isCompleteBannerCollapsed, setIsCompleteBannerCollapsed] = useState(false);
 
   const fetchCompleteness = useCallback(async () => {
     try {
@@ -89,6 +92,7 @@ export default function ProfileCompletenessCard({
         setLoading(false);
         return;
       }
+      setUserId(user.id);
 
       // Fetch the full profile
       const { data: profile } = await supabase
@@ -115,6 +119,35 @@ export default function ProfileCompletenessCard({
     fetchCompleteness();
   }, [fetchCompleteness]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const updateIsMobile = () => setIsMobile(mediaQuery.matches);
+    updateIsMobile();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateIsMobile);
+      return () => mediaQuery.removeEventListener("change", updateIsMobile);
+    }
+
+    mediaQuery.addListener(updateIsMobile);
+    return () => mediaQuery.removeListener(updateIsMobile);
+  }, []);
+
+  useEffect(() => {
+    if (!userId || typeof window === "undefined" || !result) return;
+
+    const storageKey = `profile-completeness-collapsed:${userId}`;
+
+    if (result.percentage < 100) {
+      setIsCompleteBannerCollapsed(false);
+      window.localStorage.removeItem(storageKey);
+      return;
+    }
+
+    setIsCompleteBannerCollapsed(window.localStorage.getItem(storageKey) === "1");
+  }, [isMobile, result, userId]);
+
   // Don't render while loading
   if (loading) {
     return variant === "compact" ? null : (
@@ -130,13 +163,51 @@ export default function ProfileCompletenessCard({
   // Hide if 100% complete (unless forced to show)
   if (result.percentage >= 100 && !showWhenComplete) return null;
 
+  const canToggleCompleteBanner =
+    variant === "full" && showWhenComplete && result.percentage >= 100 && !!userId;
+
+  const handleCollapseCompleteBanner = () => {
+    if (!userId || typeof window === "undefined") return;
+    const storageKey = `profile-completeness-collapsed:${userId}`;
+    window.localStorage.setItem(storageKey, "1");
+    setIsCompleteBannerCollapsed(true);
+  };
+
+  const handleExpandCompleteBanner = () => {
+    if (!userId || typeof window === "undefined") return;
+    const storageKey = `profile-completeness-collapsed:${userId}`;
+    window.localStorage.removeItem(storageKey);
+    setIsCompleteBannerCollapsed(false);
+  };
+
+  if (canToggleCompleteBanner && isCompleteBannerCollapsed) {
+    return (
+      <div className="rounded-2xl bg-white p-4 shadow-lg ring-1 ring-black/5">
+        <button
+          type="button"
+          onClick={handleExpandCompleteBanner}
+          className="flex w-full items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-left transition-colors hover:bg-emerald-100"
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle className="h-4.5 w-4.5 text-emerald-600" />
+            <span className="text-sm font-semibold text-emerald-800">
+              Show profile completeness
+            </span>
+          </span>
+          <ChevronDown className="h-4 w-4 text-emerald-700" />
+        </button>
+      </div>
+    );
+  }
+
   const topMissing = getTopMissingFields(result, 3);
 
   // ---------------------------------------------------------------
   // SVG circular progress ring
   // ---------------------------------------------------------------
-  const size = variant === "compact" ? 56 : 80;
-  const strokeWidth = variant === "compact" ? 5 : 6;
+  const size = variant === "compact" ? 56 : isMobile ? 68 : 80;
+  const strokeWidth = variant === "compact" ? 5 : isMobile ? 5 : 6;
+  const percentageFontSize = variant === "compact" ? 14 : isMobile ? 16 : 18;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const progress = (result.percentage / 100) * circumference;
@@ -189,7 +260,7 @@ export default function ProfileCompletenessCard({
             textAnchor="middle"
             dominantBaseline="central"
             className="fill-gray-900 font-bold"
-            fontSize="14"
+            fontSize={percentageFontSize}
             transform={`rotate(90, ${size / 2}, ${size / 2})`}
           >
             {result.percentage}%
@@ -218,8 +289,8 @@ export default function ProfileCompletenessCard({
   // FULL VARIANT — detailed card with missing fields
   // ---------------------------------------------------------------
   return (
-    <div className="rounded-2xl bg-white p-6 shadow-lg ring-1 ring-black/5">
-      <div className="flex items-start gap-5">
+    <div className="rounded-2xl bg-white p-4 shadow-lg ring-1 ring-black/5 sm:p-6">
+      <div className="flex items-start gap-3 sm:gap-5">
         {/* Progress Ring */}
         <div className="flex-shrink-0">
           <svg width={size} height={size} className="-rotate-90">
@@ -249,7 +320,7 @@ export default function ProfileCompletenessCard({
               textAnchor="middle"
               dominantBaseline="central"
               className="fill-gray-900 font-bold"
-              fontSize="18"
+              fontSize={percentageFontSize}
               transform={`rotate(90, ${size / 2}, ${size / 2})`}
             >
               {result.percentage}%
@@ -259,30 +330,42 @@ export default function ProfileCompletenessCard({
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-lg font-bold text-gray-900">
-              Profile Completeness
-            </h3>
-            <span
-              className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                result.percentage >= 100
-                  ? "bg-emerald-50 text-emerald-700"
-                  : result.percentage >= 75
-                  ? "bg-blue-50 text-blue-700"
-                  : result.percentage >= 50
-                  ? "bg-amber-50 text-amber-700"
-                  : "bg-red-50 text-red-700"
-              }`}
-            >
-              {result.tierLabel}
-            </span>
+          <div className="mb-1">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <h3 className="text-lg font-bold leading-tight text-gray-900 sm:text-xl">
+                Profile Completeness
+              </h3>
+              <span
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                  result.percentage >= 100
+                    ? "bg-emerald-50 text-emerald-700"
+                    : result.percentage >= 75
+                    ? "bg-blue-50 text-blue-700"
+                    : result.percentage >= 50
+                    ? "bg-amber-50 text-amber-700"
+                    : "bg-red-50 text-red-700"
+                }`}
+              >
+                {result.tierLabel}
+              </span>
+              {canToggleCompleteBanner && (
+                <button
+                  type="button"
+                  onClick={handleCollapseCompleteBanner}
+                  className="ml-auto inline-flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50"
+                >
+                  Collapse
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
           <p className="text-sm text-gray-500">
             {result.filledCount} of {result.totalCount} fields completed
           </p>
 
           {/* Progress Bar */}
-          <div className="mt-3 h-2 w-full rounded-full bg-gray-100 overflow-hidden">
+          <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-gray-100 sm:mt-3">
             <div
               className="h-full rounded-full transition-all duration-1000"
               style={{
@@ -296,13 +379,13 @@ export default function ProfileCompletenessCard({
 
       {/* 100% Complete State */}
       {result.percentage >= 100 ? (
-        <div className="mt-5 flex items-center gap-3 rounded-xl bg-emerald-50 border border-emerald-200 p-4">
-          <CheckCircle className="h-6 w-6 text-emerald-500 flex-shrink-0" />
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:mt-5 sm:gap-3 sm:p-4">
+          <CheckCircle className="h-5 w-5 flex-shrink-0 text-emerald-500 sm:h-6 sm:w-6" />
           <div>
             <p className="text-sm font-semibold text-emerald-800">
               Your profile is 100% complete!
             </p>
-            <p className="text-xs text-emerald-600 mt-0.5">
+            <p className="mt-0.5 text-xs text-emerald-600">
               Complete profiles get 3x more matches. You&apos;re all set!
             </p>
           </div>
@@ -311,7 +394,7 @@ export default function ProfileCompletenessCard({
         <>
           {/* Missing Fields — Top 3 Suggestions */}
           {topMissing.length > 0 && (
-            <div className="mt-5 space-y-2">
+            <div className="mt-4 space-y-2 sm:mt-5">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 Complete these to boost your score
               </p>
@@ -339,7 +422,7 @@ export default function ProfileCompletenessCard({
           )}
 
           {/* CTA Button */}
-          <div className="mt-5">
+          <div className="mt-4 sm:mt-5">
             <Link
               href="/dashboard/profile/edit"
               className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] px-5 py-2.5 text-sm font-semibold text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"

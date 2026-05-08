@@ -41,9 +41,12 @@ export function ReactivationForm({ onSubmit, isLoading = false, error, success }
       await onSubmit(selectedReason, isCustomReasonSelected ? customReason : undefined);
       setSelectedReason('');
       setCustomReason('');
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to submit reactivation request');
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Failed to submit reactivation request';
+      setLocalError(message);
     } finally {
       setIsSubmitting(false);
     }

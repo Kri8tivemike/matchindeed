@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Prediction = {
   description: string;
@@ -13,6 +13,7 @@ type Props = {
   minChars?: number;
   limit?: number;
   className?: string;
+  requireSuggestion?: boolean;
   /** Google Places types filter. Defaults to ["(cities)"] for worldwide city search.
    *  Use ["geocode"] for addresses, ["establishment"] for businesses, 
    *  or undefined/[] for no restriction (broadest results). */
@@ -76,7 +77,16 @@ function loadMaps() {
   return mapsPromise;
 }
 
-export default function GooglePlacesAutocomplete({ value, onChange, placeholder = "Enter your city", minChars = 2, limit = 8, className = "", types }: Props) {
+export default function GooglePlacesAutocomplete({
+  value,
+  onChange,
+  placeholder = "Enter your city",
+  minChars = 2,
+  limit = 8,
+  className = "",
+  requireSuggestion = false,
+  types,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Prediction[]>([]);
@@ -85,14 +95,41 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const tokenRef = useRef<object | null>(null);
 
+  const commit = useCallback(
+    (v: string, p?: Prediction) => {
+      onChange(v, p);
+      setOpen(false);
+      setQuery("");
+      setHighlight(-1);
+    },
+    [onChange]
+  );
+
+  const commitTypedQueryIfNeeded = useCallback(() => {
+    const typed = query.trim();
+    if (requireSuggestion) {
+      setOpen(false);
+      setQuery("");
+      setHighlight(-1);
+      return;
+    }
+    if (typed.length > 0 && typed !== value) {
+      commit(typed);
+      return;
+    }
+    setOpen(false);
+  }, [commit, query, requireSuggestion, value]);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+      if (!containerRef.current.contains(e.target as Node)) {
+        commitTypedQueryIfNeeded();
+      }
     };
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
-  }, []);
+  }, [commitTypedQueryIfNeeded]);
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 0);
@@ -139,11 +176,20 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
           svc.getPlacePredictions(
             request,
             (preds) => {
-              const arr = Array.isArray(preds) 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ? preds.slice(0, limit).map((p: any) => ({ description: p.description, place_id: p.place_id })) 
+              const arr = Array.isArray(preds)
+                ? preds.map((p) => ({ description: p.description, place_id: p.place_id }))
                 : [];
-              setResults(arr);
+
+              if (requireSuggestion) {
+                const detailedPredictions = arr.filter((prediction) =>
+                  prediction.description.includes(",")
+                );
+                const prioritized = detailedPredictions.length > 0 ? detailedPredictions : arr;
+                setResults(prioritized.slice(0, limit));
+                return;
+              }
+
+              setResults(arr.slice(0, limit));
             }
           );
         })
@@ -155,15 +201,7 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
       ctrl.abort();
       clearTimeout(t);
     };
-// eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, query, minChars, limit]);
-
-  const commit = (v: string, p?: Prediction) => {
-    onChange(v, p);
-    setOpen(false);
-    setQuery("");
-    setHighlight(-1);
-  };
+  }, [open, query, minChars, limit, types]);
 
   return (
     <div ref={containerRef} className="relative w-full">
@@ -174,6 +212,16 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);
+        }}
+        onBlur={() => {
+          // If focus leaves the autocomplete entirely (e.g. keyboard tab),
+          // persist the typed location even when no suggestion was clicked.
+          setTimeout(() => {
+            const container = containerRef.current;
+            const active = document.activeElement;
+            if (container && active && container.contains(active)) return;
+            commitTypedQueryIfNeeded();
+          }, 0);
         }}
         onKeyDown={(e) => {
           if (!open) return;
@@ -187,6 +235,19 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
             e.preventDefault();
             const r = results[highlight];
             commit(r.description, r);
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            if (requireSuggestion && results.length > 0) {
+              const typed = query.trim().toLowerCase();
+              const exact = results.find(
+                (result) => result.description.trim().toLowerCase() === typed
+              );
+              if (exact) {
+                commit(exact.description, exact);
+                return;
+              }
+            }
+            commitTypedQueryIfNeeded();
           }
         }}
         placeholder={placeholder}
@@ -197,7 +258,11 @@ export default function GooglePlacesAutocomplete({ value, onChange, placeholder 
           <div className="px-3 py-2 text-xs font-semibold text-gray-500">Suggestions</div>
           <ul role="listbox" className="max-h-56 overflow-auto py-1">
             {results.length === 0 && (
-              <li className="px-3 py-2 text-sm text-gray-500">No matches</li>
+              <li className="px-3 py-2 text-sm text-gray-500">
+                {requireSuggestion
+                  ? "Search by city or region, for example Sydney, Australia."
+                  : "No matches"}
+              </li>
             )}
             {results.map((o, idx) => (
               <li key={o.place_id}>

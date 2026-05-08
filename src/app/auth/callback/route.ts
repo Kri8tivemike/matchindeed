@@ -12,6 +12,12 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { getSafeDisplayName, isValidFirstName, normalizeFirstName } from "@/lib/name";
+import { ensureBaselineUserRecords } from "@/lib/account-provisioning";
+import {
+  resolvePostLoginRedirect,
+  resolveUserProgressState,
+} from "@/lib/user-progress";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -70,33 +76,37 @@ export async function GET(request: Request) {
     .maybeSingle();
 
   if (!existingAccount) {
-    const displayName =
+    const rawDisplayName =
       user.user_metadata?.full_name ||
       user.user_metadata?.name ||
-      user.email?.split("@")[0] ||
-      "User";
+      null;
 
-    const firstName = user.user_metadata?.given_name || user.user_metadata?.first_name || null;
-    const lastName = user.user_metadata?.family_name || user.user_metadata?.last_name || null;
+    const normalizedFirstName = normalizeFirstName(
+      user.user_metadata?.given_name || user.user_metadata?.first_name || ""
+    );
+    const firstName = isValidFirstName(normalizedFirstName)
+      ? normalizedFirstName
+      : null;
+    const lastName = normalizeFirstName(
+      user.user_metadata?.family_name || user.user_metadata?.last_name || ""
+    ) || null;
+    const displayName = getSafeDisplayName(
+      firstName,
+      rawDisplayName || user.email?.split("@")[0] || null
+    );
 
-    await supabaseAdmin.from("accounts").insert({
-      id: user.id,
-      email: user.email,
-      display_name: displayName,
-      tier: "basic",
-    });
+    const provisioningResult = await ensureBaselineUserRecords(
+      supabaseAdmin,
+      { id: user.id, email: user.email },
+      displayName
+    );
 
-    await supabaseAdmin.from("wallets").insert({
-      user_id: user.id,
-      balance_cents: 0,
-    });
-
-    await supabaseAdmin.from("credits").insert({
-      user_id: user.id,
-      total: 0,
-      used: 0,
-      rollover: 0,
-    });
+    if (!provisioningResult.ok) {
+      console.error("[Auth callback] account provisioning error:", provisioningResult);
+      return NextResponse.redirect(
+        `${origin}/login?error=auth_callback_provisioning_failed`
+      );
+    }
 
     // Create user_profile for OAuth users (matches email signup flow)
     await supabaseAdmin.from("user_profiles").upsert(
@@ -116,21 +126,22 @@ export async function GET(request: Request) {
     );
   }
 
-  // Determine redirect: profile setup if incomplete, else dashboard
-  const { data: progress } = await supabaseAdmin
-    .from("user_progress")
-    .select("profile_completed, preferences_completed")
-    .eq("user_id", user.id)
+  const { data: account } = await supabaseAdmin
+    .from("accounts")
+    .select("role")
+    .eq("id", user.id)
     .maybeSingle();
 
-  let redirectPath = safeNext;
-  if (!progress?.profile_completed) {
-    redirectPath = "/dashboard/profile/edit";
-  } else if (!progress?.preferences_completed) {
-    redirectPath = "/dashboard/profile/preferences";
-  } else if (safeNext === "/dashboard") {
-    redirectPath = "/dashboard/discover";
-  }
+  // Determine redirect: coordinators bypass dating-profile onboarding.
+  const redirectPath =
+    account?.role === "coordinator"
+      ? safeNext.startsWith("/coordinator")
+        ? safeNext
+        : "/coordinator/dashboard"
+      : resolvePostLoginRedirect(
+          await resolveUserProgressState(supabaseAdmin, user.id),
+          safeNext
+        );
 
   const forwardedHost = request.headers.get("x-forwarded-host");
   const isLocalEnv = process.env.NODE_ENV === "development";

@@ -17,67 +17,314 @@
  */
 
 import { useEffect, useRef } from "react";
+import type { IOneSignalOneSignal } from "react-onesignal";
 
 interface OneSignalProviderProps {
   /** The authenticated user's Supabase ID */
   userId?: string | null;
 }
 
+interface PushStatusDetail {
+  configured: boolean;
+  supported: boolean;
+  permission: NotificationPermission | "unsupported";
+  optedIn: boolean;
+  webPushConfigured?: boolean;
+  originMatches?: boolean;
+  pushChannelEnabled?: boolean;
+  statusMessage?: string;
+}
+
 export default function OneSignalProvider({ userId }: OneSignalProviderProps) {
   const initialized = useRef(false);
+  const currentUserId = useRef<string | null>(null);
+  const initialUserId = useRef(userId);
+  const recoveryAttempted = useRef(false);
+
+  const dispatchStatus = async (
+    OneSignal?: IOneSignalOneSignal,
+    overrides?: Partial<PushStatusDetail>
+  ) => {
+    if (typeof window === "undefined") return;
+
+    const detail: PushStatusDetail = {
+      configured: Boolean(process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID),
+      supported: Boolean(OneSignal?.Notifications?.isPushSupported?.()),
+      permission: OneSignal?.Notifications?.permissionNative ?? "default",
+      optedIn: Boolean(OneSignal?.User?.PushSubscription?.optedIn),
+      webPushConfigured: true,
+      originMatches: true,
+      pushChannelEnabled: true,
+      statusMessage: "",
+      ...overrides,
+    };
+
+    window.dispatchEvent(new CustomEvent("onesignal:status", { detail }));
+  };
 
   useEffect(() => {
     const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
     if (!appId || initialized.current) return;
 
     const initOneSignal = async () => {
-      try {
-        // Dynamically import OneSignal to avoid SSR issues
-        const OneSignalModule = await import("react-onesignal");
-        const OneSignal = OneSignalModule.default;
-
-        await OneSignal.init({
-          appId,
-          allowLocalhostAsSecureOrigin: process.env.NODE_ENV === "development",
-          notifyButton: {
-            enable: false, // We handle UI ourselves
-            prenotify: false,
-            showCredit: false,
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-            text: {} as any,
-          },
+      const readConfigStatus = async () => {
+        const statusResponse = await fetch("/api/integrations/onesignal", {
+          cache: "no-store",
         });
+        return (await statusResponse.json().catch(() => null)) as
+          | {
+              configured?: boolean;
+              webPushConfigured?: boolean;
+              originMatches?: boolean;
+              pushChannelEnabled?: boolean;
+              message?: string;
+            }
+          | null;
+      };
 
-        initialized.current = true;
+      const resetStaleOneSignalState = async () => {
+        if (typeof window === "undefined") return;
 
-        // Set external ID for targeted push
-        if (userId) {
-          await OneSignal.login(userId);
+        const removeMatchingKeys = (storage: Storage) => {
+          const keys: string[] = [];
+          for (let index = 0; index < storage.length; index += 1) {
+            const key = storage.key(index);
+            if (key && /onesignal/i.test(key)) {
+              keys.push(key);
+            }
+          }
+          for (const key of keys) {
+            storage.removeItem(key);
+          }
+        };
+
+        try {
+          removeMatchingKeys(window.localStorage);
+          removeMatchingKeys(window.sessionStorage);
+        } catch {
+          // Ignore browser storage issues.
         }
+
+        if ("serviceWorker" in navigator) {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(
+              registrations
+                .filter((registration) =>
+                  [registration.active, registration.waiting, registration.installing]
+                    .filter(Boolean)
+                    .some((worker) =>
+                      worker?.scriptURL?.toLowerCase().includes("onesignal")
+                    )
+                )
+                .map((registration) => registration.unregister().catch(() => false))
+            );
+          } catch {
+            // Ignore service worker cleanup failures.
+          }
+        }
+
+        const indexedDb = window.indexedDB;
+        if (indexedDb && typeof indexedDb.databases === "function") {
+          try {
+            const databases = await indexedDb.databases();
+            await Promise.all(
+              databases
+                .map((database) => database.name)
+                .filter(
+                  (name): name is string =>
+                    typeof name === "string" && /onesignal/i.test(name)
+                )
+                .map(
+                  (name) =>
+                    new Promise<void>((resolve) => {
+                      const request = indexedDb.deleteDatabase(name);
+                      request.onsuccess = () => resolve();
+                      request.onerror = () => resolve();
+                      request.onblocked = () => resolve();
+                    })
+                )
+            );
+          } catch {
+            // Ignore IndexedDB cleanup failures.
+          }
+        }
+      };
+
+      const isRecoverableWebPushInitError = (error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : String(error ?? "");
+        return /app not configured for web push/i.test(message);
+      };
+
+      try {
+        const configStatus = await readConfigStatus();
+
+        if (
+          configStatus &&
+          (configStatus.configured === false ||
+            configStatus.webPushConfigured === false ||
+            configStatus.originMatches === false ||
+            configStatus.pushChannelEnabled === false)
+        ) {
+          await dispatchStatus(undefined, {
+            configured: Boolean(configStatus.configured),
+            supported: false,
+            permission: "unsupported",
+            optedIn: false,
+            webPushConfigured: Boolean(configStatus.webPushConfigured),
+            originMatches: Boolean(configStatus.originMatches),
+            pushChannelEnabled: Boolean(configStatus.pushChannelEnabled),
+            statusMessage: configStatus.message ?? "",
+          });
+          return;
+        }
+
+        const OneSignalModule = await import("react-onesignal");
+        const OneSignal = OneSignalModule.default as IOneSignalOneSignal;
+
+        try {
+          await OneSignal.init({
+            appId,
+            allowLocalhostAsSecureOrigin: process.env.NODE_ENV === "development",
+            serviceWorkerPath: "/OneSignalSDKWorker.js",
+            serviceWorkerParam: {
+              scope: "/",
+            },
+            notifyButton: {
+              enable: false,
+              prenotify: false,
+              showCredit: false,
+              text: {} as never,
+            },
+            promptOptions: {
+              slidedown: {
+                prompts: [
+                  {
+                    type: "push",
+                    autoPrompt: false,
+                    delay: {
+                      pageViews: 0,
+                      timeDelay: 0,
+                    },
+                  },
+                ],
+              },
+            },
+          });
+        } catch (error) {
+          if (isRecoverableWebPushInitError(error) && !recoveryAttempted.current) {
+            const latestStatus = await readConfigStatus();
+            if (
+              latestStatus?.configured &&
+              latestStatus.webPushConfigured &&
+              latestStatus.originMatches &&
+              latestStatus.pushChannelEnabled !== false
+            ) {
+              recoveryAttempted.current = true;
+              await resetStaleOneSignalState();
+              await dispatchStatus(undefined, {
+                configured: true,
+                supported: false,
+                permission: "unsupported",
+                optedIn: false,
+                webPushConfigured: true,
+                originMatches: true,
+                pushChannelEnabled: true,
+                statusMessage:
+                  "OneSignal was just reconfigured. Refresh this page once so the browser can reload a clean push state, then try enabling browser push again.",
+              });
+              return;
+            }
+          }
+
+          throw error;
+        }
+
+        recoveryAttempted.current = false;
+        initialized.current = true;
+        await OneSignal.Notifications.setDefaultTitle("MatchIndeed");
+        await OneSignal.Notifications.setDefaultUrl(
+          `${window.location.origin}/dashboard/notifications`
+        );
+
+        const onSubscriptionChange = () => {
+          void dispatchStatus(OneSignal);
+        };
+        OneSignal.User.PushSubscription.addEventListener(
+          "change",
+          onSubscriptionChange
+        );
+
+        if (initialUserId.current) {
+          await OneSignal.login(initialUserId.current);
+          currentUserId.current = initialUserId.current;
+        }
+
+        await dispatchStatus(OneSignal);
+
+        return () => {
+          OneSignal.User.PushSubscription.removeEventListener(
+            "change",
+            onSubscriptionChange
+          );
+        };
       } catch (error) {
         console.error("[OneSignal] Init failed:", error);
+        await dispatchStatus(undefined, {
+          configured: Boolean(process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID),
+          supported: false,
+          permission: "unsupported",
+          optedIn: false,
+          webPushConfigured: false,
+          originMatches: false,
+          pushChannelEnabled: false,
+          statusMessage:
+            error instanceof Error ? error.message : "Unable to initialize OneSignal.",
+        });
       }
     };
 
-    initOneSignal();
-  }, [userId]);
+    let cleanup: (() => void) | undefined;
+    void initOneSignal().then((result) => {
+      cleanup = result;
+    });
 
-  // Update external ID when user changes
+    return () => {
+      cleanup?.();
+    };
+  }, []);
+
   useEffect(() => {
-    if (!initialized.current || !userId) return;
+    if (!initialized.current) return;
 
     const updateUser = async () => {
       try {
         const OneSignalModule = await import("react-onesignal");
-        const OneSignal = OneSignalModule.default;
-        await OneSignal.login(userId);
+        const OneSignal = OneSignalModule.default as IOneSignalOneSignal;
+
+        if (!userId) {
+          if (currentUserId.current) {
+            await OneSignal.logout();
+            currentUserId.current = null;
+          }
+          await dispatchStatus(OneSignal);
+          return;
+        }
+
+        if (currentUserId.current !== userId) {
+          await OneSignal.login(userId);
+          currentUserId.current = userId;
+        }
+
+        await dispatchStatus(OneSignal);
       } catch {
         // Silently ignore
       }
     };
 
-    updateUser();
+    void updateUser();
   }, [userId]);
 
-  return null; // This is a side-effect-only component
+  return null;
 }

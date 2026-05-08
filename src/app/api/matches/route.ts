@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  getMinimumRequestableMeetingStartIso,
+  hasRequestableMeetingAvailability,
+} from "@/lib/meetings/request-availability";
+import { validateMatchesAccess } from "@/middleware/subscription-check";
 
 /**
  * Mutual Matches API
@@ -24,6 +29,59 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+type ProfileRow = {
+  user_id: string;
+  first_name: string | null;
+  date_of_birth: string | null;
+  location: string | null;
+  photos: string[] | null;
+  profile_photo_url: string | null;
+  ethnicity: string | null;
+  religion: string | null;
+  education_level: string | null;
+  about_yourself: string | null;
+};
+
+type AccountRow = {
+  id: string;
+  tier: string | null;
+  display_name: string | null;
+  email_verified: boolean | null;
+  last_active_at?: string | null;
+  account_status?: string | null;
+  profile_visible?: boolean | null;
+  calendar_enabled?: boolean | null;
+};
+
+type UnifiedMatch = {
+  partner_id: string;
+  match_type: "meeting" | "activity";
+  matched_at: string;
+  name: string;
+  age: number | null;
+  location: string | null;
+  photo: string | null;
+  ethnicity: string | null;
+  religion: string | null;
+  education: string | null;
+  about: string | null;
+  tier: string;
+  verified: boolean;
+  your_activity: string | null;
+  their_activity: string | null;
+  match_id: string | null;
+  messaging_enabled: boolean;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  meeting_id: string | null;
+  has_activity_match: boolean;
+  has_meeting_match: boolean;
+  hasCalendarSlots: boolean;
+  canRequestMeeting: boolean;
+  meetingRequestBlockedReason: string | null;
+  partnerLastActiveAt: string | null;
+};
+
 export async function GET(request: NextRequest) {
   try {
     // Authenticate
@@ -44,6 +102,14 @@ export async function GET(request: NextRequest) {
 
     const userId = user.id;
 
+    const accessValidation = await validateMatchesAccess(userId);
+    if (!accessValidation.allowed) {
+      return NextResponse.json(
+        { error: "access_denied", message: accessValidation.message },
+        { status: 403 }
+      );
+    }
+
     // ---------------------------------------------------------------
     // 1. Fetch activity-based mutual matches
     // ---------------------------------------------------------------
@@ -63,10 +129,6 @@ export async function GET(request: NextRequest) {
       .in("activity_type", ["like", "wink", "interested"]);
 
     // Find mutual: users who appear in both sent and received
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const sentTargets = new Set(
-      (sentActivities || []).map((a) => a.target_user_id)
-    );
     const receivedFrom = new Set(
       (receivedActivities || []).map((a) => a.user_id)
     );
@@ -164,24 +226,33 @@ export async function GET(request: NextRequest) {
       .in("user_id", [...allPartnerIds]);
 
     const profileMap = new Map(
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (profiles || []).map((p: any) => [p.user_id, p])
+      ((profiles || []) as ProfileRow[]).map((p) => [p.user_id, p])
     );
 
     // Fetch partner accounts
     const { data: accounts } = await supabase
       .from("accounts")
-      .select("id, tier, display_name, email_verified")
+      .select(
+        "id, tier, display_name, email_verified, last_active_at, account_status, profile_visible, calendar_enabled"
+      )
       .in("id", [...allPartnerIds]);
 
     const accountMap = new Map(
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (accounts || []).map((a: any) => [a.id, a])
+      ((accounts || []) as AccountRow[]).map((a) => [a.id, a])
+    );
+
+    const { data: availabilityRows } = await supabase
+      .from("meeting_availability")
+      .select("user_id")
+      .in("user_id", [...allPartnerIds])
+      .gte("scheduled_at_utc", getMinimumRequestableMeetingStartIso());
+
+    const slotsSet = new Set(
+      ((availabilityRows || []) as Array<{ user_id: string }>).map((row) => row.user_id)
     );
 
     // Build the unified matches list
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const matches: any[] = [];
+    const matches: UnifiedMatch[] = [];
 
     for (const partnerId of allPartnerIds) {
       const profile = profileMap.get(partnerId);
@@ -211,6 +282,12 @@ export async function GET(request: NextRequest) {
         : activityMatch
         ? "activity"
         : "activity";
+      const meetingRequestBlockedReason = meetingMatch?.messaging_enabled
+        ? "Chat is already enabled for this match."
+        : null;
+      const canRequestMeeting =
+        hasRequestableMeetingAvailability(account, slotsSet.has(partnerId)) &&
+        !meetingMatch?.messaging_enabled;
 
       // Use the earliest matched_at for sorting
       const matchedAt =
@@ -243,6 +320,13 @@ export async function GET(request: NextRequest) {
         // Flags
         has_activity_match: !!activityMatch,
         has_meeting_match: !!meetingMatch,
+        hasCalendarSlots: hasRequestableMeetingAvailability(
+          account,
+          slotsSet.has(partnerId)
+        ),
+        canRequestMeeting,
+        meetingRequestBlockedReason,
+        partnerLastActiveAt: account?.last_active_at || null,
       });
     }
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
 import Image from "next/image";
 import {
   Search,
@@ -18,6 +19,7 @@ import {
   Crown,
   CheckCircle,
   XCircle,
+  Trash2,
 } from "lucide-react";
 
 /**
@@ -36,6 +38,27 @@ type UserListItem = {
     first_name: string | null;
     profile_photo_url: string | null;
   };
+};
+
+type UserListQueryRow = {
+  id: string;
+  email: string;
+  display_name: string | null;
+  tier: string;
+  role: string;
+  account_status: string;
+  email_verified: boolean;
+  created_at: string;
+  user_profiles:
+    | {
+        first_name: string | null;
+        profile_photo_url: string | null;
+      }
+    | {
+        first_name: string | null;
+        profile_photo_url: string | null;
+      }[]
+    | null;
 };
 
 /**
@@ -61,6 +84,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [filters, setFilters] = useState<FilterOptions>({
     tier: "all",
     status: "all",
@@ -72,6 +96,8 @@ export default function AdminUsersPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const pageSize = 20;
   const totalPages = Math.ceil(totalUsers / pageSize);
@@ -79,7 +105,7 @@ export default function AdminUsersPage() {
   /**
    * Fetch users with filters and pagination
    */
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
       // Build query
@@ -115,8 +141,10 @@ export default function AdminUsersPage() {
       }
 
       // Apply search
-      if (searchQuery) {
-        query = query.or(`email.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
+      if (debouncedSearchQuery) {
+        query = query.or(
+          `email.ilike.%${debouncedSearchQuery}%,display_name.ilike.%${debouncedSearchQuery}%`
+        );
       }
 
       // Apply pagination
@@ -135,8 +163,7 @@ export default function AdminUsersPage() {
       }
 
       // Transform data
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const transformedUsers: UserListItem[] = (data || []).map((user: any) => ({
+      const transformedUsers: UserListItem[] = ((data as UserListQueryRow[] | null) || []).map((user) => ({
         id: user.id,
         email: user.email,
         display_name: user.display_name,
@@ -145,7 +172,9 @@ export default function AdminUsersPage() {
         account_status: user.account_status,
         email_verified: user.email_verified,
         created_at: user.created_at,
-        profile: user.user_profiles?.[0] || user.user_profiles,
+        profile: Array.isArray(user.user_profiles)
+          ? user.user_profiles[0] || undefined
+          : user.user_profiles || undefined,
       }));
 
       setUsers(transformedUsers);
@@ -155,22 +184,32 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, currentPage, debouncedSearchQuery]);
 
-  useEffect(() => {
-    fetchUsers();
-// eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, currentPage]);
-
-  // Debounced search
   useEffect(() => {
     const timer = setTimeout(() => {
       setCurrentPage(1);
-      fetchUsers();
+      setDebouncedSearchQuery(searchQuery.trim());
     }, 300);
     return () => clearTimeout(timer);
-// eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  // Keep only currently visible users selected when the page/filter changes.
+  useEffect(() => {
+    setSelectedUserIds((prev) => {
+      if (prev.size === 0) return prev;
+      const visibleIds = new Set(users.map((u) => u.id));
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (visibleIds.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [users]);
 
   /**
    * Handle user action (suspend, ban, warn)
@@ -224,6 +263,149 @@ export default function AdminUsersPage() {
     }
   };
 
+  const toggleUserSelection = (userId: string) => {
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    if (users.length === 0) return;
+    const allSelected = users.every((u) => selectedUserIds.has(u.id));
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        users.forEach((u) => next.delete(u.id));
+      } else {
+        users.forEach((u) => next.add(u.id));
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const userIds = Array.from(selectedUserIds);
+    if (userIds.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete ${userIds.length} selected account${userIds.length > 1 ? "s" : ""}? This will disable login for those users.`
+    );
+    if (!confirmed) return;
+
+    const note = window.prompt("Optional note for bulk deletion:", "");
+
+    setBulkDeleting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Admin session missing");
+      }
+
+      const res = await fetch("/api/admin/user-actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "bulk_delete_users",
+          user_ids: userIds,
+          reason: note || undefined,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || "Bulk delete failed");
+      }
+
+      const deleted = typeof payload?.deleted_count === "number" ? payload.deleted_count : 0;
+      const skipped = typeof payload?.skipped_count === "number" ? payload.skipped_count : 0;
+      const failed = typeof payload?.failed_count === "number" ? payload.failed_count : 0;
+      window.alert(
+        `Bulk delete completed.\nDeleted: ${deleted}\nSkipped: ${skipped}\nFailed: ${failed}`
+      );
+
+      setSelectedUserIds(new Set());
+      fetchUsers();
+    } catch (error) {
+      console.error("Error bulk deleting users:", error);
+      window.alert(error instanceof Error ? error.message : "Bulk delete failed");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  /**
+   * Handle deletion workflow actions via admin API
+   */
+  const handleDeletionRequestAction = async (
+    userId: string,
+    action: "approve_deletion_request" | "reject_deletion_request"
+  ) => {
+    const isApprove = action === "approve_deletion_request";
+    const confirmed = window.confirm(
+      isApprove
+        ? "Approve deletion request and disable this user's login?"
+        : "Reject deletion request and reactivate this user?"
+    );
+    if (!confirmed) return;
+
+    const note = window.prompt(
+      isApprove
+        ? "Optional note for deletion approval:"
+        : "Optional note for rejection:",
+      ""
+    );
+
+    setActionLoading(userId);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Admin session missing");
+      }
+
+      const res = await fetch("/api/admin/user-actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action,
+          user_id: userId,
+          reason: note || undefined,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to process deletion request");
+      }
+
+      fetchUsers();
+      setActionMenuId(null);
+    } catch (error) {
+      console.error("Error processing deletion request:", error);
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to process deletion request"
+      );
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   /**
    * Get tier badge color
    */
@@ -251,10 +433,22 @@ export default function AdminUsersPage() {
         return "bg-amber-100 text-amber-700";
       case "banned":
         return "bg-red-100 text-red-700";
+      case "deactivated":
+        return "bg-gray-100 text-gray-700";
+      case "deletion_requested":
+        return "bg-orange-100 text-orange-700";
       default:
         return "bg-gray-100 text-gray-700";
     }
   };
+
+  const formatStatusLabel = (status: string) =>
+    status
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (m) => m.toUpperCase());
+
+  const allVisibleSelected =
+    users.length > 0 && users.every((user) => selectedUserIds.has(user.id));
 
   return (
     <div className="p-6 lg:p-8">
@@ -326,6 +520,8 @@ export default function AdminUsersPage() {
                 <option value="active">Active</option>
                 <option value="suspended">Suspended</option>
                 <option value="banned">Banned</option>
+                <option value="deactivated">Deactivated</option>
+                <option value="deletion_requested">Deletion Requested</option>
               </select>
             </div>
 
@@ -339,7 +535,7 @@ export default function AdminUsersPage() {
               >
                 <option value="all">All Roles</option>
                 <option value="user">User</option>
-                <option value="moderator">Moderator</option>
+                <option value="coordinator">Coordinator</option>
                 <option value="admin">Admin</option>
                 <option value="superadmin">Super Admin</option>
               </select>
@@ -360,6 +556,7 @@ export default function AdminUsersPage() {
             </div>
           </div>
         )}
+
       </div>
 
       {/* Users Table */}
@@ -374,10 +571,19 @@ export default function AdminUsersPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-100">
+            <div className="max-h-[70vh] overflow-auto">
+              <table className="w-full min-w-[1120px]">
+                <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100 shadow-sm">
                   <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={toggleSelectAllVisible}
+                        aria-label={allVisibleSelected ? "Deselect all users" : "Select all users"}
+                        className="h-4 w-4 rounded border-gray-300 text-[#1f419a] focus:ring-[#1f419a]"
+                      />
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       User
                     </th>
@@ -401,6 +607,19 @@ export default function AdminUsersPage() {
                 <tbody className="divide-y divide-gray-100">
                   {users.map((user) => (
                     <tr key={user.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={selectedUserIds.has(user.id)}
+                          onChange={() => toggleUserSelection(user.id)}
+                          aria-label={
+                            selectedUserIds.has(user.id)
+                              ? `Deselect ${user.email}`
+                              : `Select ${user.email}`
+                          }
+                          className="h-4 w-4 rounded border-gray-300 text-[#1f419a] focus:ring-[#1f419a]"
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
@@ -442,7 +661,7 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(user.account_status)}`}>
-                          {user.account_status.charAt(0).toUpperCase() + user.account_status.slice(1)}
+                          {formatStatusLabel(user.account_status)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -472,7 +691,7 @@ export default function AdminUsersPage() {
                           {actionMenuId === user.id && (
                             <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-100 z-10">
                               <Link
-                                href={`/admin/users/${user.id}`}
+                                href={adminPath(`/users/${user.id}`)}
                                 className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                               >
                                 <Eye className="h-4 w-4" />
@@ -509,6 +728,37 @@ export default function AdminUsersPage() {
                                   <CheckCircle className="h-4 w-4" />
                                   Activate
                                 </button>
+                              )}
+
+                              {user.account_status === "deletion_requested" && (
+                                <>
+                                  <button
+                                    onClick={() =>
+                                      handleDeletionRequestAction(
+                                        user.id,
+                                        "approve_deletion_request"
+                                      )
+                                    }
+                                    disabled={actionLoading === user.id}
+                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    Approve Delete
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      handleDeletionRequestAction(
+                                        user.id,
+                                        "reject_deletion_request"
+                                      )
+                                    }
+                                    disabled={actionLoading === user.id}
+                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-green-600 hover:bg-green-50 disabled:opacity-50"
+                                  >
+                                    <CheckCircle className="h-4 w-4" />
+                                    Reject Request
+                                  </button>
+                                </>
                               )}
                             </div>
                           )}
@@ -551,6 +801,38 @@ export default function AdminUsersPage() {
           </>
         )}
       </div>
+
+      {/* Floating bulk action bar so actions remain visible while scrolling */}
+      {selectedUserIds.size > 0 && (
+        <div className="fixed inset-x-3 bottom-4 z-50 sm:inset-x-auto sm:right-6">
+          <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-white px-4 py-3 shadow-2xl sm:min-w-[360px]">
+            <div className="text-sm font-semibold text-gray-900">
+              {selectedUserIds.size} selected
+            </div>
+            <div className="ml-auto flex gap-2">
+              <button
+                onClick={() => setSelectedUserIds(new Set())}
+                disabled={bulkDeleting}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Clear
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {bulkDeleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Delete Selected
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

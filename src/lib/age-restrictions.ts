@@ -9,6 +9,9 @@
  * - Other users cannot see or match with them
  */
 
+/** Minimum legal age to use the platform */
+export const MINIMUM_PLATFORM_AGE = 18;
+
 /** Minimum age for matching (users must be 24+ to appear in results) */
 export const MIN_MATCHING_AGE = 24;
 
@@ -44,4 +47,15 @@ export function isAgeRestrictedForMatching(dateOfBirth: string | null): boolean 
   const age = calculateAge(dateOfBirth);
   if (age === null) return false; // No DOB = allow (let other filters handle)
   return age >= MIN_RESTRICTED_AGE && age <= MAX_RESTRICTED_AGE;
+}
+
+/**
+ * Check if a user is below the minimum legal platform age.
+ */
+export function isBelowMinimumPlatformAge(
+  dateOfBirth: string | null
+): boolean {
+  const age = calculateAge(dateOfBirth);
+  if (age === null) return false;
+  return age < MINIMUM_PLATFORM_AGE;
 }

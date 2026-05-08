@@ -10,12 +10,23 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type PostgrestError } from "@supabase/supabase-js";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+function isMissingBlockedUsersTable(error: PostgrestError | null): boolean {
+  if (!error) return false;
+  const message = (error.message || "").toLowerCase();
+  return (
+    error.code === "42P01" ||
+    error.code === "PGRST205" ||
+    (error.code === "PGRST204" && message.includes("blocked_users")) ||
+    message.includes("blocked_users")
+  );
+}
 
 // ---------------------------------------------------------------
 // Auth helper — extract the current user from Bearer token
@@ -56,6 +67,9 @@ export async function GET(req: NextRequest) {
       .order("created_at", { ascending: false });
 
     if (blocksError) {
+      if (isMissingBlockedUsersTable(blocksError)) {
+        return NextResponse.json({ blocked_users: [] });
+      }
       console.error("Error fetching blocked users:", blocksError);
       return NextResponse.json(
         { error: "Failed to fetch blocked users" },
@@ -139,12 +153,25 @@ export async function POST(req: NextRequest) {
     }
 
     // Check if already blocked
-    const { data: existing } = await supabaseAdmin
+    const { data: existing, error: existingError } = await supabaseAdmin
       .from("blocked_users")
       .select("id")
       .eq("blocker_id", user.id)
       .eq("blocked_id", blocked_id)
       .maybeSingle();
+
+    if (existingError) {
+      if (isMissingBlockedUsersTable(existingError)) {
+        return NextResponse.json(
+          { error: "Blocking is temporarily unavailable. Please contact support." },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        { error: "Failed to validate block status" },
+        { status: 500 }
+      );
+    }
 
     if (existing) {
       return NextResponse.json(
@@ -163,6 +190,12 @@ export async function POST(req: NextRequest) {
       });
 
     if (insertError) {
+      if (isMissingBlockedUsersTable(insertError)) {
+        return NextResponse.json(
+          { error: "Blocking is temporarily unavailable. Please contact support." },
+          { status: 503 }
+        );
+      }
       console.error("Error blocking user:", insertError);
       return NextResponse.json(
         { error: "Failed to block user" },
@@ -210,6 +243,12 @@ export async function DELETE(req: NextRequest) {
       .eq("blocked_id", blockedId);
 
     if (deleteError) {
+      if (isMissingBlockedUsersTable(deleteError)) {
+        return NextResponse.json(
+          { error: "Blocking is temporarily unavailable. Please contact support." },
+          { status: 503 }
+        );
+      }
       console.error("Error unblocking user:", deleteError);
       return NextResponse.json(
         { error: "Failed to unblock user" },

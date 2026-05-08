@@ -14,7 +14,7 @@ export default function NotFound() {
       {/* Logo */}
       <Link href="/" className="mb-8">
         <Image
-          src="/matchindeed.svg"
+          src="/matchindeed-logo-black-font.png"
           alt="Matchindeed"
           width={180}
           height={46}

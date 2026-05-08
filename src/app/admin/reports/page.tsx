@@ -19,6 +19,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
 import {
   AlertTriangle,
   AlertCircle,
@@ -36,8 +37,6 @@ import {
   Ban,
   MessageSquare,
   Search,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  TrendingUp,
   FileWarning,
   CheckCircle,
   XCircle,
@@ -75,6 +74,23 @@ type ReportStats = {
   resolved: number;
   dismissed: number;
   urgent: number;
+};
+
+type ReportQueryRow = {
+  id: string;
+  reporter_id: string;
+  reported_user_id: string;
+  reason: string;
+  description: string | null;
+  priority: ReportItem["priority"];
+  status: ReportItem["status"];
+  resolution: string | null;
+  created_at: string;
+  reporter: ReportItem["reporter"] | ReportItem["reporter"][] | null;
+  reported_user:
+    | ReportItem["reported_user"]
+    | ReportItem["reported_user"][]
+    | null;
 };
 
 // ---------------------------------------------------------------
@@ -207,8 +223,8 @@ export default function AdminReportsPage() {
         return;
       }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let transformedData: ReportItem[] = (data || []).map((item: any) => ({
+      const reportRows = (data as ReportQueryRow[] | null) || [];
+      let transformedData: ReportItem[] = reportRows.map((item) => ({
         id: item.id,
         reporter_id: item.reporter_id,
         reported_user_id: item.reported_user_id,
@@ -218,8 +234,10 @@ export default function AdminReportsPage() {
         status: item.status,
         resolution: item.resolution,
         created_at: item.created_at,
-        reporter: item.reporter,
-        reported_user: item.reported_user,
+        reporter: Array.isArray(item.reporter) ? item.reporter[0] || null : item.reporter,
+        reported_user: Array.isArray(item.reported_user)
+          ? item.reported_user[0] || null
+          : item.reported_user,
       }));
 
       // Client-side search filter
@@ -269,12 +287,18 @@ export default function AdminReportsPage() {
         data: { user },
       } = await supabase.auth.getUser();
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const updateData: Record<string, any> = {
+      const updateData: {
+        status: string;
+        reviewed_by?: string;
+        reviewed_at: string;
+        resolution?: string;
+      } = {
         status: newStatus,
-        reviewed_by: user?.id,
         reviewed_at: new Date().toISOString(),
       };
+      if (user?.id) {
+        updateData.reviewed_by = user.id;
+      }
 
       if (resolutionText) {
         updateData.resolution = resolutionText;
@@ -786,7 +810,7 @@ export default function AdminReportsPage() {
                       </button>
                     )}
                     <Link
-                      href={`/admin/users/${report.reported_user_id}`}
+                      href={adminPath(`/users/${report.reported_user_id}`)}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 text-xs font-medium transition"
                     >
                       <User className="h-3.5 w-3.5" />

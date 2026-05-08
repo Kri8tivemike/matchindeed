@@ -11,6 +11,8 @@ import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import ProfileCompletenessCard from "@/components/ProfileCompletenessCard";
 import { supabase } from "@/lib/supabase";
+import { getSafeDisplayName } from "@/lib/name";
+import { getVisibleReceivedActivities, getVisibleReceivedActivityCount } from "@/lib/like-counters";
 
 /** Time-based greeting helper */
 function getGreeting(): string {
@@ -46,6 +48,7 @@ function activityLabel(type: string): { emoji: string; label: string } {
 type DashboardStats = {
   matches: number;
   unreadMessages: number;
+  unreadNotifications: number;
   upcomingMeetings: number;
   credits: number;
   walletBalance: number;
@@ -103,6 +106,7 @@ export default function DashboardHomePage() {
   const [stats, setStats] = useState<DashboardStats>({
     matches: 0,
     unreadMessages: 0,
+    unreadNotifications: 0,
     upcomingMeetings: 0,
     credits: 0,
     walletBalance: 0,
@@ -128,33 +132,61 @@ export default function DashboardHomePage() {
           .maybeSingle();
 
         if (profile) {
-          setUserName(profile.first_name || "User");
+          setUserName(getSafeDisplayName(profile.first_name, user.email?.split("@")[0] || null));
           const photo = (profile.photos && profile.photos.length > 0)
             ? profile.photos[0]
             : profile.profile_photo_url;
           setUserPhoto(photo || null);
         }
 
+        const { data: { session } } = await supabase.auth.getSession();
+        const unreadMessagesPromise: Promise<number> = session
+          ? fetch("/api/messages?summary=true", {
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            })
+              .then((res) => (res.ok ? res.json() : null))
+              .then((payload) => {
+                const value = payload?.total_unread;
+                return typeof value === "number" ? value : 0;
+              })
+              .catch(() => 0)
+          : Promise.resolve(0);
+
+        const unreadNotificationsPromise: Promise<number> = session
+          ? fetch("/api/notifications?summary=true&unread_only=true", {
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            })
+              .then((res) => (res.ok ? res.json() : null))
+              .then((payload) => {
+                const value = payload?.unread_count;
+                return typeof value === "number" ? value : 0;
+              })
+              .catch(() => 0)
+          : Promise.resolve(0);
+
         // Fetch stats in parallel
+        const visibleReceivedActivitiesPromise = getVisibleReceivedActivities(user.id, 5);
+        const visibleReceivedLikesCountPromise = getVisibleReceivedActivityCount(user.id);
+
         const [
           matchesRes,
-          messagesRes,
           meetingsRes,
           creditsRes,
           walletRes,
-          likesRes,
+          visibleLikesCount,
+          visibleReceivedActivities,
+          unreadMessages,
+          unreadNotifications,
         ] = await Promise.all([
           // Mutual matches count
           supabase
             .from("user_matches")
             .select("id", { count: "exact", head: true })
             .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`),
-          // Unread messages count
-          supabase
-            .from("messages")
-            .select("id", { count: "exact", head: true })
-            .eq("receiver_id", user.id)
-            .is("read_at", null),
           // Upcoming meetings count
           supabase
             .from("meetings")
@@ -173,12 +205,10 @@ export default function DashboardHomePage() {
             .select("balance_cents")
             .eq("user_id", user.id)
             .maybeSingle(),
-          // Total likes/winks/interested received
-          supabase
-            .from("user_activities")
-            .select("id", { count: "exact", head: true })
-            .eq("target_user_id", user.id)
-            .in("activity_type", ["like", "wink", "interested"]),
+          visibleReceivedLikesCountPromise,
+          visibleReceivedActivitiesPromise,
+          unreadMessagesPromise,
+          unreadNotificationsPromise,
         ]);
 
         // Compute available credits safely
@@ -190,25 +220,18 @@ export default function DashboardHomePage() {
 
         setStats({
           matches: matchesRes.count || 0,
-          unreadMessages: messagesRes.count || 0,
+          unreadMessages,
+          unreadNotifications,
           upcomingMeetings: meetingsRes.count || 0,
           credits: availableCredits,
           walletBalance: walletData?.balance_cents ? walletData.balance_cents / 100 : 0,
           profileViews: 0, // placeholder for future feature
-          totalLikes: likesRes.count || 0,
+          totalLikes: visibleLikesCount || 0,
         });
 
-        // Fetch recent activity (last 5 interactions received)
-        const { data: activityData } = await supabase
-          .from("user_activities")
-          .select("id, user_id, activity_type, created_at")
-          .eq("target_user_id", user.id)
-          .in("activity_type", ["like", "wink", "interested"])
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        if (activityData && activityData.length > 0) {
-          const activities = activityData as ActivityRow[];
+        // Fetch recent activity (last 5 visible interactions received)
+        if (visibleReceivedActivities.length > 0) {
+          const activities = visibleReceivedActivities as ActivityRow[];
           // Get names for activity users
           const activityUserIds = [...new Set(activities.map((a) => a.user_id))];
           const { data: activityProfiles } = await supabase
@@ -294,14 +317,14 @@ export default function DashboardHomePage() {
 
   /** Quick action shortcut items */
   const quickActions = [
-    { href: "/dashboard/discover", icon: Compass, label: "Discover", color: "bg-blue-50 text-blue-600", desc: "Find new matches" },
-    { href: "/dashboard/search", icon: Search, label: "Search", color: "bg-purple-50 text-purple-600", desc: "Advanced search" },
-    { href: "/dashboard/matches", icon: Users, label: "Matches", color: "bg-pink-50 text-pink-600", desc: "Your matches" },
-    { href: "/dashboard/messages", icon: MessageCircle, label: "Messages", color: "bg-green-50 text-green-600", desc: "Chat with matches" },
-    { href: "/dashboard/calendar", icon: Calendar, label: "Calendar", color: "bg-orange-50 text-orange-600", desc: "Manage availability" },
-    { href: "/dashboard/meetings", icon: Video, label: "Meetings", color: "bg-indigo-50 text-indigo-600", desc: "Video meetings" },
-    { href: "/dashboard/likes", icon: Heart, label: "Likes", color: "bg-red-50 text-red-600", desc: "Who likes you" },
-    { href: "/dashboard/notifications", icon: Bell, label: "Notifications", color: "bg-amber-50 text-amber-600", desc: "Stay updated" },
+    { href: "/dashboard/discover", icon: Compass, label: "Discover", color: "bg-blue-50 text-blue-600", desc: "Find new matches", count: 0 },
+    { href: "/dashboard/search", icon: Search, label: "Search", color: "bg-purple-50 text-purple-600", desc: "Advanced search", count: 0 },
+    { href: "/dashboard/matches", icon: Users, label: "Matches", color: "bg-pink-50 text-pink-600", desc: "Your matches", count: stats.matches },
+    { href: "/dashboard/messages", icon: MessageCircle, label: "Messages", color: "bg-green-50 text-green-600", desc: "Chat with matches", count: stats.unreadMessages },
+    { href: "/dashboard/calendar", icon: Calendar, label: "Calendar", color: "bg-orange-50 text-orange-600", desc: "Manage availability", count: 0 },
+    { href: "/dashboard/meetings", icon: Video, label: "Meetings", color: "bg-indigo-50 text-indigo-600", desc: "Video meetings", count: stats.upcomingMeetings },
+    { href: "/dashboard/likes", icon: Heart, label: "Likes", color: "bg-red-50 text-red-600", desc: "Who likes you", count: stats.totalLikes },
+    { href: "/dashboard/notifications", icon: Bell, label: "Notifications", color: "bg-amber-50 text-amber-600", desc: "Stay updated", count: stats.unreadNotifications },
   ];
 
   return (
@@ -310,7 +333,7 @@ export default function DashboardHomePage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/matchindeed.svg" alt="Matchindeed" width={140} height={36} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>
@@ -408,7 +431,7 @@ export default function DashboardHomePage() {
                   </div>
                 </Link>
 
-                <Link href="/dashboard/profile/wallet" className="group rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5 hover:shadow-md transition-shadow">
+                <Link href="/dashboard/wallet" className="group rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5 hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-100 transition-colors">
                       <CreditCard className="h-5 w-5" />
@@ -556,11 +579,23 @@ export default function DashboardHomePage() {
                       href={action.href}
                       className="group flex flex-col items-center gap-2 rounded-xl border border-gray-100 p-4 hover:border-[#1f419a]/30 hover:bg-[#1f419a]/5 transition-all"
                     >
-                      <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${action.color} group-hover:scale-110 transition-transform`}>
+                      <div className={`relative flex h-11 w-11 items-center justify-center rounded-xl ${action.color} group-hover:scale-110 transition-transform`}>
                         <action.icon className="h-5 w-5" />
+                        {action.count > 0 && (
+                          <span className="absolute -right-2 -top-2 inline-flex min-w-[22px] items-center justify-center rounded-full bg-[#1f419a] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm ring-2 ring-white">
+                            {action.count > 99 ? "99+" : action.count}
+                          </span>
+                        )}
                       </div>
                       <div className="text-center">
-                        <div className="text-sm font-medium text-gray-900">{action.label}</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {action.label}
+                          {action.count > 0 && (
+                            <span className="ml-1 text-xs font-semibold text-[#1f419a]">
+                              ({action.count > 99 ? "99+" : action.count})
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-gray-500">{action.desc}</div>
                       </div>
                     </Link>
@@ -570,7 +605,7 @@ export default function DashboardHomePage() {
 
               {/* Wallet Summary */}
               {(stats.credits > 0 || stats.walletBalance > 0) && (
-                <Link href="/dashboard/profile/wallet" className="block rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 p-5 shadow-sm ring-1 ring-amber-200/50 hover:shadow-md transition-shadow">
+                <Link href="/dashboard/wallet" className="block rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 p-5 shadow-sm ring-1 ring-amber-200/50 hover:shadow-md transition-shadow">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-600">

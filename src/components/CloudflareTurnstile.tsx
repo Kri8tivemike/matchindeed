@@ -30,6 +30,26 @@ interface CloudflareTurnstileProps {
   theme?: "light" | "dark" | "auto";
 }
 
+type TurnstileAPI = {
+  render: (
+    container: HTMLElement,
+    options: {
+      sitekey: string;
+      theme?: "light" | "dark" | "auto";
+      callback: (token: string) => void;
+      "expired-callback"?: () => void;
+      "error-callback"?: () => void;
+    }
+  ) => string;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileAPI;
+  }
+}
+
 // Global flag to track script loading state
 let scriptLoaded = false;
 let scriptLoading = false;
@@ -49,8 +69,7 @@ export default function CloudflareTurnstile({
     if (!containerRef.current || !siteKey) return;
     if (widgetIdRef.current !== null) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const turnstile = (window as any).turnstile;
+    const { turnstile } = window;
     if (!turnstile) return;
 
     widgetIdRef.current = turnstile.render(containerRef.current, {
@@ -99,8 +118,7 @@ export default function CloudflareTurnstile({
       // Cleanup widget on unmount
       if (widgetIdRef.current !== null) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (window as any).turnstile?.remove(widgetIdRef.current);
+          window.turnstile?.remove(widgetIdRef.current);
         } catch {
           // Silently ignore cleanup errors
         }

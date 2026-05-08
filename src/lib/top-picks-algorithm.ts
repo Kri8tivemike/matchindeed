@@ -10,6 +10,11 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { isAgeRestrictedForMatching } from "./age-restrictions";
+import {
+  matchesPartnerGenderPreference,
+  resolvePartnerGenderPreference,
+} from "./matching/interest-preference";
+import { evaluateGenderEligibility } from "./matching/gender-rules";
 
 // Lazy initialization of admin client (only for server-side use)
 let supabaseAdmin: ReturnType<typeof createClient> | null = null;
@@ -37,6 +42,8 @@ function getSupabaseAdmin() {
 }
 
 export interface UserPreferences {
+  partner_gender_preference: string | null;
+  partner_experience?: string | null;
   partner_location: string | null;
   partner_age_range: string | null;
   partner_height_min_cm: number | null;
@@ -393,12 +400,20 @@ export async function generateTopPicks(
   try {
     const admin = getSupabaseAdmin();
     
-    // Get user preferences
-    const { data: preferences } = await admin
-      .from("user_preferences")
-      .select("*")
-      .eq("user_id", userId)
-      .maybeSingle();
+    const [{ data: preferences }, { data: requesterProfile }] = await Promise.all([
+      admin
+        .from("user_preferences")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle(),
+      admin
+        .from("user_profiles")
+        .select("gender")
+        .eq("user_id", userId)
+        .maybeSingle(),
+    ]);
+    const requesterGender =
+      (requesterProfile as { gender?: string | null } | null)?.gender || null;
 
     // Get all active user IDs (excluding current user)
     const { data: activeAccounts } = await admin
@@ -417,7 +432,7 @@ export async function generateTopPicks(
     // Get profiles for active users
     const { data: profiles } = await admin
       .from("user_profiles")
-      .select("user_id, first_name, last_name, date_of_birth, location, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, ethnicity, updated_at")
+      .select("user_id, first_name, last_name, date_of_birth, location, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, ethnicity, updated_at, gender")
       .in("user_id", activeUserIds) as { data: { 
   user_id: string;
   first_name: string | null;
@@ -434,6 +449,7 @@ export async function generateTopPicks(
   smoking_habits: string | null;
   ethnicity: string | null;
   updated_at: string | null;
+  gender: string | null;
 }[] | null };
 
     if (!profiles || profiles.length === 0) {
@@ -466,12 +482,32 @@ export async function generateTopPicks(
       .in("activity_type", ["like", "wink", "interested"]) as { data: { user_id: string }[] | null };
 
     const mutualUserIds = new Set((mutualActivities || []).map(a => a.user_id));
+    const partnerGenderPreference = resolvePartnerGenderPreference({
+      partnerGenderPreference:
+        (preferences as UserPreferences | null)?.partner_gender_preference || null,
+      legacyPartnerExperience:
+        (preferences as UserPreferences | null)?.partner_experience || null,
+      requesterGender,
+    });
 
     // Calculate compatibility scores (exclude profiles aged 18–23 per platform rule)
     const scores: CompatibilityScore[] = profiles
       .map(profile => {
         // Exclude users aged 18–23 from matching pool
         if (isAgeRestrictedForMatching(profile.date_of_birth)) return null;
+
+        if (
+          !evaluateGenderEligibility({
+            requesterGender,
+            targetGender: profile.gender,
+          }).allowed
+        ) {
+          return null;
+        }
+
+        if (!matchesPartnerGenderPreference(profile.gender, partnerGenderPreference)) {
+          return null;
+        }
 
         const account = accountMap.get(profile.user_id);
         if (!account) return null;

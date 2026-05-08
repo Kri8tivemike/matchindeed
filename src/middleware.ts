@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+const MAINTENANCE_MODE_ENABLED = false;
+const MAINTENANCE_PATH = "/maintenance";
+
 /**
  * Next.js Middleware — Security Headers & Rate Limiting Prep
  *
@@ -15,8 +18,40 @@ import type { NextRequest } from "next/server";
  * 6. Cache static assets (JS, CSS, images)
  */
 export function middleware(request: NextRequest) {
-  const response = NextResponse.next();
+  const pathname = request.nextUrl.pathname;
 
+  if (MAINTENANCE_MODE_ENABLED && pathname !== MAINTENANCE_PATH) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        {
+          error: "maintenance_mode",
+          message:
+            "MatchIndeed is temporarily unavailable while maintenance is in progress.",
+        },
+        {
+          status: 503,
+          headers: {
+            "Cache-Control": "no-store",
+            "Retry-After": "3600",
+          },
+        }
+      );
+    }
+
+    const maintenanceUrl = request.nextUrl.clone();
+    maintenanceUrl.pathname = MAINTENANCE_PATH;
+    maintenanceUrl.search = "";
+
+    const response = NextResponse.rewrite(maintenanceUrl);
+    response.headers.set("Cache-Control", "no-store");
+    return applySecurityHeaders(request, response);
+  }
+
+  const response = NextResponse.next();
+  return applySecurityHeaders(request, response);
+}
+
+function applySecurityHeaders(request: NextRequest, response: NextResponse) {
   // Security headers (complement Cloudflare's edge-level protections)
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
@@ -41,6 +76,6 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     // Apply to all routes except static files and _next internals
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.svg$|.*\\.png$|.*\\.jpg$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|maintenance|.*\\.svg$|.*\\.png$|.*\\.jpg$).*)",
   ],
 };

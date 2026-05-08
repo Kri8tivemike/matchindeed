@@ -23,14 +23,17 @@ import {
   AlertCircle,
   Loader2,
   RefreshCw,
+  Clock,
 } from "lucide-react";
 import Link from "next/link";
+import { adminPath } from "@/lib/admin/path";
 
 type CalendarSlot = {
   id: string;
   user_id: string;
   slot_date: string;
   slot_time: string;
+  scheduled_at_utc?: string | null;
   source: string;
   user: {
     email: string;
@@ -39,9 +42,11 @@ type CalendarSlot = {
 };
 
 type MeetingConflict = {
+  key: string;
   date: string;
+  time: string;
   count: number;
-  meetings: CalendarSlot[];
+  slots: CalendarSlot[];
 };
 
 type CalendarSlotRow = {
@@ -49,6 +54,7 @@ type CalendarSlotRow = {
   user_id: string;
   slot_date: string;
   slot_time: string;
+  scheduled_at_utc?: string | null;
   source: string;
   accounts:
     | {
@@ -68,11 +74,28 @@ export default function AdminCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [dateFilter, setDateFilter] = useState<string>("");
+  const [timeFilter, setTimeFilter] = useState<string>("");
   const [conflicts, setConflicts] = useState<MeetingConflict[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<CalendarSlot | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("");
+
+  const formatConflictDate = (date: string) =>
+    new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+
+  const formatConflictTime = (time: string) => {
+    const normalized = time.length === 5 ? `${time}:00` : time;
+    return new Date(`1970-01-01T${normalized}`).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
 
   /**
    * Fetch all calendar slots
@@ -87,18 +110,19 @@ export default function AdminCalendarPage() {
           user_id,
           slot_date,
           slot_time,
+          scheduled_at_utc,
           source,
           accounts!user_id (
             email,
             display_name
           )
         `)
+        .order("scheduled_at_utc", { ascending: true, nullsFirst: false })
         .order("slot_date", { ascending: true })
         .order("slot_time", { ascending: true });
 
-      if (dateFilter) {
-        query = query.eq("slot_date", dateFilter);
-      }
+      if (dateFilter) query = query.eq("slot_date", dateFilter);
+      if (timeFilter) query = query.eq("slot_time", timeFilter);
 
       const { data, error } = await query;
 
@@ -112,44 +136,49 @@ export default function AdminCalendarPage() {
         user_id: slot.user_id,
         slot_date: slot.slot_date,
         slot_time: slot.slot_time,
+        scheduled_at_utc: slot.scheduled_at_utc,
         source: slot.source,
         user: Array.isArray(slot.accounts) ? slot.accounts[0] : slot.accounts,
       }));
 
       setSlots(transformedSlots);
 
-      // Detect conflicts (3+ meetings on same date)
+      // Detect exact date+time collisions so admins can review real conflicts.
       detectConflicts(transformedSlots);
     } catch (error) {
       console.error("Error:", error);
     } finally {
       setLoading(false);
     }
-  }, [dateFilter]);
+  }, [dateFilter, timeFilter]);
 
   /**
    * Detect meeting conflicts
    */
   const detectConflicts = (allSlots: CalendarSlot[]) => {
-    const dateGroups: Record<string, CalendarSlot[]> = {};
-    
-    allSlots.forEach(slot => {
-      if (!dateGroups[slot.slot_date]) {
-        dateGroups[slot.slot_date] = [];
-      }
-      dateGroups[slot.slot_date].push(slot);
+    const slotGroups = new Map<string, CalendarSlot[]>();
+
+    allSlots.forEach((slot) => {
+      const key = slot.scheduled_at_utc || `${slot.slot_date}|${slot.slot_time}`;
+      const existing = slotGroups.get(key) || [];
+      existing.push(slot);
+      slotGroups.set(key, existing);
     });
 
-    const conflictList: MeetingConflict[] = [];
-    Object.entries(dateGroups).forEach(([date, slots]) => {
-      if (slots.length >= 3) {
-        conflictList.push({
-          date,
-          count: slots.length,
-          meetings: slots,
-        });
-      }
-    });
+    const conflictList = Array.from(slotGroups.entries())
+      .filter(([, groupedSlots]) => groupedSlots.length >= 2)
+      .map(([key, groupedSlots]) => ({
+        key,
+        date: groupedSlots[0].slot_date,
+        time: groupedSlots[0].slot_time,
+        count: groupedSlots.length,
+        slots: groupedSlots,
+      }))
+      .sort((a, b) =>
+        (a.slots[0]?.scheduled_at_utc || `${a.date}T${a.time}`).localeCompare(
+          b.slots[0]?.scheduled_at_utc || `${b.date}T${b.time}`
+        )
+      );
 
     setConflicts(conflictList);
   };
@@ -205,8 +234,43 @@ export default function AdminCalendarPage() {
    * Send email alert to user
    */
   const handleSendAlert = async (slot: CalendarSlot) => {
-    // This would integrate with email service
-    toast.info(`Email alert would be sent to ${slot.user?.email}`);
+    if (!slot.user?.email) {
+      toast.error("No email address found for this user.");
+      return;
+    }
+
+    const subject = encodeURIComponent("Matchindeed calendar update");
+    const body = encodeURIComponent(
+      `Hello${slot.user.display_name ? ` ${slot.user.display_name}` : ""},\n\nYour calendar slot on ${formatConflictDate(slot.slot_date)} at ${formatConflictTime(slot.slot_time)} requires attention. Please log in to Matchindeed to review the latest update.\n\nMatchindeed Admin`
+    );
+    window.location.href = `mailto:${slot.user.email}?subject=${subject}&body=${body}`;
+    toast.info(`Opening your email app for ${slot.user.email}`);
+  };
+
+  const handleReviewConflict = (conflict: MeetingConflict) => {
+    setDateFilter(conflict.date);
+    setTimeFilter(conflict.time);
+    toast.info(
+      `Showing ${conflict.count} overlapping slots for ${formatConflictDate(conflict.date)} at ${formatConflictTime(conflict.time)}.`
+    );
+  };
+
+  const handleNotifyConflict = (conflict: MeetingConflict) => {
+    const uniqueEmails = Array.from(
+      new Set(conflict.slots.map((slot) => slot.user?.email).filter(Boolean))
+    ) as string[];
+
+    if (uniqueEmails.length === 0) {
+      toast.error("No user emails found for this conflict.");
+      return;
+    }
+
+    const subject = encodeURIComponent("Matchindeed scheduling conflict review");
+    const body = encodeURIComponent(
+      `Hello,\n\nWe are reviewing a scheduling conflict for ${formatConflictDate(conflict.date)} at ${formatConflictTime(conflict.time)}. Our admin team is currently reallocating the affected slots and will follow up with the confirmed update shortly.\n\nMatchindeed Admin`
+    );
+    window.location.href = `mailto:${uniqueEmails.join(",")}?subject=${subject}&body=${body}`;
+    toast.info(`Opening your email app for ${uniqueEmails.length} affected user(s).`);
   };
 
   const filteredSlots = slots.filter(slot => {
@@ -235,27 +299,6 @@ export default function AdminCalendarPage() {
         </button>
       </div>
 
-      {/* Conflicts Alert */}
-      {conflicts.length > 0 && (
-        <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertCircle className="h-5 w-5 text-amber-600" />
-            <h3 className="font-semibold text-amber-900">Meeting Conflicts Detected</h3>
-          </div>
-          <p className="text-sm text-amber-700 mb-3">
-            {conflicts.length} date(s) have 3 or more meetings scheduled. Review and allocate accordingly.
-          </p>
-          <div className="space-y-2">
-            {conflicts.map((conflict, idx) => (
-              <div key={idx} className="flex items-center justify-between p-2 bg-white rounded-lg">
-                <span className="text-sm font-medium">{conflict.date}</span>
-                <span className="text-sm text-amber-600">{conflict.count} meetings</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Filters */}
       <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mb-6">
         <div className="flex flex-col sm:flex-row gap-4">
@@ -277,8 +320,116 @@ export default function AdminCalendarPage() {
               className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
             />
           </div>
+          <div className="w-full sm:w-40">
+            <input
+              type="time"
+              value={timeFilter}
+              onChange={(e) => setTimeFilter(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] outline-none"
+            />
+          </div>
+          {(dateFilter || timeFilter) && (
+            <button
+              type="button"
+              onClick={() => {
+                setDateFilter("");
+                setTimeFilter("");
+              }}
+              className="w-full rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:w-auto"
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Exact Conflict Console */}
+      {conflicts.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 text-base font-semibold text-amber-900">
+                <AlertCircle className="h-5 w-5 text-amber-600" />
+                Exact Time Conflicts
+              </h3>
+              <p className="mt-1 text-sm text-amber-700">
+                These are overlapping slots at the same date and time. Review the affected users below and reallocate or notify them.
+              </p>
+            </div>
+            <Link
+              href={adminPath("/meetings")}
+              className="inline-flex items-center justify-center rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100"
+            >
+              Open Meeting Management
+            </Link>
+          </div>
+
+          <div className="mt-4 max-h-[46vh] overflow-auto pr-2">
+            <div className="grid gap-3">
+              {conflicts.map((conflict) => (
+                <div
+                  key={conflict.key}
+                  className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                          <CalendarIcon className="h-3.5 w-3.5" />
+                          {formatConflictDate(conflict.date)}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700">
+                          <Clock className="h-3.5 w-3.5" />
+                          {formatConflictTime(conflict.time)}
+                        </span>
+                        <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">
+                          {conflict.count} overlapping slots
+                        </span>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {conflict.slots.map((slot) => (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSlot(slot);
+                              setNewDate(slot.slot_date);
+                              setNewTime(slot.slot_time);
+                              setShowEditModal(true);
+                            }}
+                            className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-[#1f419a]/20 hover:bg-[#1f419a]/5"
+                          >
+                            {slot.user?.display_name || slot.user?.email || "Unknown user"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleReviewConflict(conflict)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        Review Slots
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleNotifyConflict(conflict)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        <Mail className="h-4 w-4" />
+                        Notify Users
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Calendar Slots Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -292,9 +443,9 @@ export default function AdminCalendarPage() {
             <p className="text-gray-500">No calendar slots found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-100">
+          <div className="max-h-[62vh] overflow-auto">
+            <table className="w-full min-w-[900px]">
+              <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100 shadow-sm">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
@@ -352,7 +503,7 @@ export default function AdminCalendarPage() {
                           <Mail className="h-4 w-4" />
                         </button>
                         <Link
-                          href={`/admin/users/${slot.user_id}`}
+                          href={adminPath(`/users/${slot.user_id}`)}
                           className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
                           title="View User"
                         >

@@ -18,8 +18,6 @@ import {
   MapPin,
   Plus,
   X,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  Trash2,
   Shield,
   Loader2,
   Search,
@@ -81,13 +79,6 @@ export default function BlockedLocationsPage() {
     type: "success" | "error";
     text: string;
   } | null>(null);
-
-  // Auto-dismiss toast
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3000);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   /**
    * Fetch blocked locations on mount
@@ -237,7 +228,7 @@ export default function BlockedLocationsPage() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/matchindeed.svg" alt="Matchindeed" width={140} height={36} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>

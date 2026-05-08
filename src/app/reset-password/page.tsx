@@ -63,11 +63,11 @@ function BrandPanel() {
 
       <Link href="/" className="relative z-10">
         <Image
-          src="/matchindeed.svg"
+          src="/matchindeed-logo-black-font.png"
           alt="MatchIndeed"
           width={160}
           height={42}
-          className="brightness-0 invert"
+         
           style={{ width: "auto", height: "auto" }}
         />
       </Link>
@@ -228,7 +228,7 @@ function ResetPasswordContent() {
           <div className="w-full max-w-md">
             <div className="mb-8 text-center lg:hidden">
               <Link href="/" className="inline-block">
-                <Image src="/matchindeed.svg" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
+                <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
               </Link>
             </div>
             <div className="rounded-2xl bg-white p-8 shadow-xl ring-1 ring-black/5 text-center">
@@ -267,7 +267,7 @@ function ResetPasswordContent() {
           {/* Mobile logo */}
           <div className="mb-8 text-center lg:hidden">
             <Link href="/" className="inline-block">
-              <Image src="/matchindeed.svg" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
+              <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
             </Link>
           </div>
 

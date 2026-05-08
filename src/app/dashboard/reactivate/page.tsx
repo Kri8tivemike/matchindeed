@@ -9,6 +9,7 @@ interface ReactivationStatus {
   has_pending_request: boolean;
   status?: string;
   created_at?: string;
+  expires_at?: string;
   custom_reason?: string;
   reactivation_reason?: string;
 }
@@ -47,8 +48,7 @@ export default function ReactivatePage() {
     };
 
     checkReactivationStatus();
-// eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router]);
 
   const handleSubmit = async (reason: string, customReason?: string) => {
     setSubmitting(true);
@@ -77,9 +77,12 @@ export default function ReactivatePage() {
         const data = await statusRes.json();
         setStatus(data);
       }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit reactivation request');
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Failed to submit reactivation request';
+      setError(message);
     } finally {
       setSubmitting(false);
     }
@@ -110,8 +113,14 @@ export default function ReactivatePage() {
             <div className="text-sm text-blue-800 space-y-2">
               <p><strong>Status:</strong> {status.status || 'Pending'}</p>
               <p><strong>Submitted:</strong> {status.created_at ? new Date(status.created_at).toLocaleDateString() : 'Unknown'}</p>
+              {status.expires_at && (
+                <p><strong>Partner response deadline:</strong> {new Date(status.expires_at).toLocaleString()}</p>
+              )}
               {status.reactivation_reason && (
                 <p><strong>Reason:</strong> {status.reactivation_reason}</p>
+              )}
+              {status.status === "partner_responded" && (
+                <p className="text-purple-700"><strong>Update:</strong> Partner has responded. Your request is awaiting admin review.</p>
               )}
               <p className="mt-4 text-xs">Your partner will have 7 days to respond. After that, your request will be automatically approved.</p>
             </div>

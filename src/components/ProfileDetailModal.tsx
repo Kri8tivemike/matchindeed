@@ -21,15 +21,13 @@
  *   />
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Image from "next/image";
 import {
   X,
   Heart,
   Video,
   MapPin,
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-  Calendar,
   User,
   Loader2,
   ChevronLeft,
@@ -55,6 +53,13 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import ReportUserModal from "@/components/ReportUserModal";
+import { formatRelationshipStatusLabel } from "@/lib/relationship-status";
+import { NO_ACTIVE_MEETING_AVAILABILITY_BUTTON_LABEL } from "@/lib/meetings/request-availability";
+import {
+  getPersonalityDisplayText,
+  parseStoredPersonalityPrompts,
+} from "@/lib/profile/personality-prompts";
+import { getBlockedUserIds } from "@/lib/blocked-users";
 
 // ---------------------------------------------------------------
 // Types
@@ -103,6 +108,7 @@ interface ProfileDetailModalProps {
   matchBgColor?: string;
   /** Action handlers */
   onRequestMeeting?: (userId: string) => void;
+  canRequestMeeting?: boolean;
 }
 
 // ---------------------------------------------------------------
@@ -152,6 +158,7 @@ export default function ProfileDetailModal({
   matchColor,
   matchBgColor,
   onRequestMeeting,
+  canRequestMeeting = true,
 }: ProfileDetailModalProps) {
   const [profile, setProfile] = useState<FullProfile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -161,6 +168,14 @@ export default function ProfileDetailModal({
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [blocking, setBlocking] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
+  const profileViewLoggedRef = useRef<string | null>(null);
+  const personalityPromptEntries = parseStoredPersonalityPrompts(
+    profile?.personality_type
+  );
+  const legacyPersonalityText =
+    personalityPromptEntries.length === 0
+      ? getPersonalityDisplayText(profile?.personality_type)
+      : null;
 
   /**
    * Fetch full profile data and account verification status when modal opens
@@ -175,49 +190,38 @@ export default function ProfileDetailModal({
     try {
       // Get current user session for block check
       const { data: { session } } = await supabase.auth.getSession();
-      const currentUserId = session?.user?.id;
 
       // Fetch profile, account data, and block status in parallel
-      const promises = [
-        supabase
-          .from("user_profiles")
-          .select("*")
-          .eq("user_id", userId)
-          .maybeSingle().then(res => res),
-        supabase
-          .from("accounts")
-          .select("email_verified")
-          .eq("id", userId)
-          .maybeSingle().then(res => res),
-      ];
+      const profilePromise = supabase
+        .from("user_profiles")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
 
-      // Check if this user is already blocked by the current user
-      if (currentUserId) {
-        promises.push(
-          supabase
-            .from("blocked_users")
-            .select("id")
-            .eq("blocker_id", currentUserId)
-            .eq("blocked_id", userId)
-            .maybeSingle().then(res => res)
-        );
-      }
+      const accountPromise = supabase
+        .from("accounts")
+        .select("email_verified")
+        .eq("id", userId)
+        .maybeSingle();
 
-      const results = await Promise.all(promises);
+      const blockPromise = session?.access_token
+        ? getBlockedUserIds()
+            .then((blockedIds) => blockedIds.has(userId))
+            .catch(() => false)
+        : Promise.resolve(false);
 
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      const profileRes = results[0] as any;
-      const accountRes = results[1] as any;
-      const blockRes = results[2] as any;
-      /* eslint-enable @typescript-eslint/no-explicit-any */
+      const [profileRes, accountRes, blockRes] = await Promise.all([
+        profilePromise,
+        accountPromise,
+        blockPromise,
+      ]);
 
       if (profileRes.error) {
         console.error("Error fetching profile detail:", profileRes.error);
       }
       setProfile(profileRes.data || null);
       setVerified(accountRes.data?.email_verified || false);
-      // blockRes may be undefined if currentUserId was null, or error if table doesn't exist
-      setIsBlocked(blockRes?.data ? true : false);
+      setIsBlocked(!!blockRes);
     } catch (err) {
       console.error("Error in fetchProfile:", err);
     } finally {
@@ -231,8 +235,50 @@ export default function ProfileDetailModal({
     }
     if (!isOpen) {
       setProfile(null);
+      profileViewLoggedRef.current = null;
     }
   }, [isOpen, userId, fetchProfile]);
+
+  useEffect(() => {
+    if (!isOpen || !userId || profileViewLoggedRef.current === userId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const logProfileView = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token || cancelled) {
+          return;
+        }
+
+        const response = await fetch("/api/profile/view", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ target_user_id: userId }),
+        });
+
+        if (response.ok && !cancelled) {
+          profileViewLoggedRef.current = userId;
+        }
+      } catch (error) {
+        console.error("Error logging profile view:", error);
+      }
+    };
+
+    void logProfileView();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, userId]);
 
   // Close on Escape
   useEffect(() => {
@@ -332,7 +378,11 @@ export default function ProfileDetailModal({
     details.push({ icon: <GraduationCap className="h-4 w-4" />, label: "Education", value: profile.education_level });
   }
   if (profile?.relationship_status) {
-    details.push({ icon: <Heart className="h-4 w-4" />, label: "Status", value: formatLabel(profile.relationship_status) });
+    details.push({
+      icon: <Heart className="h-4 w-4" />,
+      label: "Status",
+      value: formatRelationshipStatusLabel(profile.relationship_status),
+    });
   }
   if (profile?.relationship_type) {
     details.push({ icon: <Target className="h-4 w-4" />, label: "Looking For", value: formatLabel(profile.relationship_type) });
@@ -357,7 +407,7 @@ export default function ProfileDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[100] flex items-stretch justify-stretch sm:items-center sm:justify-center">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -365,9 +415,9 @@ export default function ProfileDetailModal({
       />
 
       {/* Modal Content */}
-      <div className="relative z-10 flex h-[92vh] w-[95vw] max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <div className="relative z-10 flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-[92vh] sm:max-h-[92vh] sm:w-[95vw] sm:max-w-4xl sm:rounded-3xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 sm:px-5">
           <div className="flex items-center gap-3">
             {matchScore !== undefined && matchScore > 0 && (
               <span
@@ -499,7 +549,7 @@ export default function ProfileDetailModal({
               </div>
 
               {/* Right: Profile Info */}
-              <div className="p-6 space-y-5 overflow-y-auto max-h-[75vh]">
+              <div className="p-5 space-y-4 overflow-y-auto sm:p-6 sm:space-y-5 md:max-h-[75vh]">
                 {/* Name / Age / Location */}
                 <div>
                   <h2 className="flex items-center gap-2 text-3xl font-bold text-gray-900">
@@ -528,15 +578,41 @@ export default function ProfileDetailModal({
                 </div>
 
                 {/* About */}
-                {(profile.about_yourself || profile.personality_type) && (
+                {(profile.about_yourself ||
+                  personalityPromptEntries.length > 0 ||
+                  legacyPersonalityText) && (
                   <div className="rounded-xl bg-gradient-to-br from-[#1f419a]/5 to-[#2a44a3]/5 border border-[#1f419a]/10 p-4">
                     <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
                       <Sparkles className="h-4 w-4 text-[#1f419a]" />
                       About Me
                     </h3>
-                    <p className="text-sm text-gray-700 leading-relaxed">
-                      {profile.about_yourself || profile.personality_type}
-                    </p>
+                    {profile.about_yourself ? (
+                      <p className="text-sm text-gray-700 leading-relaxed">
+                        {profile.about_yourself}
+                      </p>
+                    ) : null}
+                    {!profile.about_yourself && legacyPersonalityText ? (
+                      <p className="text-sm text-gray-700 leading-relaxed">
+                        {legacyPersonalityText}
+                      </p>
+                    ) : null}
+                    {personalityPromptEntries.length > 0 ? (
+                      <div className="mt-3 grid gap-2">
+                        {personalityPromptEntries.map((prompt) => (
+                          <div
+                            key={prompt.id}
+                            className="rounded-2xl border border-[#1f419a]/10 bg-white/80 px-3 py-2.5"
+                          >
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#1f419a]/70">
+                              {prompt.title}
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-gray-700">
+                              {prompt.answer}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 )}
 
@@ -637,17 +713,37 @@ export default function ProfileDetailModal({
 
         {/* Footer — Action Buttons */}
         {profile && (
-          <div className="border-t border-gray-100 bg-white px-5 py-3">
+          <div className="border-t border-gray-100 bg-white px-4 py-3 sm:px-5">
             <div className="flex items-center gap-3">
               {/* Request Meeting */}
-              <button
-                type="button"
-                onClick={() => onRequestMeeting?.(userId!)}
-                className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-2.5 text-sm font-semibold text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
-              >
-                <Video className="h-4 w-4" />
-                Request Meeting
-              </button>
+              {onRequestMeeting ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (canRequestMeeting) {
+                      onRequestMeeting(userId!);
+                    }
+                  }}
+                  disabled={!canRequestMeeting}
+                  title={
+                    canRequestMeeting
+                      ? "Request video date meeting"
+                      : NO_ACTIVE_MEETING_AVAILABILITY_BUTTON_LABEL
+                  }
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-semibold leading-tight shadow-lg transition-all sm:text-sm ${
+                    canRequestMeeting
+                      ? "bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white hover:scale-[1.02] hover:shadow-xl"
+                      : "cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                  }`}
+                >
+                  <Video className="h-4 w-4 flex-shrink-0" />
+                  <span className="text-center">
+                    {canRequestMeeting
+                      ? "Request video date meeting"
+                      : NO_ACTIVE_MEETING_AVAILABILITY_BUTTON_LABEL}
+                  </span>
+                </button>
+              ) : null}
 
               {/* Block User */}
               <button
