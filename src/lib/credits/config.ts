@@ -9,13 +9,17 @@ export const MONTHLY_CREDITS_BY_TIER: Record<TierId, number> = {
   vip: UNLIMITED_CREDITS,
 };
 
+// ₦100/credit for all tiers. Minimum purchase = 10 credits (₦1,000 / $0.70 / £0.54).
+// All currency minimums are verified to exceed Stripe's floor (NGN ₦50, USD $0.50, GBP £0.30).
+export const MIN_CREDIT_PURCHASE = 10;
+
 export const PRICE_PER_CREDIT_BY_TIER: Record<
   Exclude<TierId, "vip">,
   { ngn: number; usd: number; gbp: number }
 > = {
-  basic: { ngn: 150, usd: 0.2, gbp: 0.16 },
-  standard: { ngn: 200, usd: 0.27, gbp: 0.22 },
-  premium: { ngn: 250, usd: 0.34, gbp: 0.27 },
+  basic: { ngn: 100, usd: 0.07, gbp: 0.05 },
+  standard: { ngn: 100, usd: 0.07, gbp: 0.05 },
+  premium: { ngn: 100, usd: 0.07, gbp: 0.05 },
 };
 
 export function normalizeTier(rawTier?: string | null): TierId {

@@ -37,6 +37,7 @@ import NotificationBell from "@/components/NotificationBell";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserSafe } from "@/lib/auth-helpers";
 import {
+  MIN_CREDIT_PURCHASE,
   MONTHLY_CREDITS_BY_TIER,
   PRICE_PER_CREDIT_BY_TIER,
 } from "@/lib/credits/config";
@@ -632,13 +633,12 @@ function WalletContent() {
       return;
     }
 
-    // Enforce Stripe minimum transaction amount
+    // Enforce minimum purchase quantity
     const pricePerCreditCheck = creditPurchaseAvailability.pricePerCredit;
-    const minQty = getMinCreditQuantity(pricePerCreditCheck, currency);
-    if (creditPurchaseAmount < minQty) {
-      const minAmount = formatPrice(Math.round(pricePerCreditCheck * minQty * 100), currency);
+    if (creditPurchaseAmount < MIN_CREDIT_PURCHASE) {
+      const minAmount = formatPrice(Math.round(pricePerCreditCheck * MIN_CREDIT_PURCHASE * 100), currency);
       toast.centerError(
-        `The minimum order is ${minAmount} per transaction (${minQty} credit${minQty !== 1 ? "s" : ""}). Please increase the quantity.`,
+        `The minimum order is ${MIN_CREDIT_PURCHASE} credits (${minAmount}). Please increase the quantity.`,
         undefined,
         "Minimum Order Required"
       );
@@ -1337,7 +1337,7 @@ function WalletContent() {
                 <label className="mb-1.5 block text-xs font-medium text-gray-700 sm:text-sm">Number of Credits</label>
                 <input
                   type="number"
-                  min="1"
+                  min={MIN_CREDIT_PURCHASE}
                   step="1"
                   value={creditPurchaseAmount || ""}
                   onChange={(e) => setCreditPurchaseAmount(parseInt(e.target.value) || 0)}
@@ -1346,21 +1346,17 @@ function WalletContent() {
                 />
                 {(() => {
                   const ppc = creditPurchaseAvailability.pricePerCredit;
-                  const minQtyHint = getMinCreditQuantity(ppc, currency);
-                  if (minQtyHint > 1) {
-                    return (
-                      <p className="mt-1 text-[10px] text-amber-600 sm:text-xs">
-                        Minimum {minQtyHint} credits ({formatPrice(Math.round(ppc * minQtyHint * 100), currency)}) required per transaction.
-                      </p>
-                    );
-                  }
-                  return null;
+                  return (
+                    <p className="mt-1 text-[10px] text-amber-600 sm:text-xs">
+                      Minimum {MIN_CREDIT_PURCHASE} credits ({formatPrice(Math.round(ppc * MIN_CREDIT_PURCHASE * 100), currency)}) required per transaction.
+                    </p>
+                  );
                 })()}
               </div>
 
               {/* Quick pick */}
               <div className="flex gap-2">
-                {[5, 10, 20].map((amt) => (
+                {[10, 20, 50].map((amt) => (
                   <button
                     key={amt}
                     onClick={() => setCreditPurchaseAmount(amt)}
