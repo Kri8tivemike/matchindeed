@@ -51,7 +51,10 @@ export function createEmailVerificationCode() {
 }
 
 export function hashEmailVerificationCode(code: string) {
-  return crypto.createHash("sha256").update(code).digest("hex");
+  // Truncated to 6 chars to fit the current VARCHAR(6) DB column.
+  // Run migration 20260508000000_widen_email_verification_code_column.sql
+  // in Supabase to permanently widen the column to TEXT.
+  return crypto.createHash("sha256").update(code).digest("hex").substring(0, 6);
 }
 
 export function createEmailVerificationToken({
