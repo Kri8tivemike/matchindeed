@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import { STRIPE_SUBSCRIPTION_AMOUNTS_SMALLEST_UNIT } from "@/lib/subscription/config";
+import { canAccessPaidFeatures } from "@/lib/subscription/permissions";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Stripe apiVersion varies by package version
-  apiVersion: "2026-01-28.clover" as any,
+  apiVersion: "2026-01-28.clover" as Stripe.StripeConfig["apiVersion"],
   typescript: true,
 });
 
@@ -12,52 +15,165 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 const baseTierPricing: Record<string, { name: string; amounts: { ngn: number; usd: number; gbp: number } }> = {
   basic: {
     name: "Basic Plan",
-    amounts: {
-      ngn: 1000000, // 10,000 Naira in kobo
-      usd: 700, // $7.00 in cents
-      gbp: 550, // £5.50 in pence
-    },
+    amounts: STRIPE_SUBSCRIPTION_AMOUNTS_SMALLEST_UNIT.basic,
   },
   standard: {
     name: "Standard Plan",
-    amounts: {
-      ngn: 3150000, // 31,500 Naira in kobo
-      usd: 2000, // $20.00 in cents
-      gbp: 1600, // £16.00 in pence
-    },
+    amounts: STRIPE_SUBSCRIPTION_AMOUNTS_SMALLEST_UNIT.standard,
   },
   premium: {
     name: "Premium Plan",
-    amounts: {
-      ngn: 6300000, // 63,000 Naira in kobo
-      usd: 4300, // $43.00 in cents
-      gbp: 3400, // £34.00 in pence
-    },
+    amounts: STRIPE_SUBSCRIPTION_AMOUNTS_SMALLEST_UNIT.premium,
+  },
+  vip: {
+    name: "VIP Plan",
+    amounts: STRIPE_SUBSCRIPTION_AMOUNTS_SMALLEST_UNIT.vip,
   },
 };
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+const SUPPORTED_CURRENCIES = new Set(["ngn", "usd", "gbp"]);
+
+/** Stripe minimum charge amounts per currency (in smallest unit: cents/pence/kobo) */
+const STRIPE_MINIMUM_AMOUNT_CENTS: Record<string, number> = {
+  usd: 50,    // $0.50
+  gbp: 30,    // £0.30
+  ngn: 5000,  // ₦50.00
+};
+
+const CURRENCY_DISPLAY: Record<string, { symbol: string; unit: string }> = {
+  usd: { symbol: "$", unit: "cents" },
+  gbp: { symbol: "£", unit: "pence" },
+  ngn: { symbol: "₦", unit: "kobo" },
+};
+
+function getMinimumAmountError(currency: string, amountCents: number): string | null {
+  const min = STRIPE_MINIMUM_AMOUNT_CENTS[currency];
+  if (!min || amountCents >= min) return null;
+  const display = CURRENCY_DISPLAY[currency] || { symbol: "", unit: "" };
+  const minFormatted = (min / 100).toFixed(2);
+  return `The minimum top-up amount is ${display.symbol}${minFormatted}. Please increase the amount and try again.`;
+}
+
+async function getAuthenticatedUserId() {
+  const cookieStore = await cookies();
+  const supabaseServer = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Ignore cookie writes inside API routes.
+        }
+      },
+    },
+  });
+
+  const {
+    data: { user },
+    error,
+  } = await supabaseServer.auth.getUser();
+
+  if (error || !user) {
+    return null;
+  }
+
+  return user.id;
+}
+
+function parseAmountCents(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
+}
+
+function parseCredits(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
+}
+
+function getCheckoutErrorMessage(error: unknown) {
+  const rawMessage =
+    error instanceof Error ? error.message : "Failed to create checkout session";
+  const normalized = rawMessage.toLowerCase();
+
+  if (normalized.includes("at least 30 pence")) {
+    return "The minimum top-up amount is £0.30. Please enter a higher amount and try again.";
+  }
+  if (normalized.includes("at least 50 cents")) {
+    return "The minimum top-up amount is $0.50. Please enter a higher amount and try again.";
+  }
+  if (normalized.includes("minimum amount") || normalized.includes("too low to process")) {
+    return "The amount entered is too low to process. Please increase the amount and try again.";
+  }
+
+  return rawMessage;
+}
+
 export async function POST(request: NextRequest) {
   try {
+    const authenticatedUserId = await getAuthenticatedUserId();
+    if (!authenticatedUserId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Read request body once
     const body = await request.json();
     const { priceId, tier, userId, currency = "usd", amount, amountCents, type, credits } = body;
 
+    if (userId && userId !== authenticatedUserId) {
+      return NextResponse.json(
+        { error: "Unauthorized - user ID mismatch" },
+        { status: 403 }
+      );
+    }
+
+    const sessionUserId = authenticatedUserId;
+    const normalizedCurrency = String(currency).toLowerCase();
+    if (!SUPPORTED_CURRENCIES.has(normalizedCurrency)) {
+      return NextResponse.json(
+        { error: "Invalid currency. Supported: NGN, USD, GBP" },
+        { status: 400 }
+      );
+    }
+
     // Handle wallet top-up (one-time payment)
     if (type === "wallet_topup") {
-      if (!userId || !amountCents || !currency) {
+      const paidFeaturesAccess = await canAccessPaidFeatures(sessionUserId);
+      if (!paidFeaturesAccess.allowed) {
         return NextResponse.json(
-          { error: "Missing required parameters for wallet top-up" },
+          {
+            error:
+              paidFeaturesAccess.message ||
+              "An active subscription plan is required to access paid features.",
+          },
+          { status: 403 }
+        );
+      }
+
+      const parsedAmountCents = parseAmountCents(amountCents);
+      if (!parsedAmountCents) {
+        return NextResponse.json(
+          { error: "Invalid amount for wallet top-up" },
           { status: 400 }
         );
       }
 
-      const normalizedCurrency = currency.toLowerCase();
-
-      if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
-        return NextResponse.json(
-          { error: "Invalid currency. Supported: NGN, USD, GBP" },
-          { status: 400 }
-        );
+      const minTopUpError = getMinimumAmountError(normalizedCurrency, parsedAmountCents);
+      if (minTopUpError) {
+        return NextResponse.json({ error: minTopUpError }, { status: 400 });
       }
 
       // Create a one-time payment for wallet top-up
@@ -69,45 +185,78 @@ export async function POST(request: NextRequest) {
               currency: normalizedCurrency,
               product_data: {
                 name: "Wallet Top-up",
-                description: `Add ${currency.toUpperCase()} ${(amountCents / 100).toFixed(2)} to your wallet`,
+                description: `Add ${normalizedCurrency.toUpperCase()} ${(parsedAmountCents / 100).toFixed(2)} to your wallet`,
               },
-              unit_amount: amountCents,
+              unit_amount: parsedAmountCents,
             },
             quantity: 1,
           },
         ],
         mode: "payment",
         locale: "en",
-        success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?canceled=true`,
-        client_reference_id: userId,
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/wallet?canceled=true`,
+        client_reference_id: sessionUserId,
+        payment_intent_data: {
+          metadata: {
+            userId: sessionUserId,
+            type: "wallet_topup",
+            amountCents: parsedAmountCents.toString(),
+            currency: normalizedCurrency,
+          },
+        },
         metadata: {
-          userId,
+          userId: sessionUserId,
           type: "wallet_topup",
-          amountCents: amountCents.toString(),
+          amountCents: parsedAmountCents.toString(),
           currency: normalizedCurrency,
         },
       });
+
+      if (!session.url) {
+        return NextResponse.json(
+          { error: "Stripe checkout URL unavailable" },
+          { status: 500 }
+        );
+      }
 
       return NextResponse.json({ sessionId: session.id, url: session.url });
     }
 
     // Handle credit purchase (one-time payment)
     if (type === "credit_purchase") {
-      if (!userId || !amountCents || !currency || !credits) {
+      const paidFeaturesAccess = await canAccessPaidFeatures(sessionUserId);
+      if (!paidFeaturesAccess.allowed) {
         return NextResponse.json(
-          { error: "Missing required parameters for credit purchase" },
+          {
+            error:
+              paidFeaturesAccess.message ||
+              "An active subscription plan is required to access paid features.",
+          },
+          { status: 403 }
+        );
+      }
+
+      const parsedAmountCents = parseAmountCents(amountCents);
+      const parsedCredits = parseCredits(credits);
+      if (!parsedAmountCents || !parsedCredits) {
+        return NextResponse.json(
+          { error: "Invalid amount or credits for credit purchase" },
           { status: 400 }
         );
       }
 
-      const normalizedCurrency = currency.toLowerCase();
-
-      if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
-        return NextResponse.json(
-          { error: "Invalid currency. Supported: NGN, USD, GBP" },
-          { status: 400 }
-        );
+      const minCreditError = getMinimumAmountError(normalizedCurrency, parsedAmountCents);
+      if (minCreditError) {
+        // Provide a more specific message for credit purchases
+        const min = STRIPE_MINIMUM_AMOUNT_CENTS[normalizedCurrency] || 50;
+        const display = CURRENCY_DISPLAY[normalizedCurrency] || { symbol: "", unit: "" };
+        const minFormatted = (min / 100).toFixed(2);
+        const pricePerCreditCents = Math.round(parsedAmountCents / parsedCredits);
+        const minQuantity = pricePerCreditCents > 0 ? Math.ceil(min / pricePerCreditCents) : 1;
+        return NextResponse.json({
+          error: `The minimum order is ${display.symbol}${minFormatted} per transaction. Please purchase at least ${minQuantity} credit${minQuantity !== 1 ? "s" : ""} to proceed.`,
+        }, { status: 400 });
       }
 
       // Create a one-time payment for credit purchase
@@ -119,45 +268,50 @@ export async function POST(request: NextRequest) {
               currency: normalizedCurrency,
               product_data: {
                 name: "Credits Purchase",
-                description: `Purchase ${credits} credit${credits !== 1 ? "s" : ""} for video dating`,
+                description: `Purchase ${parsedCredits} credit${parsedCredits !== 1 ? "s" : ""} for video dating`,
               },
-              unit_amount: amountCents,
+              unit_amount: parsedAmountCents,
             },
             quantity: 1,
           },
         ],
         mode: "payment",
         locale: "en",
-        success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/wallet?canceled=true`,
-        client_reference_id: userId,
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/wallet?canceled=true`,
+        client_reference_id: sessionUserId,
+        payment_intent_data: {
+          metadata: {
+            userId: sessionUserId,
+            type: "credit_purchase",
+            amountCents: parsedAmountCents.toString(),
+            currency: normalizedCurrency,
+            credits: parsedCredits.toString(),
+          },
+        },
         metadata: {
-          userId,
+          userId: sessionUserId,
           type: "credit_purchase",
-          amountCents: amountCents.toString(),
+          amountCents: parsedAmountCents.toString(),
           currency: normalizedCurrency,
-          credits: credits.toString(),
+          credits: parsedCredits.toString(),
         },
       });
+
+      if (!session.url) {
+        return NextResponse.json(
+          { error: "Stripe checkout URL unavailable" },
+          { status: 500 }
+        );
+      }
 
       return NextResponse.json({ sessionId: session.id, url: session.url });
     }
 
     // Handle subscription (existing logic)
-    if (!tier || !userId) {
+    if (!tier) {
       return NextResponse.json(
         { error: "Missing required parameters" },
-        { status: 400 }
-      );
-    }
-
-    // Normalize currency to lowercase
-    const normalizedCurrency = currency.toLowerCase();
-
-    // Validate currency
-    if (!["ngn", "usd", "gbp"].includes(normalizedCurrency)) {
-      return NextResponse.json(
-        { error: "Invalid currency. Supported: NGN, USD, GBP" },
         { status: 400 }
       );
     }
@@ -250,17 +404,24 @@ export async function POST(request: NextRequest) {
       locale: "en",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/subscription?success=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"}/dashboard/profile/subscription?canceled=true`,
-      client_reference_id: userId,
+      client_reference_id: sessionUserId,
       metadata: {
-        userId,
+        userId: sessionUserId,
         tier,
       },
     });
 
+    if (!session.url) {
+      return NextResponse.json(
+        { error: "Stripe checkout URL unavailable" },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ sessionId: session.id, url: session.url });
   } catch (error: unknown) {
     console.error("Error creating checkout session:", error);
-    const msg = error instanceof Error ? error.message : "Failed to create checkout session";
+    const msg = getCheckoutErrorMessage(error);
     return NextResponse.json(
       { error: msg },
       { status: 500 }

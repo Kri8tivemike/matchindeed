@@ -36,6 +36,10 @@ import Sidebar from "@/components/dashboard/Sidebar";
 import NotificationBell from "@/components/NotificationBell";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserSafe } from "@/lib/auth-helpers";
+import {
+  MONTHLY_CREDITS_BY_TIER,
+  PRICE_PER_CREDIT_BY_TIER,
+} from "@/lib/credits/config";
 
 // ---------------------------------------------------------------
 // Types
@@ -48,7 +52,7 @@ type WalletData = {
 };
 
 type SubscriptionInfo = {
-  tier: string;
+  tier: string | null;
   status: string | null;
   expires_at: string | null;
   membership_status: string | null;
@@ -56,16 +60,17 @@ type SubscriptionInfo = {
 
 type CreditAllocation = {
   monthly: number;
-  vipExtra?: number;
   pricePerCredit: { ngn: number; usd: number; gbp: number };
 };
 
 type Transaction = {
   id: string;
+  source: "wallet" | "credits";
   type: string;
   amount_cents: number;
-  balance_before_cents: number;
-  balance_after_cents: number;
+  amount_credits: number;
+  balance_before_cents: number | null;
+  balance_after_cents: number | null;
   description: string | null;
   created_at: string;
   reference_id: string | null;
@@ -74,9 +79,34 @@ type Transaction = {
 
 type TxFilter = "all" | "credit" | "debit";
 
+type CreditPurchaseAvailability = {
+  canPurchase: boolean;
+  pricePerCredit: number;
+  reason: string;
+};
+
 // ---------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------
+
+/** Stripe minimum charge amounts per currency (in main unit, e.g. pounds/dollars) */
+const STRIPE_MINIMUM_AMOUNT: Record<Currency, number> = {
+  USD: 0.50,  // $0.50
+  GBP: 0.30,  // £0.30
+  NGN: 50.00, // ₦50.00
+};
+
+/** Compute the minimum number of credits needed to meet Stripe's per-transaction minimum */
+function getMinCreditQuantity(pricePerCredit: number, currency: Currency): number {
+  if (pricePerCredit <= 0) return 1;
+  const min = STRIPE_MINIMUM_AMOUNT[currency];
+  return Math.max(1, Math.ceil(min / pricePerCredit));
+}
+
+/** Compute the minimum wallet top-up amount for the selected currency */
+function getMinTopUpAmount(currency: Currency): number {
+  return STRIPE_MINIMUM_AMOUNT[currency];
+}
 
 /** Detect user currency based on IP (Nigeria → NGN, UK → GBP, else USD). Uses /api/geo; client-side fallback for Tailscale. */
 async function detectCurrency(): Promise<Currency> {
@@ -115,25 +145,138 @@ function formatPrice(cents: number, currency: Currency): string {
   return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function shouldCenterCheckoutError(message: string): boolean {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("too low to process") ||
+    normalized.includes("minimum amount") ||
+    normalized.includes("minimum top-up amount")
+  );
+}
+
 /** Currency symbol */
 function currencySymbol(c: Currency): string {
   return c === "NGN" ? "₦" : c === "GBP" ? "£" : "$";
 }
 
+function formatTransactionTitle(tx: Transaction): string {
+  const normalized = tx.type.toLowerCase();
+
+  const labels: Record<string, string> = {
+    wallet_topup: "Wallet Top-up",
+    credit_purchase: "Credit Purchase",
+    credit_purchase_wallet: "Credit Purchase (Wallet)",
+    meeting_request_sent: "Calendar Booking Request Fee",
+    meeting_request_accepted: "Meeting Acceptance Fee",
+    subscription_monthly_allocation: "Monthly Credit Allocation",
+    subscription_credit_rollover: "Credit Rollover",
+    credit_refund: "Credit Refund",
+    cancellation_fee: "Cancellation Fee",
+    meeting_charge: "Meeting Charge",
+  };
+
+  return labels[normalized] || tx.type.replace(/_/g, " ");
+}
+
 /** Get credit allocation for a tier */
 function getCreditAllocation(tier: string): CreditAllocation {
-  switch (tier?.toLowerCase()) {
+  switch ((tier || "").toLowerCase()) {
     case "basic":
-      return { monthly: 5, pricePerCredit: { ngn: 2100, usd: 1.45, gbp: 1.15 } };
+      return {
+        monthly: MONTHLY_CREDITS_BY_TIER.basic,
+        pricePerCredit: PRICE_PER_CREDIT_BY_TIER.basic,
+      };
     case "standard":
-      return { monthly: 15, pricePerCredit: { ngn: 2100, usd: 1.45, gbp: 1.15 } };
+      return {
+        monthly: MONTHLY_CREDITS_BY_TIER.standard,
+        pricePerCredit: PRICE_PER_CREDIT_BY_TIER.standard,
+      };
     case "premium":
-      return { monthly: 30, vipExtra: 10, pricePerCredit: { ngn: 2100, usd: 1.45, gbp: 1.15 } };
+      return {
+        monthly: MONTHLY_CREDITS_BY_TIER.premium,
+        pricePerCredit: PRICE_PER_CREDIT_BY_TIER.premium,
+      };
     case "vip":
       return { monthly: Infinity, pricePerCredit: { ngn: 0, usd: 0, gbp: 0 } };
     default:
-      return { monthly: 0, pricePerCredit: { ngn: 2100, usd: 1.45, gbp: 1.15 } };
+      return {
+        monthly: 0,
+        pricePerCredit: PRICE_PER_CREDIT_BY_TIER.basic,
+      };
   }
+}
+
+function isSubscriptionActive(subscriptionInfo: SubscriptionInfo | null) {
+  if (!subscriptionInfo) return false;
+  if (subscriptionInfo.tier?.toLowerCase() === "vip") return true;
+  const status = subscriptionInfo.membership_status || subscriptionInfo.status;
+  if (status !== "active") return false;
+  return subscriptionInfo.expires_at
+    ? new Date(subscriptionInfo.expires_at) > new Date()
+    : true;
+}
+
+function getCreditPurchaseAvailability(
+  tier: string | null | undefined,
+  currency: Currency
+): CreditPurchaseAvailability {
+  if (!tier) {
+    return {
+      canPurchase: false,
+      pricePerCredit: 0,
+      reason: "An active subscription plan is required before purchasing extra credits.",
+    };
+  }
+
+  const allocation = getCreditAllocation(tier);
+  const pricePerCredit =
+    allocation.pricePerCredit[
+      currency.toLowerCase() as keyof typeof allocation.pricePerCredit
+    ] || 0;
+
+  if (allocation.monthly === Infinity || pricePerCredit <= 0) {
+    return {
+      canPurchase: false,
+      pricePerCredit,
+      reason: "Your VIP plan already includes unlimited credits.",
+    };
+  }
+
+  return { canPurchase: true, pricePerCredit, reason: "" };
+}
+
+async function redirectToStripeCheckout(
+  url: string | null | undefined
+) {
+  if (!url) {
+    throw new Error("Unable to start payment checkout right now. Please try again.");
+  }
+
+  const isFramed = (() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
+    }
+  })();
+
+  if (isFramed) {
+    // Stripe Checkout must be opened as a top-level page, not inside an iframe.
+    try {
+      if (window.top) {
+        window.top.location.href = url;
+        return;
+      }
+    } catch {
+      // Ignore and fallback below.
+    }
+
+    const popup = window.open(url, "_blank", "noopener,noreferrer");
+    if (popup) return;
+  }
+
+  window.location.assign(url);
 }
 
 // ---------------------------------------------------------------
@@ -142,10 +285,14 @@ function getCreditAllocation(tier: string): CreditAllocation {
 function WalletContent() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
+  const handledSuccessRef = useRef<Set<string>>(new Set());
+  const handledCancelRef = useRef(false);
+  const handledOpenRef = useRef<Set<string>>(new Set());
 
   const [walletData, setWalletData] = useState<WalletData | null>(null);
   const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [walletAccessEnabled, setWalletAccessEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currency, setCurrency] = useState<Currency>("USD");
@@ -155,8 +302,20 @@ function WalletContent() {
   const [creditPurchaseAmount, setCreditPurchaseAmount] = useState<number>(0);
   const [processing, setProcessing] = useState(false);
   const [txFilter, setTxFilter] = useState<TxFilter>("all");
+  const creditPurchaseAvailability = getCreditPurchaseAvailability(
+    subscriptionInfo?.tier,
+    currency
+  );
+  const canPurchaseExtraCredits =
+    walletAccessEnabled &&
+    isSubscriptionActive(subscriptionInfo) &&
+    creditPurchaseAvailability.canPurchase;
 
   const processedSessionsRef = useRef<Set<string>>(new Set());
+  const fetchWalletDataRef = useRef<() => Promise<void>>(async () => {});
+  const verifyAndProcessPaymentRef = useRef<(sessionId: string) => Promise<void>>(
+    async () => {}
+  );
 
   // Detect currency on mount
   useEffect(() => {
@@ -164,17 +323,68 @@ function WalletContent() {
   }, []);
 
   // Check for success/cancel query params from Stripe redirect
+  const successParam = searchParams.get("success");
+  const canceledParam = searchParams.get("canceled");
+  const sessionIdParam = searchParams.get("session_id");
+  const openParam = searchParams.get("open");
+
   useEffect(() => {
-    const sessionId = searchParams.get("session_id");
-    if (searchParams.get("success") === "true" && sessionId) {
+    if (successParam === "true" && sessionIdParam) {
+      if (handledSuccessRef.current.has(sessionIdParam)) {
+        return;
+      }
+      handledSuccessRef.current.add(sessionIdParam);
+
       toast.success("Payment successful! Updating your wallet...");
-      fetchWalletData().then(() => verifyAndProcessPayment(sessionId));
+      fetchWalletDataRef
+        .current()
+        .then(() => verifyAndProcessPaymentRef.current(sessionIdParam));
+
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("success");
+        url.searchParams.delete("session_id");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+      }
     }
-    if (searchParams.get("canceled") === "true") {
+    if (canceledParam === "true" && !handledCancelRef.current) {
+      handledCancelRef.current = true;
       toast.warning("Payment was canceled.");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [successParam, canceledParam, sessionIdParam, toast]);
+
+  useEffect(() => {
+    if (!openParam || loading) return;
+    if (handledOpenRef.current.has(openParam)) return;
+
+    if (openParam === "credits") {
+      if (canPurchaseExtraCredits) {
+        setShowCreditPurchaseModal(true);
+      } else if (walletAccessEnabled && subscriptionInfo?.tier) {
+        toast.info(creditPurchaseAvailability.reason);
+      }
+      handledOpenRef.current.add(openParam);
+    } else if (openParam === "topup") {
+      setShowTopUpModal(true);
+      handledOpenRef.current.add(openParam);
+    } else {
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("open");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+    }
+  }, [
+    openParam,
+    loading,
+    canPurchaseExtraCredits,
+    creditPurchaseAvailability.reason,
+    walletAccessEnabled,
+    subscriptionInfo?.tier,
+    toast,
+  ]);
 
   // ---------------------------------------------------------------
   // Verify payment after Stripe redirect
@@ -183,94 +393,70 @@ function WalletContent() {
     try {
       const user = await getCurrentUserSafe();
       if (!user) return;
-
-      // Already processed?
-      const { data: existing } = await supabase
-        .from("wallet_transactions")
-        .select("id")
-        .eq("reference_id", sessionId)
-        .maybeSingle();
-      if (existing) {
-        await fetchWalletData();
+      if (!walletAccessEnabled) {
+        toast.error("Wallet is locked until your first successful subscription payment.");
         return;
       }
 
       if (processedSessionsRef.current.has(sessionId)) {
-        await new Promise((r) => setTimeout(r, 3000));
-        const { data: check } = await supabase
-          .from("wallet_transactions")
-          .select("id")
-          .eq("reference_id", sessionId)
-          .maybeSingle();
-        if (check) {
-          await fetchWalletData();
-          return;
-        }
+        return;
       }
 
       processedSessionsRef.current.add(sessionId);
-      await new Promise((r) => setTimeout(r, 2000));
+      const maxAttempts = 4;
 
-      const response = await fetch(`/api/verify-payment?sessionId=${sessionId}`);
-      if (!response.ok) return;
-      const data = await response.json();
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
 
-      // Wallet top-up
-      if (data.type === "wallet_topup" && data.amountCents > 0 && data.paid) {
-        const addRes = await fetch("/api/add-credits", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: user.id,
-            amountCents: data.amountCents,
-            sessionId,
-            type: "wallet_topup",
-          }),
+        const response = await fetch(`/api/verify-payment?sessionId=${sessionId}`, {
+          cache: "no-store",
         });
-        if (addRes.ok) {
-          const result = await addRes.json();
-          if (!result.alreadyProcessed && (result.balanceAdded > 0 || result.success)) {
+
+        if (!response.ok) {
+          if (attempt === maxAttempts - 1) {
+            toast.error("Failed to verify payment. Please refresh.");
+          }
+          continue;
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+          if (data.type === "wallet_topup" && !data.alreadyProcessed) {
             toast.success("Wallet topped up successfully!");
           }
-          await fetchWalletData();
-        } else {
-          toast.error("Failed to add wallet balance. Please contact support.");
-          processedSessionsRef.current.delete(sessionId);
-        }
-      }
 
-      // Credit purchase
-      if (data.type === "credit_purchase" && data.credits > 0 && data.paid) {
-        const addRes = await fetch("/api/add-credits", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: user.id,
-            credits: data.credits,
-            sessionId,
-            type: "credit_purchase",
-          }),
-        });
-        if (addRes.ok) {
-          const result = await addRes.json();
-          if (!result.alreadyProcessed && (result.creditsAdded > 0 || result.success)) {
-            toast.success(`${result.creditsAdded || data.credits} credits added!`);
+          if (data.type === "credit_purchase" && !data.alreadyProcessed) {
+            toast.success(`${data.creditsAdded || data.credits || 0} credits added!`);
           }
+
           await fetchWalletData();
-        } else {
-          toast.error("Failed to add credits. Please contact support.");
-          processedSessionsRef.current.delete(sessionId);
+          return;
         }
+
+        if (data.retryable && attempt < maxAttempts - 1) {
+          continue;
+        }
+
+        if (data.message) {
+          toast.error(data.message);
+          return;
+        }
+
+        if (!data.paid) {
+          toast.error("Payment has not been completed yet.");
+          return;
+        }
+
+        toast.error("Failed to process payment. Please refresh.");
+        return;
       }
     } catch {
       toast.error("Failed to verify payment. Please refresh.");
     } finally {
-      const { data: finalCheck } = await supabase
-        .from("wallet_transactions")
-        .select("id")
-        .eq("reference_id", sessionId)
-        .maybeSingle();
-      if (!finalCheck) processedSessionsRef.current.delete(sessionId);
+      processedSessionsRef.current.delete(sessionId);
     }
   };
 
@@ -329,18 +515,25 @@ function WalletContent() {
         credits = newC;
       }
 
-      // Subscription info
-      const { data: account } = await supabase.from("accounts").select("tier").eq("id", user.id).single();
+      // Subscription + wallet access state
       const { data: membership } = await supabase
         .from("memberships")
-        .select("tier, status, expires_at")
+        .select("tier, status, expires_at, price_cents")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
+      const hasPaidMembership =
+        Boolean(membership) && Number(membership?.price_cents || 0) > 0;
+      const hasActiveMembership =
+        Boolean(membership) &&
+        membership?.status === "active" &&
+        (!membership?.expires_at || new Date(membership.expires_at) > new Date());
+
+      setWalletAccessEnabled(hasPaidMembership);
       setSubscriptionInfo({
-        tier: account?.tier || "basic",
+        tier: hasActiveMembership ? membership?.tier || null : null,
         status: membership?.status || null,
         expires_at: membership?.expires_at || null,
         membership_status: membership?.status || null,
@@ -354,13 +547,50 @@ function WalletContent() {
       });
 
       // Transactions
-      const { data: txData } = await supabase
-        .from("wallet_transactions")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(50);
-      setTransactions(txData || []);
+      const [{ data: walletTxData }, { data: creditTxData }] = await Promise.all([
+        supabase
+          .from("wallet_transactions")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(200),
+        supabase
+          .from("credit_transactions")
+          .select("id, amount, action_type, description, created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(200),
+      ]);
+
+      const normalizedWalletTransactions: Transaction[] = (walletTxData || []).map((tx) => ({
+        ...tx,
+        source: "wallet",
+        amount_credits: 0,
+        balance_before_cents: tx.balance_before_cents ?? null,
+        balance_after_cents: tx.balance_after_cents ?? null,
+      }));
+
+      const normalizedCreditTransactions: Transaction[] = (creditTxData || []).map((tx) => ({
+        id: tx.id,
+        source: "credits",
+        type: tx.action_type,
+        amount_cents: 0,
+        amount_credits: tx.amount ?? 0,
+        balance_before_cents: null,
+        balance_after_cents: null,
+        description: tx.description ?? null,
+        created_at: tx.created_at,
+        reference_id: null,
+        admin_id: null,
+      }));
+
+      const mergedTransactions = [
+        ...normalizedWalletTransactions,
+        ...normalizedCreditTransactions,
+      ]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setTransactions(mergedTransactions);
     } catch (err) {
       console.error("Error fetching wallet data:", err);
     } finally {
@@ -368,6 +598,9 @@ function WalletContent() {
       setRefreshing(false);
     }
   };
+
+  fetchWalletDataRef.current = fetchWalletData;
+  verifyAndProcessPaymentRef.current = verifyAndProcessPayment;
 
   useEffect(() => {
     fetchWalletData();
@@ -377,10 +610,41 @@ function WalletContent() {
   // Purchase credits
   // ---------------------------------------------------------------
   const handlePurchaseCredits = async () => {
+    if (!walletAccessEnabled) {
+      toast.error("Wallet is locked until your first successful subscription payment.");
+      return;
+    }
+
+    if (!subscriptionInfo?.tier || !isActive()) {
+      toast.error("An active subscription plan is required before purchasing extra credits.");
+      return;
+    }
+
+    if (!canPurchaseExtraCredits || creditPurchaseAvailability.pricePerCredit <= 0) {
+      toast.info(creditPurchaseAvailability.reason);
+      setShowCreditPurchaseModal(false);
+      setCreditPurchaseAmount(0);
+      return;
+    }
+
     if (creditPurchaseAmount <= 0) {
       toast.warning("Please enter a valid number of credits.");
       return;
     }
+
+    // Enforce Stripe minimum transaction amount
+    const pricePerCreditCheck = creditPurchaseAvailability.pricePerCredit;
+    const minQty = getMinCreditQuantity(pricePerCreditCheck, currency);
+    if (creditPurchaseAmount < minQty) {
+      const minAmount = formatPrice(Math.round(pricePerCreditCheck * minQty * 100), currency);
+      toast.centerError(
+        `The minimum order is ${minAmount} per transaction (${minQty} credit${minQty !== 1 ? "s" : ""}). Please increase the quantity.`,
+        undefined,
+        "Minimum Order Required"
+      );
+      return;
+    }
+
     try {
       setProcessing(true);
       const user = await getCurrentUserSafe();
@@ -389,9 +653,7 @@ function WalletContent() {
         return;
       }
 
-      const allocation = getCreditAllocation(subscriptionInfo?.tier || "basic");
-      const pricePerCredit =
-        allocation.pricePerCredit[currency.toLowerCase() as keyof typeof allocation.pricePerCredit];
+      const pricePerCredit = creditPurchaseAvailability.pricePerCredit;
       const totalAmount = creditPurchaseAmount * pricePerCredit;
       const amountCents = Math.round(totalAmount * 100);
 
@@ -403,7 +665,20 @@ function WalletContent() {
           body: JSON.stringify({ type: "credit_purchase", amountCents, credits: creditPurchaseAmount }),
         });
         if (res.ok) {
-          toast.success(`${creditPurchaseAmount} credits purchased from wallet!`);
+          const result = await res.json().catch(() => null);
+          const nextBalance =
+            typeof result?.balance_after === "number"
+              ? formatPrice(result.balance_after, currency)
+              : formatPrice(
+                  Math.max((walletData?.balance_cents || 0) - amountCents, 0),
+                  currency
+                );
+          toast.success(
+            `${creditPurchaseAmount} credits purchased from wallet for ${formatPrice(
+              amountCents,
+              currency
+            )}. New wallet balance: ${nextBalance}.`
+          );
           setShowCreditPurchaseModal(false);
           setCreditPurchaseAmount(0);
           await fetchWalletData();
@@ -432,13 +707,15 @@ function WalletContent() {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(err.error || "Checkout failed");
       }
-      const { url, sessionId } = await res.json();
-      if (url) window.location.href = url;
-      else if (sessionId) window.location.href = `https://checkout.stripe.com/c/pay/${sessionId}`;
-      else throw new Error("No checkout URL");
+      const { url } = await res.json();
+      await redirectToStripeCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
-      toast.error(msg);
+      if (shouldCenterCheckoutError(msg)) {
+        toast.centerError(msg, undefined, "Unable to Continue");
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setProcessing(false);
     }
@@ -448,10 +725,32 @@ function WalletContent() {
   // Top-up wallet
   // ---------------------------------------------------------------
   const handleTopUp = async () => {
+    if (!walletAccessEnabled) {
+      toast.error("Wallet is locked until your first successful subscription payment.");
+      return;
+    }
+
+    if (!subscriptionInfo?.tier || !isActive()) {
+      toast.error("An active subscription plan is required before adding funds to your wallet.");
+      return;
+    }
+
     if (topUpAmount <= 0) {
       toast.warning("Please enter a valid amount.");
       return;
     }
+
+    // Enforce Stripe minimum top-up amount
+    const minTopUp = getMinTopUpAmount(currency);
+    if (topUpAmount < minTopUp) {
+      toast.centerError(
+        `The minimum top-up amount is ${formatPrice(Math.round(minTopUp * 100), currency)}. Please enter a higher amount.`,
+        undefined,
+        "Minimum Top-Up Required"
+      );
+      return;
+    }
+
     try {
       setProcessing(true);
       const user = await getCurrentUserSafe();
@@ -469,13 +768,15 @@ function WalletContent() {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
         throw new Error(err.error || "Checkout failed");
       }
-      const { url, sessionId } = await res.json();
-      if (url) window.location.href = url;
-      else if (sessionId) window.location.href = `https://checkout.stripe.com/c/pay/${sessionId}`;
-      else throw new Error("No checkout URL");
+      const { url } = await res.json();
+      await redirectToStripeCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
-      toast.error(msg);
+      if (shouldCenterCheckoutError(msg)) {
+        toast.centerError(msg, undefined, "Unable to Continue");
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setProcessing(false);
     }
@@ -488,28 +789,53 @@ function WalletContent() {
   const availableCredits = walletData?.credits
     ? walletData.credits.total - walletData.credits.used + walletData.credits.rollover
     : 0;
+  const monthlyCredits =
+    subscriptionInfo?.tier && getCreditAllocation(subscriptionInfo.tier).monthly !== Infinity
+      ? getCreditAllocation(subscriptionInfo.tier).monthly
+      : null;
+  const rolloverCredits = walletData?.credits?.rollover || 0;
 
   const isActive = () => {
-    if (!subscriptionInfo) return false;
-    if (subscriptionInfo.tier === "vip") return true;
-    const s = subscriptionInfo.membership_status || subscriptionInfo.status;
-    if (s === "active") {
-      return subscriptionInfo.expires_at ? new Date(subscriptionInfo.expires_at) > new Date() : true;
-    }
-    return false;
+    return isSubscriptionActive(subscriptionInfo);
   };
 
   const filteredTx = transactions.filter((t) => {
+    const signedAmount = t.source === "credits" ? t.amount_credits : t.amount_cents;
+
     if (txFilter === "all") return true;
-    if (txFilter === "credit") return t.amount_cents > 0;
-    return t.amount_cents < 0;
+
+    if (txFilter === "credit") {
+      return t.source === "credits";
+    }
+
+    return signedAmount < 0;
   });
 
   const txIcon = (type: string) => {
     const lower = type.toLowerCase();
-    if (["credit", "topup", "refund", "wallet_topup", "credit_purchase"].includes(lower))
+    if (
+      [
+        "credit",
+        "topup",
+        "refund",
+        "wallet_topup",
+        "credit_purchase",
+        "subscription_monthly_allocation",
+        "credit_refund",
+      ].includes(lower)
+    )
       return { Icon: ArrowDownLeft, cls: "text-green-600 bg-green-50" };
-    if (["debit", "payment", "charge", "meeting_charge", "cancellation_fee"].includes(lower))
+    if (
+      [
+        "debit",
+        "payment",
+        "charge",
+        "meeting_charge",
+        "cancellation_fee",
+        "meeting_request_sent",
+        "meeting_request_accepted",
+      ].includes(lower)
+    )
       return { Icon: ArrowUpRight, cls: "text-red-600 bg-red-50" };
     return { Icon: History, cls: "text-gray-600 bg-gray-50" };
   };
@@ -537,7 +863,7 @@ function WalletContent() {
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link href="/dashboard">
-            <Image src="/matchindeed.svg" alt="MatchIndeed" width={130} height={34} style={{ width: "auto", height: "auto" }} />
+            <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={110} height={28} style={{ width: "auto", height: "auto" }} />
           </Link>
           <NotificationBell />
         </div>
@@ -573,6 +899,20 @@ function WalletContent() {
             </button>
           </div>
 
+          {!walletAccessEnabled && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm text-amber-800">
+                Wallet access is locked until your first successful subscription payment.
+              </p>
+              <Link
+                href="/dashboard/profile/subscription"
+                className="inline-flex flex-shrink-0 items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200"
+              >
+                Subscribe
+              </Link>
+            </div>
+          )}
+
           {/* ---- Balance + Credits row ---- */}
           <div className="grid gap-4 sm:grid-cols-2">
             {/* Balance card */}
@@ -601,22 +941,30 @@ function WalletContent() {
                     Available Credits
                   </p>
                   <h2 className="mt-1 text-3xl font-bold text-[#1f419a]">{availableCredits}</h2>
-                  {walletData?.credits && walletData.credits.rollover > 0 && (
+                  {monthlyCredits !== null ? (
+                    <div className="mt-1 space-y-0.5 text-[11px] text-gray-400">
+                      <p>Monthly plan credits: {monthlyCredits}</p>
+                      {rolloverCredits > 0 && <p>Rollover credits: {rolloverCredits}</p>}
+                      <p>Total available now: {availableCredits}</p>
+                    </div>
+                  ) : rolloverCredits > 0 ? (
                     <p className="mt-1 text-[11px] text-gray-400">
-                      Includes {walletData.credits.rollover} rollover
+                      Includes {rolloverCredits} rollover
                     </p>
-                  )}
+                  ) : null}
                 </div>
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#eef2ff]">
                   <Coins className="h-6 w-6 text-[#1f419a]" />
                 </div>
               </div>
               {/* Usage bar */}
-              {subscriptionInfo && getCreditAllocation(subscriptionInfo.tier).monthly !== Infinity && walletData?.credits && (
+              {subscriptionInfo?.tier &&
+                getCreditAllocation(subscriptionInfo.tier).monthly !== Infinity &&
+                walletData?.credits && (
                 <div className="mt-3">
                   <div className="flex justify-between text-[10px] text-gray-400 mb-1">
                     <span>{walletData.credits.used} used</span>
-                    <span>{getCreditAllocation(subscriptionInfo.tier).monthly}/mo</span>
+                    <span>{getCreditAllocation(subscriptionInfo.tier).monthly} monthly plan credits</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-gray-100">
                     <div
@@ -635,7 +983,7 @@ function WalletContent() {
           </div>
 
           {/* Low / no credits warning */}
-          {availableCredits === 0 && (
+          {canPurchaseExtraCredits && availableCredits === 0 && (
             <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-3">
               <X className="h-5 w-5 flex-shrink-0 text-red-500" />
               <p className="text-sm text-red-700">
@@ -643,7 +991,7 @@ function WalletContent() {
               </p>
             </div>
           )}
-          {availableCredits > 0 && availableCredits <= 2 && (
+          {canPurchaseExtraCredits && availableCredits > 0 && availableCredits <= 2 && (
             <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
               <Coins className="h-5 w-5 flex-shrink-0 text-amber-500" />
               <p className="text-sm text-amber-700">
@@ -656,18 +1004,19 @@ function WalletContent() {
           <div className="grid gap-3 sm:grid-cols-3">
             <button
               onClick={() => setShowTopUpModal(true)}
-              className="flex items-center justify-center gap-2 rounded-xl bg-[#1f419a] px-4 py-3 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg"
+              disabled={!walletAccessEnabled}
+              className="flex items-center justify-center gap-2 rounded-xl bg-[#1f419a] px-4 py-3 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus className="h-4 w-4" />
               Add Funds
             </button>
-            {subscriptionInfo && getCreditAllocation(subscriptionInfo.tier).monthly !== Infinity && (
+            {canPurchaseExtraCredits && (
               <button
                 onClick={() => setShowCreditPurchaseModal(true)}
                 className="flex items-center justify-center gap-2 rounded-xl border-2 border-[#1f419a] px-4 py-3 text-sm font-semibold text-[#1f419a] transition-colors hover:bg-[#eef2ff]"
               >
                 <Coins className="h-4 w-4" />
-                Buy Credits
+                Get Credits
               </button>
             )}
             <Link
@@ -679,6 +1028,13 @@ function WalletContent() {
             </Link>
           </div>
 
+          {canPurchaseExtraCredits && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              Wallet balance is used first for credit purchases.
+              If your balance is not enough, card checkout opens automatically.
+            </div>
+          )}
+
           {/* ---- Subscription status ---- */}
           {subscriptionInfo && (
             <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/5">
@@ -689,7 +1045,9 @@ function WalletContent() {
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-gray-900">
-                      {subscriptionInfo.tier.charAt(0).toUpperCase() + subscriptionInfo.tier.slice(1)} Plan
+                      {subscriptionInfo.tier
+                        ? `${subscriptionInfo.tier.charAt(0).toUpperCase()}${subscriptionInfo.tier.slice(1)} Plan`
+                        : "No Active Subscription"}
                     </p>
                     <p className={`text-xs ${isActive() ? "text-green-600" : "text-red-500"}`}>
                       {isActive() ? "Active" : "Inactive"}
@@ -703,9 +1061,10 @@ function WalletContent() {
                     </p>
                   )}
                   <p className="text-xs text-gray-400">
-                    {getCreditAllocation(subscriptionInfo.tier).monthly === Infinity
+                    {subscriptionInfo.tier &&
+                    getCreditAllocation(subscriptionInfo.tier).monthly === Infinity
                       ? "Unlimited credits"
-                      : `${getCreditAllocation(subscriptionInfo.tier).monthly} credits/mo`}
+                      : `${subscriptionInfo.tier ? getCreditAllocation(subscriptionInfo.tier).monthly : 0} credits/mo`}
                   </p>
                 </div>
               </div>
@@ -714,84 +1073,123 @@ function WalletContent() {
 
           {/* ---- Transaction history ---- */}
           <div className="rounded-xl bg-white shadow-sm ring-1 ring-black/5">
-            <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <History className="h-5 w-5 text-[#1f419a]" />
-                <h2 className="font-semibold text-gray-900">Transaction History</h2>
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-500">
-                  {filteredTx.length}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Filter className="h-3.5 w-3.5 text-gray-400" />
-                {(["all", "credit", "debit"] as TxFilter[]).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setTxFilter(f)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                      txFilter === f
-                        ? "bg-[#1f419a] text-white"
-                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                    }`}
-                  >
-                    {f === "all" ? "All" : f === "credit" ? "Credits" : "Debits"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {filteredTx.length === 0 ? (
-              <div className="p-10 text-center">
-                <History className="mx-auto mb-3 h-10 w-10 text-gray-200" />
-                <p className="text-sm font-medium text-gray-500">No transactions yet</p>
-                <p className="mt-1 text-xs text-gray-400">
-                  Your transaction history will appear here.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-50">
-                {filteredTx.map((tx) => {
-                  const isCredit = tx.amount_cents > 0;
-                  const { Icon, cls } = txIcon(tx.type);
-                  return (
-                    <div
-                      key={tx.id}
-                      className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50/50"
-                    >
-                      <div
-                        className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${cls}`}
+              <>
+                <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <History className="h-5 w-5 text-[#1f419a]" />
+                    <h2 className="font-semibold text-gray-900">Transaction History</h2>
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-500">
+                      {filteredTx.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Filter className="h-3.5 w-3.5 text-gray-400" />
+                    {(["all", "credit", "debit"] as TxFilter[]).map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setTxFilter(f)}
+                        className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                          txFilter === f
+                            ? "bg-[#1f419a] text-white"
+                            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                        }`}
                       >
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-gray-900 capitalize">
-                          {tx.type.replace(/_/g, " ")}
-                        </p>
-                        {tx.description && (
-                          <p className="truncate text-xs text-gray-400">{tx.description}</p>
-                        )}
-                        <p className="text-[10px] text-gray-300">
-                          {new Date(tx.created_at).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className={`text-sm font-semibold ${isCredit ? "text-green-600" : "text-red-500"}`}>
-                          {isCredit ? "+" : ""}
-                          {formatPrice(tx.amount_cents, currency)}
-                        </p>
-                        <p className="text-[10px] text-gray-300">
-                          Bal: {formatPrice(tx.balance_after_cents, currency)}
-                        </p>
-                      </div>
+                        {f === "all" ? "All" : f === "credit" ? "Credits" : "Debits"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-10 text-center">
+                  <History className="mx-auto mb-3 h-10 w-10 text-gray-200" />
+                  <p className="text-sm font-medium text-gray-500">No transactions yet</p>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Your transaction history will appear here.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="relative">
+                <div className="max-h-[420px] overflow-y-auto pr-1 sm:max-h-[520px] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#cfd7f3] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1.5">
+                  <div className="sticky top-0 z-10 flex flex-col gap-3 border-b border-gray-100 bg-white/95 p-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2">
+                      <History className="h-5 w-5 text-[#1f419a]" />
+                      <h2 className="font-semibold text-gray-900">Transaction History</h2>
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-500">
+                        {filteredTx.length}
+                      </span>
                     </div>
-                  );
-                })}
+                    <div className="flex items-center gap-1.5">
+                      <Filter className="h-3.5 w-3.5 text-gray-400" />
+                      {(["all", "credit", "debit"] as TxFilter[]).map((f) => (
+                        <button
+                          key={f}
+                          onClick={() => setTxFilter(f)}
+                          className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                            txFilter === f
+                              ? "bg-[#1f419a] text-white"
+                              : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                          }`}
+                        >
+                          {f === "all" ? "All" : f === "credit" ? "Credits" : "Debits"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {filteredTx.map((tx) => {
+                      const signedAmount = tx.source === "credits" ? tx.amount_credits : tx.amount_cents;
+                      const isCredit = signedAmount > 0;
+                      const { Icon, cls } = txIcon(tx.type);
+                      const amountLabel =
+                        tx.source === "credits"
+                          ? `${isCredit ? "+" : ""}${tx.amount_credits} credit${Math.abs(tx.amount_credits) === 1 ? "" : "s"}`
+                          : `${isCredit ? "+" : ""}${formatPrice(tx.amount_cents, currency)}`;
+                      return (
+                        <div
+                          key={tx.id}
+                          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50/50"
+                        >
+                          <div
+                            className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${cls}`}
+                          >
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-gray-900">
+                              {formatTransactionTitle(tx)}
+                            </p>
+                            {tx.description && (
+                              <p className="truncate text-xs text-gray-400">{tx.description}</p>
+                            )}
+                            <p className="text-[10px] text-gray-300">
+                              {new Date(tx.created_at).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                              })}
+                            </p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className={`text-sm font-semibold ${isCredit ? "text-green-600" : "text-red-500"}`}>
+                              {amountLabel}
+                            </p>
+                            {tx.source === "wallet" && tx.balance_after_cents !== null ? (
+                              <p className="text-[10px] text-gray-300">
+                                Bal: {formatPrice(tx.balance_after_cents, currency)}
+                              </p>
+                            ) : (
+                              <p className="text-[10px] text-gray-300">Credits activity</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white via-white/90 to-transparent" />
               </div>
             )}
           </div>
@@ -800,11 +1198,11 @@ function WalletContent() {
 
       {/* ---- Top-up modal ---- */}
       {showTopUpModal && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="mx-4 w-full max-w-md rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gray-100 p-4">
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 px-2 backdrop-blur-sm sm:items-center sm:px-0">
+          <div className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:mx-4 sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 p-3 sm:p-4">
               <div>
-                <h3 className="font-bold text-gray-900">Add Funds</h3>
+                <h3 className="text-base font-bold text-gray-900 sm:text-lg">Add Funds</h3>
                 <p className="text-xs text-gray-500">Top up your wallet balance</p>
               </div>
               <button
@@ -818,9 +1216,9 @@ function WalletContent() {
               </button>
             </div>
 
-            <div className="space-y-4 p-4">
+            <div className="space-y-3 p-3 sm:space-y-4 sm:p-4">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                <label className="mb-1.5 block text-xs font-medium text-gray-700 sm:text-sm">
                   Amount ({currencySymbol(currency)})
                 </label>
                 <input
@@ -829,9 +1227,12 @@ function WalletContent() {
                   step="0.01"
                   value={topUpAmount || ""}
                   onChange={(e) => setTopUpAmount(parseFloat(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-lg font-semibold focus:border-[#1f419a] focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-base font-semibold focus:border-[#1f419a] focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20 sm:py-3 sm:text-lg"
                   placeholder="0.00"
                 />
+                <p className="mt-1 text-[10px] text-gray-400 sm:text-xs">
+                  Minimum top-up: {formatPrice(Math.round(getMinTopUpAmount(currency) * 100), currency)}
+                </p>
               </div>
 
               {/* Preset amounts */}
@@ -841,7 +1242,7 @@ function WalletContent() {
                     <button
                       key={amt}
                       onClick={() => setTopUpAmount(amt)}
-                      className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${
+                      className={`flex-1 rounded-lg border py-2 text-xs font-medium transition-colors sm:text-sm ${
                         topUpAmount === amt
                           ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
                           : "border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -855,37 +1256,41 @@ function WalletContent() {
               </div>
 
               {topUpAmount > 0 && (
-                <div className="rounded-xl bg-[#eef2ff] p-3 text-center">
+                <div className="rounded-xl bg-[#eef2ff] p-2.5 text-center sm:p-3">
                   <p className="text-xs text-gray-500">You will be charged</p>
-                  <p className="text-xl font-bold text-[#1f419a]">
+                  <p className="text-lg font-bold text-[#1f419a] sm:text-xl">
                     {formatPrice(Math.round(topUpAmount * 100), currency)}
                   </p>
                 </div>
               )}
             </div>
 
-            <div className="flex gap-3 border-t border-gray-100 p-4">
+            <div className="flex gap-2 border-t border-gray-100 p-3 sm:gap-3 sm:p-4">
               <button
                 onClick={() => {
                   setShowTopUpModal(false);
                   setTopUpAmount(0);
                 }}
-                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap"
               >
                 Cancel
               </button>
               <button
                 onClick={handleTopUp}
-                disabled={processing || topUpAmount <= 0}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
+                disabled={processing || topUpAmount <= 0 || !subscriptionInfo?.tier || !isActive()}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50 whitespace-nowrap"
               >
                 {processing ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> Processing...
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="sm:hidden">Processing</span>
+                    <span className="hidden sm:inline">Processing...</span>
                   </>
                 ) : (
                   <>
-                    <ArrowRight className="h-4 w-4" /> Continue to Payment
+                    <ArrowRight className="h-4 w-4" />
+                    <span className="sm:hidden">Continue</span>
+                    <span className="hidden sm:inline">Continue to Payment</span>
                   </>
                 )}
               </button>
@@ -895,13 +1300,13 @@ function WalletContent() {
       )}
 
       {/* ---- Credit purchase modal ---- */}
-      {showCreditPurchaseModal && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="mx-4 w-full max-w-md rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gray-100 p-4">
+      {showCreditPurchaseModal && canPurchaseExtraCredits && (
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 px-2 backdrop-blur-sm sm:items-center sm:px-0">
+          <div className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:mx-4 sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 p-3 sm:p-4">
               <div>
-                <h3 className="font-bold text-gray-900">Purchase Credits</h3>
-                <p className="text-xs text-gray-500">Buy additional credits for video dating</p>
+                <h3 className="text-base font-bold text-gray-900 sm:text-lg">Get Credits</h3>
+                <p className="text-xs text-gray-500">Use wallet balance first, then card only if needed</p>
               </div>
               <button
                 onClick={() => {
@@ -914,15 +1319,14 @@ function WalletContent() {
               </button>
             </div>
 
-            <div className="space-y-4 p-4">
+            <div className="space-y-3 p-3 sm:space-y-4 sm:p-4">
               {/* Price per credit */}
-              {subscriptionInfo && (() => {
-                const alloc = getCreditAllocation(subscriptionInfo.tier);
-                const ppc = alloc.pricePerCredit[currency.toLowerCase() as keyof typeof alloc.pricePerCredit];
+              {subscriptionInfo?.tier && (() => {
+                const ppc = creditPurchaseAvailability.pricePerCredit;
                 return (
-                  <div className="rounded-xl bg-blue-50 p-3">
+                  <div className="rounded-xl bg-blue-50 p-2.5 sm:p-3">
                     <p className="text-[10px] uppercase tracking-wider text-blue-500">Price per credit</p>
-                    <p className="text-lg font-bold text-blue-700">
+                    <p className="text-base font-bold text-blue-700 sm:text-lg">
                       {formatPrice(Math.round(ppc * 100), currency)}
                     </p>
                   </div>
@@ -930,16 +1334,28 @@ function WalletContent() {
               })()}
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">Number of Credits</label>
+                <label className="mb-1.5 block text-xs font-medium text-gray-700 sm:text-sm">Number of Credits</label>
                 <input
                   type="number"
                   min="1"
                   step="1"
                   value={creditPurchaseAmount || ""}
                   onChange={(e) => setCreditPurchaseAmount(parseInt(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-lg font-semibold focus:border-[#1f419a] focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-base font-semibold focus:border-[#1f419a] focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20 sm:py-3 sm:text-lg"
                   placeholder="0"
                 />
+                {(() => {
+                  const ppc = creditPurchaseAvailability.pricePerCredit;
+                  const minQtyHint = getMinCreditQuantity(ppc, currency);
+                  if (minQtyHint > 1) {
+                    return (
+                      <p className="mt-1 text-[10px] text-amber-600 sm:text-xs">
+                        Minimum {minQtyHint} credits ({formatPrice(Math.round(ppc * minQtyHint * 100), currency)}) required per transaction.
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               {/* Quick pick */}
@@ -948,7 +1364,7 @@ function WalletContent() {
                   <button
                     key={amt}
                     onClick={() => setCreditPurchaseAmount(amt)}
-                    className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${
+                    className={`flex-1 rounded-lg border py-2 text-xs font-medium transition-colors sm:text-sm ${
                       creditPurchaseAmount === amt
                         ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
                         : "border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -960,52 +1376,102 @@ function WalletContent() {
               </div>
 
               {/* Total */}
-              {creditPurchaseAmount > 0 && subscriptionInfo && (() => {
-                const alloc = getCreditAllocation(subscriptionInfo.tier);
-                const ppc = alloc.pricePerCredit[currency.toLowerCase() as keyof typeof alloc.pricePerCredit];
+              {creditPurchaseAmount > 0 && subscriptionInfo?.tier && (() => {
+                const ppc = creditPurchaseAvailability.pricePerCredit;
                 const totalCents = Math.round(creditPurchaseAmount * ppc * 100);
                 const canUseWallet = walletData && walletData.balance_cents >= totalCents;
+                const walletBalance = walletData?.balance_cents || 0;
+                const walletBalanceAfter = Math.max(walletBalance - totalCents, 0);
+                const currentCredits =
+                  (walletData?.credits?.total || 0) -
+                  (walletData?.credits?.used || 0) +
+                  (walletData?.credits?.rollover || 0);
+                const creditsAfterPurchase = currentCredits + creditPurchaseAmount;
                 return (
-                  <div className="rounded-xl bg-[#eef2ff] p-3 space-y-2">
-                    <div className="flex justify-between text-sm">
+                  <div className="rounded-xl bg-[#eef2ff] p-2.5 space-y-2 sm:p-3">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500">{creditPurchaseAmount} credits</span>
                       <span className="font-bold text-[#1f419a]">{formatPrice(totalCents, currency)}</span>
                     </div>
                     {canUseWallet ? (
-                      <p className="text-[11px] text-green-600">
-                        Sufficient wallet balance — payment will be deducted from your wallet.
-                      </p>
+                      <div className="space-y-1 text-[11px]">
+                        <p className="font-medium text-green-600">
+                          Sufficient wallet balance — payment will be deducted from your wallet.
+                        </p>
+                        <p className="text-[#1f419a]">
+                          Wallet deduction: {formatPrice(totalCents, currency)}.
+                          Balance after purchase: {formatPrice(walletBalanceAfter, currency)}.
+                        </p>
+                        <p className="text-[#1f419a]">
+                          Credits after purchase: {creditsAfterPurchase}.
+                        </p>
+                      </div>
                     ) : walletData ? (
-                      <p className="text-[11px] text-amber-600">
-                        Wallet ({formatPrice(walletData.balance_cents, currency)}) insufficient — redirecting to Stripe.
-                      </p>
+                      <div className="space-y-1 text-[11px]">
+                        <p className="font-medium text-amber-600">
+                          Wallet ({formatPrice(walletData.balance_cents, currency)}) insufficient — redirecting to card payment.
+                        </p>
+                        <p className="text-gray-500">
+                          Credits after purchase: {creditsAfterPurchase}.
+                        </p>
+                      </div>
                     ) : null}
+                    <p className="text-[11px] text-gray-500">
+                      This flow uses your available wallet balance before debit or credit card checkout.
+                    </p>
                   </div>
                 );
               })()}
             </div>
 
-            <div className="flex gap-3 border-t border-gray-100 p-4">
+            <div className="flex gap-2 border-t border-gray-100 p-3 sm:gap-3 sm:p-4">
               <button
                 onClick={() => {
                   setShowCreditPurchaseModal(false);
                   setCreditPurchaseAmount(0);
                 }}
-                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap"
               >
                 Cancel
               </button>
               <button
                 onClick={handlePurchaseCredits}
-                disabled={processing || creditPurchaseAmount <= 0}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
+                disabled={processing || creditPurchaseAmount <= 0 || !canPurchaseExtraCredits}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50 whitespace-nowrap"
               >
                 {processing ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> Processing...
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="sm:hidden">Processing</span>
+                    <span className="hidden sm:inline">Processing...</span>
                   </>
                 ) : (
-                  "Purchase Credits"
+                  <>
+                    <span className="sm:hidden">
+                      {walletData &&
+                      creditPurchaseAmount > 0 &&
+                      walletData.balance_cents >=
+                        Math.round(
+                          creditPurchaseAmount *
+                            creditPurchaseAvailability.pricePerCredit *
+                            100
+                        )
+                        ? "Use Wallet"
+                        : "Continue"}
+                    </span>
+                    <span className="hidden sm:inline">
+                      {walletData &&
+                      creditPurchaseAmount > 0 &&
+                      walletData.balance_cents >=
+                        Math.round(
+                          creditPurchaseAmount *
+                            creditPurchaseAvailability.pricePerCredit *
+                            100
+                        )
+                        ? "Pay from Wallet"
+                        : "Use Wallet or Card"}
+                    </span>
+                  </>
                 )}
               </button>
             </div>
