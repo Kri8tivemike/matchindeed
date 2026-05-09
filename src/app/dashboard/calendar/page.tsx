@@ -585,8 +585,10 @@ export default function CalendarPage() {
     }
 
     if (starterTrial?.has_active_slot) {
-      toast.warning(
-        "Your free starter slot is already active. Remove it before creating another one."
+      toast.warningAction(
+        "Starter slot active — remove it first, or upgrade for unlimited slots.",
+        "Upgrade plan",
+        SUBSCRIPTION_HREF
       );
       return;
     }
@@ -661,8 +663,10 @@ export default function CalendarPage() {
     }
 
     if (starterTrial?.has_active_slot) {
-      toast.warning(
-        "Your free starter slot is already active. Remove it before creating another one."
+      toast.warningAction(
+        "Starter slot active — remove it first, or upgrade for unlimited slots.",
+        "Upgrade plan",
+        SUBSCRIPTION_HREF
       );
       return;
     }
@@ -733,8 +737,10 @@ export default function CalendarPage() {
             SUBSCRIPTION_HREF
           );
         } else if (data.error === "starter_trial_slot_in_use") {
-          toast.warning(
-            data.message || "Remove your current starter slot before creating another one."
+          toast.warningAction(
+            "Starter slot active — remove it first, or upgrade for unlimited slots.",
+            "Upgrade plan",
+            SUBSCRIPTION_HREF
           );
         } else if (data.error === "access_denied") {
           toast.errorAction(

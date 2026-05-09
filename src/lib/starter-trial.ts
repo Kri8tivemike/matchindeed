@@ -722,7 +722,7 @@ export async function validateStarterTrialSlotCreation(params: {
       status: 409,
       code: "starter_trial_slot_in_use",
       message:
-        "Your free starter slot is already active. Remove it before creating a new one.",
+        "Starter slot active — remove it first, or upgrade for unlimited slots.",
     } satisfies StarterTrialSlotValidationResult;
   }
 
