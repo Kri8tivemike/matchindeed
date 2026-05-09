@@ -103,6 +103,31 @@ export async function consumeCredits(
     return { success: true, available: Number.POSITIVE_INFINITY, required: 0 };
   }
 
+  // Use atomic RPC to avoid race conditions (FOR UPDATE row lock in PostgreSQL).
+  // Falls back to the legacy read-modify-write path if the RPC is unavailable.
+  const { data: rpcResult, error: rpcError } = await supabase.rpc(
+    "consume_credits_atomic",
+    {
+      p_user_id: userId,
+      p_amount: amount,
+      p_action_type: options?.actionType || "credit_deduction",
+      p_description: options?.description || `Consumed ${amount} credit(s).`,
+    }
+  );
+
+  if (!rpcError) {
+    const row = Array.isArray(rpcResult) ? rpcResult[0] : rpcResult;
+    if (!row) throw new Error("consume_credits_atomic returned no result");
+    return {
+      success: Boolean(row.success),
+      available: Number(row.available_before),
+      required: amount,
+    };
+  }
+
+  // ── Legacy fallback (non-atomic) ──────────────────────────
+  console.warn("[consumeCredits] RPC unavailable, using fallback:", rpcError.message);
+
   const { data: credits, error } = await supabase
     .from("credits")
     .select("total, used, rollover")
@@ -155,6 +180,20 @@ export async function refundConsumedCredits(
   options?: CreditMutationOptions
 ) {
   if (amount <= 0) return;
+
+  // Use atomic RPC to avoid race conditions (FOR UPDATE row lock in PostgreSQL).
+  // Falls back to the legacy read-modify-write path if the RPC is unavailable.
+  const { error: rpcError } = await supabase.rpc("refund_credits_atomic", {
+    p_user_id: userId,
+    p_amount: amount,
+    p_action_type: options?.actionType || "credit_refund",
+    p_description: options?.description || `Refunded ${amount} credit(s).`,
+  });
+
+  if (!rpcError) return;
+
+  // ── Legacy fallback (non-atomic) ──────────────────────────
+  console.warn("[refundConsumedCredits] RPC unavailable, using fallback:", rpcError.message);
 
   const { data: credits, error } = await supabase
     .from("credits")
