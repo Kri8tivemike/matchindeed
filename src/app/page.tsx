@@ -164,7 +164,7 @@ const faqs = [
   },
   {
     q: "How do I contact MatchIndeed support?",
-    a: "Use the support form on the Contact Us page or email help@matchindeed.com for account, booking, payment, or technical help.",
+    a: "Use the support form on the Contact Us page or email support@matchindeed.com for account, booking, payment, or technical help.",
   },
 ] satisfies FaqItem[];
 
@@ -1398,8 +1398,8 @@ export default function Home() {
                   </Link>
                 </li>
                 <li>
-                  <a href="mailto:help@matchindeed.com" className="hover:text-[#1f419a] hover:underline">
-                    help@matchindeed.com
+                  <a href="mailto:support@matchindeed.com" className="hover:text-[#1f419a] hover:underline">
+                    support@matchindeed.com
                   </a>
                 </li>
                 <li>London, United Kingdom</li>

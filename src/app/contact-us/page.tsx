@@ -7,7 +7,7 @@ import { Mail, Send, ShieldCheck, HelpCircle, LogIn, LogOut, UserCircle2 } from 
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-const SUPPORT_EMAIL = "help@matchindeed.com";
+const SUPPORT_EMAIL = "support@matchindeed.com";
 const REASONS = [
   "Account Login Issue",
   "Profile Verification",
