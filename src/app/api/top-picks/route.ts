@@ -179,6 +179,7 @@ export async function GET(request: NextRequest) {
         .from("user_profiles")
         .select("user_id, first_name, last_name, date_of_birth, location, gender, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, updated_at, ethnicity, profile_completed")
         .eq("profile_completed", true)
+        .not("photos", "is", null)
         .in("user_id", targetUserIds);
       
       const profileMap = new Map((profiles as ProfileRow[] | null || []).map((prof) => [prof.user_id, prof]));
@@ -194,6 +195,7 @@ export async function GET(request: NextRequest) {
             (account.account_status || "active") !== "active" ||
             account.profile_visible === false ||
             account.calendar_enabled === false ||
+            ((!profile.photos || profile.photos.length === 0) && !profile.profile_photo_url) ||
             !evaluateGenderEligibility({
               requesterGender,
               targetGender: profile.gender,

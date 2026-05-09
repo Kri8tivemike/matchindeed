@@ -398,6 +398,7 @@ export default function DiscoverPage() {
             updated_at
           `)
           .eq("profile_completed", true)
+          .not("photos", "is", null)
           .limit(50); // Get more, we'll filter in memory
 
 
@@ -411,10 +412,13 @@ export default function DiscoverPage() {
         // Get blocked user IDs (bidirectional) and filter them out
         const blockedUserIds = await getBlockedUserIds();
 
-        // Filter out current user's profile and blocked users
+        // Filter out current user's profile, blocked users, and profiles with no photos
         const rawProfiles = (profilesData || []) as RawProfile[];
         const otherProfiles = rawProfiles.filter(
-          (p) => p.user_id !== user.id && !blockedUserIds.has(p.user_id)
+          (p) =>
+            p.user_id !== user.id &&
+            !blockedUserIds.has(p.user_id) &&
+            ((p.photos && p.photos.length > 0) || !!p.profile_photo_url)
         );
 
         if (otherProfiles.length === 0) {

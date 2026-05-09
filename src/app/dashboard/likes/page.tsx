@@ -227,7 +227,7 @@ export default function LikesPage() {
 
         // 5. Profiles + accounts + availability
         const [profilesRes, availRes] = await Promise.all([
-          supabase.from("user_profiles").select("user_id, first_name, photos, profile_photo_url, location, date_of_birth, profile_completed").in("user_id", allIds).eq("profile_completed", true),
+          supabase.from("user_profiles").select("user_id, first_name, photos, profile_photo_url, location, date_of_birth, profile_completed").in("user_id", allIds).eq("profile_completed", true).not("photos", "is", null),
           supabase.from("meeting_availability").select("user_id").in("user_id", allIds).gte("scheduled_at_utc", getMinimumRequestableMeetingStartIso()),
         ]);
 
@@ -254,6 +254,7 @@ export default function LikesPage() {
           const prof = profilesMap.get(targetId);
           const acct = accountsMap.get(targetId);
           if (!acct) return null;
+          if ((!prof?.photos || prof.photos.length === 0) && !prof?.profile_photo_url) return null;
 
           let age: number | null = null;
           if (prof?.date_of_birth) {

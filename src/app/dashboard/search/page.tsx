@@ -274,6 +274,7 @@ export default function SearchPage() {
             updated_at
           `)
           .eq("profile_completed", true)
+          .not("photos", "is", null)
           .limit(100);
 
         if (profilesError) {
@@ -286,10 +287,13 @@ export default function SearchPage() {
         // Get blocked user IDs (bidirectional) and filter them out
         const blockedUserIds = await getBlockedUserIds();
 
-        // Filter out current user and blocked users
+        // Filter out current user, blocked users, and profiles with no photos
         const rawProfiles = (profilesData || []) as RawProfile[];
         const otherProfiles = rawProfiles.filter(
-          (p) => p.user_id !== user.id && !blockedUserIds.has(p.user_id)
+          (p) =>
+            p.user_id !== user.id &&
+            !blockedUserIds.has(p.user_id) &&
+            ((p.photos && p.photos.length > 0) || !!p.profile_photo_url)
         );
 
         // Fetch account info (tier, display_name, visibility)
