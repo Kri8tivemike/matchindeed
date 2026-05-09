@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendRawHtmlEmail } from "@/lib/email";
 
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "help@matchindeed.com";
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "support@matchindeed.com";
 
 const ALLOWED_REASONS = new Set([
   "Account Login Issue",
