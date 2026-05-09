@@ -612,9 +612,9 @@ export default function Home() {
                   style={{ width: "auto", height: "auto" }}
                 />
               </div>
-              <p className="mt-2 text-center text-sm text-gray-500">
-                Get Started - It&apos;s Free
-              </p>
+              <h2 className="mt-4 text-center text-xl font-extrabold tracking-tight text-gray-900 sm:text-2xl">
+                Get Started — <span className="bg-gradient-to-r from-orange-500 to-pink-600 bg-clip-text text-transparent">It&apos;s Free</span>
+              </h2>
 
               <form onSubmit={handleSubmit} className="px-4 pb-6 pt-4 sm:px-8 sm:pb-8 sm:pt-5">
                 {/* Seeking */}
