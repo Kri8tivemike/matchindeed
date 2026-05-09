@@ -227,7 +227,7 @@ export default function LikesPage() {
 
         // 5. Profiles + accounts + availability
         const [profilesRes, availRes] = await Promise.all([
-          supabase.from("user_profiles").select("user_id, first_name, photos, profile_photo_url, location, date_of_birth").in("user_id", allIds),
+          supabase.from("user_profiles").select("user_id, first_name, photos, profile_photo_url, location, date_of_birth, profile_completed").in("user_id", allIds).eq("profile_completed", true),
           supabase.from("meeting_availability").select("user_id").in("user_id", allIds).gte("scheduled_at_utc", getMinimumRequestableMeetingStartIso()),
         ]);
 
@@ -244,7 +244,7 @@ export default function LikesPage() {
 
         const profilesMap = new Map(((profilesRes.data || []) as ProfileRow[]).map((p) => [p.user_id, p]));
         const activeAccounts = accountsData.filter(
-          (a) => (a.account_status || "active") === "active" && a.profile_visible !== false
+          (a) => (a.account_status || "active") === "active" && a.profile_visible !== false && a.calendar_enabled !== false
         );
         const accountsMap = new Map(activeAccounts.map((a) => [a.id, a]));
         const slotsSet = new Set(((availRes.data || []) as AvailabilityRow[]).map((a) => a.user_id));
