@@ -373,7 +373,7 @@ export default function DiscoverPage() {
           return;
         }
 
-        // Now fetch full profiles
+        // Now fetch full profiles (only completed profiles are visible in discovery)
         const { data: profilesData, error: profilesError } = await supabase
           .from("user_profiles")
           .select(`
@@ -397,6 +397,7 @@ export default function DiscoverPage() {
             relationship_status,
             updated_at
           `)
+          .eq("profile_completed", true)
           .limit(50); // Get more, we'll filter in memory
 
 

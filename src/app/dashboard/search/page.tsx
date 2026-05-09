@@ -250,7 +250,7 @@ export default function SearchPage() {
           // Column might not exist yet — ignore
         }
 
-        // Fetch other users' profiles
+        // Fetch other users' profiles (only completed profiles are visible in search)
         const { data: profilesData, error: profilesError } = await supabase
           .from("user_profiles")
           .select(`
@@ -273,6 +273,7 @@ export default function SearchPage() {
             relationship_status,
             updated_at
           `)
+          .eq("profile_completed", true)
           .limit(100);
 
         if (profilesError) {

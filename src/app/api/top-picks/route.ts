@@ -174,10 +174,11 @@ export async function GET(request: NextRequest) {
         ((availabilityRows || []) as Array<{ user_id: string }>).map((row) => row.user_id)
       );
       
-      // Fetch profiles for these users
+      // Fetch profiles for these users (only completed profiles)
       const { data: profiles } = await supabaseAdmin
         .from("user_profiles")
-        .select("user_id, first_name, last_name, date_of_birth, location, gender, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, updated_at, ethnicity")
+        .select("user_id, first_name, last_name, date_of_birth, location, gender, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, updated_at, ethnicity, profile_completed")
+        .eq("profile_completed", true)
         .in("user_id", targetUserIds);
       
       const profileMap = new Map((profiles as ProfileRow[] | null || []).map((prof) => [prof.user_id, prof]));
@@ -191,6 +192,8 @@ export async function GET(request: NextRequest) {
             !profile ||
             !account ||
             (account.account_status || "active") !== "active" ||
+            account.profile_visible === false ||
+            account.calendar_enabled === false ||
             !evaluateGenderEligibility({
               requesterGender,
               targetGender: profile.gender,
