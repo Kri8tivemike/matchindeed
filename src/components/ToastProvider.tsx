@@ -51,6 +51,7 @@ export interface ToastItem {
   message: string;
   placement?: ToastPlacement;
   actions?: ToastAction[];
+  duration?: number;
 }
 
 interface ToastContextValue {
@@ -173,15 +174,23 @@ function ToastCard({
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
 
+  const handleDismiss = () => {
+    setExiting(true);
+    setTimeout(onDismiss, 300);
+  };
+
   // Enter animation
   useEffect(() => {
     requestAnimationFrame(() => setVisible(true));
   }, []);
 
-  const handleDismiss = () => {
-    setExiting(true);
-    setTimeout(onDismiss, 300);
-  };
+  // Auto-dismiss after duration (default 5 s for regular, 6.5 s for centered)
+  useEffect(() => {
+    const ms = item.duration ?? (isCentered ? 6500 : 5000);
+    const timer = setTimeout(handleDismiss, ms);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div
@@ -297,9 +306,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     ) => {
       const id = `toast-${++toastCounter}-${Date.now()}`;
       setToasts((prev) => {
+        // Deduplicate: skip if an identical type+message is already visible
+        if (prev.some((t) => t.type === type && t.message === message)) {
+          return prev;
+        }
         const next = [
           ...prev,
-          { id, type, message, placement, title, actions },
+          { id, type, message, placement, title, actions, duration },
         ];
         const regular = next.filter((item) => item.placement !== "center").slice(-5);
         const centered = next.filter((item) => item.placement === "center").slice(-1);
