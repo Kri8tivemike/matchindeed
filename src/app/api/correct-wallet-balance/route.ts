@@ -72,23 +72,45 @@ export async function POST() {
       );
     }
 
-    // Calculate correct balance from transactions
-    // Start from 0 and apply all transactions
+    // Derive the correct wallet balance from transaction history.
+    //
+    // We use the balance_after_cents of the MOST RECENT transaction that
+    // actually changed the wallet balance (balance_before ≠ balance_after),
+    // skipping admin_adjustment records (which are themselves corrections and
+    // may carry stale or incorrect values from previous buggy runs).
+    //
+    // Why not sum all amount_cents?
+    //   Summing can over-state the balance for users who had their wallet
+    //   silently clamped to 0 in the past (by the fetchWalletData safeguard)
+    //   without a corresponding wallet_transaction record.  The most-recent
+    //   balance_after approach only looks at the last known good state, so it
+    //   naturally accounts for those gaps.
+    //
+    // Transactions arrive in ascending created_at order; we scan from the end.
     let calculatedBalance = 0;
+    let foundRealTransaction = false;
     const transactionLog: Array<{ type: string; amount: number; balance: number }> = [];
 
     if (transactions && transactions.length > 0) {
-      for (const tx of transactions) {
-        if (tx.type === "topup" || tx.type === "refund" || tx.type === "credit") {
-          calculatedBalance += tx.amount_cents;
-        } else if (tx.type === "payment" || tx.type === "debit" || tx.type === "credit_purchase" || tx.type === "subscription_payment") {
-          calculatedBalance -= Math.abs(tx.amount_cents);
-        }
+      for (let i = transactions.length - 1; i >= 0; i--) {
+        const tx = transactions[i];
+
+        // Skip corrections from previous runs of this very route.
+        if (tx.type === "admin_adjustment") continue;
+
+        // Skip tracking-only records (Stripe-card payments recorded with
+        // balance_before === balance_after because no wallet money moved).
+        if (tx.balance_before_cents === tx.balance_after_cents) continue;
+
+        // Found the most recent real wallet movement.
+        calculatedBalance = tx.balance_after_cents ?? 0;
+        foundRealTransaction = true;
         transactionLog.push({
           type: tx.type,
           amount: tx.amount_cents,
           balance: calculatedBalance,
         });
+        break;
       }
     }
 
@@ -100,6 +122,20 @@ export async function POST() {
       .single();
 
     const currentBalance = currentWallet?.balance_cents || 0;
+
+    // If we found no real wallet transactions there is no reliable baseline;
+    // skip correction to avoid accidentally zeroing a legitimately funded wallet.
+    if (!foundRealTransaction) {
+      return NextResponse.json({
+        success: true,
+        corrected: false,
+        currentBalance,
+        calculatedBalance: currentBalance,
+        difference: 0,
+        message: "No real wallet transactions found; balance left unchanged.",
+      });
+    }
+
     const difference = currentBalance - calculatedBalance;
 
     // If there's a significant difference, correct it

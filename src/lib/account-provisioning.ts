@@ -204,17 +204,19 @@ export async function ensureBaselineUserRecords(
   }
 
   const baselineWrites = await Promise.all([
+    // ignoreDuplicates: true → ON CONFLICT DO NOTHING, so existing wallet
+    // balances and credit totals are never overwritten on re-login.
     supabase
       .from("wallets")
-      .upsert({ user_id: user.id, balance_cents: 0 }, { onConflict: "user_id" }),
+      .upsert({ user_id: user.id, balance_cents: 0 }, { onConflict: "user_id", ignoreDuplicates: true }),
     supabase
       .from("credits")
-      .upsert({ user_id: user.id, total: 0, used: 0, rollover: 0 }, { onConflict: "user_id" }),
+      .upsert({ user_id: user.id, total: 0, used: 0, rollover: 0 }, { onConflict: "user_id", ignoreDuplicates: true }),
     supabase
       .from("user_progress")
       .upsert(
         { user_id: user.id, profile_completed: false, preferences_completed: false },
-        { onConflict: "user_id" }
+        { onConflict: "user_id", ignoreDuplicates: true }
       ),
   ]);
 

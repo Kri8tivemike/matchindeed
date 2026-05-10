@@ -492,8 +492,14 @@ function WalletContent() {
         wallet = newW;
       }
 
-      // Fix negative balance
+      // Guard against negative balances that should never happen in normal
+      // operation.  If this fires, a bug in a payment route or admin tool
+      // produced an invalid balance; the /api/correct-wallet-balance endpoint
+      // (which is the canonical fixer) should be called to diagnose and restore.
       if (wallet && wallet.balance_cents < 0) {
+        console.warn(
+          `[wallet] Negative balance_cents (${wallet.balance_cents}) detected for user ${user.id}. Clamping to 0 — check /api/correct-wallet-balance for root cause.`
+        );
         await supabase.from("wallets").update({ balance_cents: 0 }).eq("user_id", user.id);
         wallet.balance_cents = 0;
       }
