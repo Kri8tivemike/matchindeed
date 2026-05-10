@@ -132,7 +132,7 @@ const DEFAULT_POLICY_BY_TIER: Record<
   basic: {
     monthly_outgoing_credits: MONTHLY_CREDITS_BY_TIER.basic,
     max_outgoing_slots: 5,
-    customized_slots: 0,
+    customized_slots: 1,
     matchindeed_slots: 5,
     credit_rollover: false,
     simultaneous_bookings_limit: 1,
