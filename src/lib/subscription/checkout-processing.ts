@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import { allocateSubscriptionCredits } from "@/lib/credits/allocation";
 import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
+import { clearStarterTrialSlot } from "@/lib/starter-trial";
 import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 
 type ProcessingRow = {
@@ -314,6 +315,23 @@ export async function processSubscriptionCheckoutSession(
         );
       }
     );
+
+    // Detach any starter-trial slot pointer so the carried-over slot is treated
+    // as a regular self-customized slot under the new subscription. The slot
+    // row itself is preserved; only the user_starter_trials.active_slot_id
+    // pointer is cleared. Slots created before the new subscription window are
+    // also grandfathered out of the cycle's custom-slot allowance count
+    // (see getCalendarSlotUsageForMonth).
+    const { error: clearStarterError } = await clearStarterTrialSlot(
+      supabase,
+      userId
+    );
+    if (clearStarterError) {
+      console.warn(
+        "[checkout-processing] Failed to clear starter trial slot pointer:",
+        clearStarterError
+      );
+    }
 
     const { error: completeError } = await supabase
       .from("subscription_checkout_processing")

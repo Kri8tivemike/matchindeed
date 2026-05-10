@@ -22,6 +22,7 @@ type TierConfigRow = {
 
 type SlotUsageRow = {
   source: SlotSource;
+  created_at?: string | null;
 };
 
 type MembershipWindowRow = {
@@ -415,7 +416,7 @@ export async function getCalendarSlotUsageForMonth(
 
   const { data, error } = await supabase
     .from("meeting_availability")
-    .select("source")
+    .select("source, created_at")
     .eq("user_id", userId)
     .gte("slot_date", rangeStart.toISOString().slice(0, 10))
     .lt("slot_date", rangeEndExclusive.toISOString().slice(0, 10));
@@ -425,9 +426,22 @@ export async function getCalendarSlotUsageForMonth(
   }
 
   const rows = (data || []) as SlotUsageRow[];
+  // Grandfather slots created BEFORE the current subscription window started
+  // (e.g. a starter-trial slot carried over after upgrading to Basic). Such
+  // slots should not consume the new cycle's included-slot allowance — they
+  // were created under a different (free) policy.
+  const windowStartMs = activeWindow
+    ? new Date(activeWindow.starts_at).getTime()
+    : null;
   let customSlotsUsed = 0;
   let matchindeedSlotsUsed = 0;
   for (const row of rows) {
+    if (windowStartMs !== null && row.created_at) {
+      const createdAtMs = new Date(row.created_at).getTime();
+      if (!Number.isNaN(createdAtMs) && createdAtMs < windowStartMs) {
+        continue;
+      }
+    }
     if (row.source === "self_customized") {
       customSlotsUsed += 1;
     } else {

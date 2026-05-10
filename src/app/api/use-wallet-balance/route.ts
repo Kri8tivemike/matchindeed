@@ -7,6 +7,7 @@ import {
   hasUnlockedWalletAccess,
 } from "@/lib/subscription/permissions";
 import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
+import { clearStarterTrialSlot } from "@/lib/starter-trial";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -487,6 +488,23 @@ export async function POST(request: NextRequest) {
         { error: "Wallet payment returned no result" },
         { status: 500 }
       );
+    }
+
+    // After a successful wallet-funded subscription activation, detach any
+    // existing starter-trial slot pointer so the carried-over slot becomes a
+    // regular self-customized slot (and is grandfathered out of the new
+    // cycle's allowance via getCalendarSlotUsageForMonth).
+    if (type === "subscription") {
+      const { error: clearStarterError } = await clearStarterTrialSlot(
+        supabase,
+        user.id
+      );
+      if (clearStarterError) {
+        console.warn(
+          "[use-wallet-balance] Failed to clear starter trial slot pointer:",
+          clearStarterError
+        );
+      }
     }
 
     return NextResponse.json(result);
