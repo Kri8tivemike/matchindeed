@@ -23,7 +23,57 @@ type TierConfigRow = {
 type SlotUsageRow = {
   source: SlotSource;
   created_at?: string | null;
+  scheduled_at_utc?: string | null;
 };
+
+type MeetingConsumptionRow = {
+  scheduled_at: string;
+  status: "pending" | "confirmed" | "canceled" | "completed";
+  canceled_by: string | null;
+  host_id: string;
+  cancellation_reason: string | null;
+  admin_resolved_by: string | null;
+};
+
+/**
+ * Returns true when this meeting causes its slot to occupy the host's cycle
+ * allowance — i.e. one of the 7 consumption rules says the slot is "spent" or
+ * "in flight". Returns false for outcomes that explicitly release the slot
+ * (requester cancel, admin override).
+ *
+ *   OCCUPIES: confirmed, completed, host-canceled, host auto-declined, pending
+ *   RELEASES: requester-canceled, admin-resolved (any status)
+ */
+function doesMeetingOccupyQuota(meeting: MeetingConsumptionRow): boolean {
+  // Rule 2: admin override always releases the slot.
+  if (meeting.admin_resolved_by) return false;
+
+  if (meeting.status === "confirmed" || meeting.status === "completed") {
+    return true; // Rule 6
+  }
+
+  if (meeting.status === "pending") {
+    return true; // Rule 1 — request in flight, slot is held
+  }
+
+  if (meeting.status === "canceled") {
+    // Rule 5: host canceled (after accepting OR by declining) → occupies
+    if (meeting.canceled_by === meeting.host_id) return true;
+    // Rule 4: host failed to accept in time → system auto-decline → occupies
+    if (
+      meeting.canceled_by === null &&
+      (meeting.cancellation_reason ?? "")
+        .toLowerCase()
+        .startsWith("automatically declined")
+    ) {
+      return true;
+    }
+    // Rule 3: anyone else (requester) canceled → release
+    return false;
+  }
+
+  return false;
+}
 
 type MembershipWindowRow = {
   status: string | null;
@@ -45,7 +95,19 @@ export type CalendarSlotPolicy = {
 
 export type CalendarSlotUsage = {
   total_slots_used: number;
+  /**
+   * Number of custom slots whose attached meeting "consumed" the cycle's
+   * allowance per the 7 consumption rules (pending requests don't count;
+   * requester/admin cancellations don't count; host-side outcomes do).
+   * Drives credit-charge and remaining-allowance decisions.
+   */
   custom_slots_used: number;
+  /**
+   * Raw count of custom slots created in the cycle (independent of whether
+   * they have a consuming meeting). Used for UI labels like
+   * "X total slot created this cycle".
+   */
+  custom_slots_created: number;
   matchindeed_slots_used: number;
   month_start: string;
   month_end: string;
@@ -416,7 +478,7 @@ export async function getCalendarSlotUsageForMonth(
 
   const { data, error } = await supabase
     .from("meeting_availability")
-    .select("source, created_at")
+    .select("source, created_at, scheduled_at_utc")
     .eq("user_id", userId)
     .gte("slot_date", rangeStart.toISOString().slice(0, 10))
     .lt("slot_date", rangeEndExclusive.toISOString().slice(0, 10));
@@ -426,6 +488,7 @@ export async function getCalendarSlotUsageForMonth(
   }
 
   const rows = (data || []) as SlotUsageRow[];
+
   // Grandfather slots created BEFORE the current subscription window started
   // (e.g. a starter-trial slot carried over after upgrading to Basic). Such
   // slots should not consume the new cycle's included-slot allowance — they
@@ -433,25 +496,105 @@ export async function getCalendarSlotUsageForMonth(
   const windowStartMs = activeWindow
     ? new Date(activeWindow.starts_at).getTime()
     : null;
-  let customSlotsUsed = 0;
-  let matchindeedSlotsUsed = 0;
-  for (const row of rows) {
-    if (windowStartMs !== null && row.created_at) {
-      const createdAtMs = new Date(row.created_at).getTime();
-      if (!Number.isNaN(createdAtMs) && createdAtMs < windowStartMs) {
-        continue;
+  const isInCycle = (row: SlotUsageRow) => {
+    if (windowStartMs === null || !row.created_at) return true;
+    const createdAtMs = new Date(row.created_at).getTime();
+    if (Number.isNaN(createdAtMs)) return true;
+    return createdAtMs >= windowStartMs;
+  };
+
+  const eligibleRows = rows.filter(isInCycle);
+
+  // Per-slot meeting status map. A slot occupies the cycle's quota if and
+  // only if it is "live" (consuming the allowance) per the 7 rules:
+  //
+  //   OCCUPIES the quota:
+  //     - Slot has a confirmed/completed meeting             (Rule 6, host accepted)
+  //     - Slot has a canceled meeting where canceled_by =
+  //       host_id                                            (Rule 5, host canceled)
+  //     - Slot has a canceled meeting with auto-decline
+  //       reason (host let it expire)                        (Rule 4)
+  //     - Slot has a pending meeting                         (Rule 1, in-flight request)
+  //     - Slot has NO meeting AND scheduled_at_utc > now     (Rule 1, open & live)
+  //
+  //   DOES NOT OCCUPY the quota:
+  //     - Slot has a canceled meeting where canceled_by ≠
+  //       host_id and admin_resolved_by IS NULL (requester
+  //       canceled)                                          (Rule 3)
+  //     - Slot has any meeting where admin_resolved_by IS
+  //       NOT NULL (admin override)                          (Rule 2)
+  //     - Slot has NO meeting AND scheduled_at_utc ≤ now     (Rule 7, expired unbooked)
+  //
+  // A slot's "consumed" state (the host's allowance is permanently spent for
+  // this cycle) is the subset where status is confirmed/completed, host
+  // canceled, or host auto-declined — i.e. an event that locks the quota.
+  const meetingsByScheduledAt = new Map<string, MeetingConsumptionRow>();
+  const scheduledAtList = eligibleRows
+    .map((row) => row.scheduled_at_utc)
+    .filter((value): value is string => Boolean(value));
+
+  if (scheduledAtList.length > 0) {
+    const { data: meetingData, error: meetingError } = await supabase
+      .from("meetings")
+      .select(
+        "scheduled_at, status, canceled_by, host_id, cancellation_reason, admin_resolved_by"
+      )
+      .eq("host_id", userId)
+      .in("scheduled_at", scheduledAtList);
+
+    if (meetingError) {
+      throw meetingError;
+    }
+
+    // If multiple meetings share a scheduled_at (rare — e.g. rejected then
+    // re-requested), prefer one that occupies the quota over one that doesn't.
+    for (const meeting of (meetingData || []) as MeetingConsumptionRow[]) {
+      const existing = meetingsByScheduledAt.get(meeting.scheduled_at);
+      const meetingOccupies = doesMeetingOccupyQuota(meeting);
+      if (!existing) {
+        meetingsByScheduledAt.set(meeting.scheduled_at, meeting);
+      } else if (meetingOccupies && !doesMeetingOccupyQuota(existing)) {
+        meetingsByScheduledAt.set(meeting.scheduled_at, meeting);
       }
     }
+  }
+
+  const nowMs = Date.now();
+
+  let customSlotsUsed = 0;
+  let customSlotsCreated = 0;
+  let matchindeedSlotsUsed = 0;
+  for (const row of eligibleRows) {
+    const meeting = row.scheduled_at_utc
+      ? meetingsByScheduledAt.get(row.scheduled_at_utc)
+      : undefined;
+
+    const slotIsLiveOpen =
+      !meeting &&
+      row.scheduled_at_utc &&
+      new Date(row.scheduled_at_utc).getTime() > nowMs;
+
+    const occupies = meeting
+      ? doesMeetingOccupyQuota(meeting)
+      : Boolean(slotIsLiveOpen) ||
+        // Legacy rows without scheduled_at_utc fall back to "occupies"
+        // (preserves prior behaviour for matchindeed slots).
+        !row.scheduled_at_utc;
+
     if (row.source === "self_customized") {
-      customSlotsUsed += 1;
-    } else {
+      customSlotsCreated += 1;
+      if (occupies) {
+        customSlotsUsed += 1;
+      }
+    } else if (occupies) {
       matchindeedSlotsUsed += 1;
     }
   }
 
   return {
-    total_slots_used: rows.length,
+    total_slots_used: customSlotsUsed + matchindeedSlotsUsed,
     custom_slots_used: customSlotsUsed,
+    custom_slots_created: customSlotsCreated,
     matchindeed_slots_used: matchindeedSlotsUsed,
     month_start: rangeStart.toISOString(),
     month_end: rangeEndExclusive.toISOString(),
@@ -475,6 +618,7 @@ export async function validateSlotCreation(
       usage: {
         total_slots_used: 0,
         custom_slots_used: 0,
+        custom_slots_created: 0,
         matchindeed_slots_used: 0,
         month_start: new Date().toISOString(),
         month_end: new Date().toISOString(),
@@ -494,6 +638,7 @@ export async function validateSlotCreation(
       usage: {
         total_slots_used: 0,
         custom_slots_used: 0,
+        custom_slots_created: 0,
         matchindeed_slots_used: 0,
         month_start: new Date().toISOString(),
         month_end: new Date().toISOString(),

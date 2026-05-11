@@ -958,6 +958,7 @@ export default function CalendarPage() {
       : getRemainingIncludedCustomSlots(tierConfig, slotUsage || {
           total_slots_used: 0,
           custom_slots_used: 0,
+          custom_slots_created: 0,
           matchindeed_slots_used: 0,
           month_start: "",
           month_end: "",
@@ -1330,7 +1331,7 @@ export default function CalendarPage() {
                     </div>
                     <div className="text-right min-w-[150px]">
                       <div className="font-bold text-[#1f419a]">
-                        {usedCustomSlots} total slot created this cycle
+                        {slotUsage?.custom_slots_created ?? 0} total slot created this cycle
                       </div>
                       <div className="text-[11px] text-gray-400">{slotUsageSummary}</div>
                     </div>
