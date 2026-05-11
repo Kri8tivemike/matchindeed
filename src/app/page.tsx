@@ -213,6 +213,31 @@ export default function Home() {
   const [currency, setCurrency] = useState<"ngn" | "usd" | "gbp">("usd");
   const [currencySelectorOpen, setCurrencySelectorOpen] = useState(false);
 
+  // Defensive: when Supabase's password-recovery email redirects users to the
+  // site root instead of /reset-password (e.g. because the redirect URL is
+  // missing from the auth allowlist), forward them to the reset page along
+  // with the original auth params. The /reset-password page reads both the
+  // implicit-hash and PKCE-code flows.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const hash = window.location.hash || "";
+    const search = window.location.search || "";
+    const hashParams = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+    const queryParams = new URLSearchParams(search);
+
+    const type = hashParams.get("type") || queryParams.get("type");
+    const hasRecoveryToken =
+      hashParams.has("access_token") || queryParams.has("code");
+
+    if (type === "recovery" && hasRecoveryToken) {
+      // Preserve both hash (implicit flow tokens) and search (PKCE code) on
+      // redirect so the reset page can establish the session correctly.
+      const target = `/reset-password${search}${hash}`;
+      router.replace(target);
+    }
+  }, [router]);
+
   const scrollToSignupForm = useCallback(() => {
     const formRoot = document.getElementById(signupFormId);
     if (!formRoot) {

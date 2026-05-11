@@ -20,6 +20,22 @@ const MAINTENANCE_PATH = "/maintenance";
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
+  // Defensive: if a Supabase password-recovery PKCE redirect lands on the
+  // site root (which happens when /reset-password is not in the auth
+  // allowlist, causing Supabase to fall back to the Site URL), forward to
+  // /reset-password with the original auth params intact. The implicit-hash
+  // flow is handled client-side in app/page.tsx — the hash never reaches
+  // the server.
+  if (pathname === "/") {
+    const type = request.nextUrl.searchParams.get("type");
+    const code = request.nextUrl.searchParams.get("code");
+    if (type === "recovery" && code) {
+      const recoveryUrl = request.nextUrl.clone();
+      recoveryUrl.pathname = "/reset-password";
+      return NextResponse.redirect(recoveryUrl);
+    }
+  }
+
   if (MAINTENANCE_MODE_ENABLED && pathname !== MAINTENANCE_PATH) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
