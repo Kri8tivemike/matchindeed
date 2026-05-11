@@ -63,11 +63,10 @@ function BrandPanel() {
 
       <Link href="/" className="relative z-10">
         <Image
-          src="/matchindeed-logo-black-font.png"
+          src="/matchindeed-logo-white.png"
           alt="MatchIndeed"
           width={160}
           height={42}
-         
           style={{ width: "auto", height: "auto" }}
         />
       </Link>
