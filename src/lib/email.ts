@@ -87,6 +87,7 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   new_message: "new_message",
   daily_profile_views: "profile_view",
   daily_new_likes: "like",
+  daily_recommendations: "match_found",
   meeting_accepted: "meeting_accepted",
   meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
@@ -335,6 +336,23 @@ export async function sendDailyNewLikesEmail(
     to: recipientEmail,
     template: "daily_new_likes",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/likes?tab=received` },
+    recipientUserId,
+  });
+}
+
+/** Send the daily recommended matches digest email */
+export async function sendDailyRecommendationsEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    count: number;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "daily_recommendations",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/discover` },
     recipientUserId,
   });
 }

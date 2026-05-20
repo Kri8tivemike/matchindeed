@@ -2,10 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   sendDailyNewLikesEmail,
   sendDailyProfileViewsEmail,
+  sendDailyRecommendationsEmail,
   type SendEmailResult,
 } from "@/lib/email";
+import { generateTopPicks } from "@/lib/top-picks-algorithm";
 
-type DigestType = "daily_profile_views" | "daily_new_likes";
+type DigestType = "daily_profile_views" | "daily_new_likes" | "daily_recommendations";
 
 type DigestRunStatus = "processing" | "sent" | "skipped" | "failed";
 
@@ -35,6 +37,7 @@ type DigestResult = {
 };
 
 const DIGEST_SEND_HOUR_UTC = 17;
+const RECOMMENDATION_BATCH_LIMIT = 250;
 
 function isMissingDigestRunsTable(error: unknown) {
   const value = error as { code?: string; message?: string } | null;
@@ -202,7 +205,18 @@ async function sendDigestEmail(params: {
     );
   }
 
-  return sendDailyNewLikesEmail(
+  if (params.digestType === "daily_new_likes") {
+    return sendDailyNewLikesEmail(
+      params.identity.email,
+      {
+        recipientName: params.identity.name,
+        count: params.count,
+      },
+      params.identity.userId
+    );
+  }
+
+  return sendDailyRecommendationsEmail(
     params.identity.email,
     {
       recipientName: params.identity.name,
@@ -210,6 +224,33 @@ async function sendDigestEmail(params: {
     },
     params.identity.userId
   );
+}
+
+async function storeTopPicksForUser(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  digestDate: string;
+  picks: Awaited<ReturnType<typeof generateTopPicks>>;
+}) {
+  if (params.picks.length === 0) return;
+
+  await params.supabase
+    .from("user_top_picks")
+    .delete()
+    .eq("user_id", params.userId)
+    .eq("pick_date", params.digestDate);
+
+  const rows = params.picks.map((pick) => ({
+    user_id: params.userId,
+    target_user_id: pick.profile.user_id,
+    pick_date: params.digestDate,
+    score: pick.score,
+  }));
+
+  const { error } = await params.supabase.from("user_top_picks").insert(rows);
+  if (error) {
+    console.warn("Daily recommendations could not store top picks:", error);
+  }
 }
 
 async function processCandidates(params: {
@@ -304,6 +345,153 @@ async function processCandidates(params: {
   return result;
 }
 
+async function loadRecommendationRecipientIds(
+  supabase: SupabaseClient,
+  limit: number
+): Promise<string[]> {
+  const { data: profiles, error: profilesError } = await supabase
+    .from("user_profiles")
+    .select("user_id")
+    .eq("profile_completed", true)
+    .limit(limit);
+
+  if (profilesError) {
+    throw profilesError;
+  }
+
+  const userIds = Array.from(
+    new Set(((profiles || []) as Array<{ user_id: string }>).map((profile) => profile.user_id))
+  );
+
+  if (userIds.length === 0) {
+    return [];
+  }
+
+  const { data: accounts, error: accountsError } = await supabase
+    .from("accounts")
+    .select("id")
+    .in("id", userIds)
+    .eq("account_status", "active")
+    .or("profile_visible.is.null,profile_visible.eq.true");
+
+  if (accountsError) {
+    throw accountsError;
+  }
+
+  return ((accounts || []) as Array<{ id: string }>).map((account) => account.id);
+}
+
+async function processRecommendationDigests(params: {
+  supabase: SupabaseClient;
+  digestDate: string;
+}) {
+  const result: DigestResult = {
+    processed: 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    missingTable: false,
+  };
+
+  const userIds = await loadRecommendationRecipientIds(
+    params.supabase,
+    RECOMMENDATION_BATCH_LIMIT
+  );
+  const identities = await loadIdentities(params.supabase, userIds);
+
+  for (const userId of userIds) {
+    const claim = await claimDigestRun({
+      supabase: params.supabase,
+      userId,
+      digestType: "daily_recommendations",
+      digestDate: params.digestDate,
+    });
+
+    if (claim.missingTable) {
+      result.missingTable = true;
+      return result;
+    }
+
+    if (!claim.claimed || !claim.runId) {
+      result.skipped += 1;
+      continue;
+    }
+
+    result.processed += 1;
+
+    const identity = identities.get(userId);
+    if (!identity?.email) {
+      result.skipped += 1;
+      await markDigestRun({
+        supabase: params.supabase,
+        runId: claim.runId,
+        status: "skipped",
+        count: 0,
+        error: "missing_email",
+      });
+      continue;
+    }
+
+    try {
+      const picks = await generateTopPicks(userId, 5);
+      if (picks.length === 0) {
+        result.skipped += 1;
+        await markDigestRun({
+          supabase: params.supabase,
+          runId: claim.runId,
+          status: "skipped",
+          count: 0,
+          error: "no_recommendations",
+        });
+        continue;
+      }
+
+      await storeTopPicksForUser({
+        supabase: params.supabase,
+        userId,
+        digestDate: params.digestDate,
+        picks,
+      });
+
+      const email = await sendDigestEmail({
+        digestType: "daily_recommendations",
+        identity,
+        count: picks.length,
+      });
+
+      if (email.success && !email.skipped) {
+        result.sent += 1;
+        await markDigestRun({
+          supabase: params.supabase,
+          runId: claim.runId,
+          status: "sent",
+          count: picks.length,
+        });
+      } else {
+        result.skipped += 1;
+        await markDigestRun({
+          supabase: params.supabase,
+          runId: claim.runId,
+          status: "skipped",
+          count: picks.length,
+          error: email.error || "skipped",
+        });
+      }
+    } catch (error) {
+      result.failed += 1;
+      await markDigestRun({
+        supabase: params.supabase,
+        runId: claim.runId,
+        status: "failed",
+        count: 0,
+        error: error instanceof Error ? error.message : "Unexpected recommendation digest error",
+      });
+    }
+  }
+
+  return result;
+}
+
 export async function processDailyEngagementDigests(
   supabase: SupabaseClient,
   options: { now?: Date; force?: boolean } = {}
@@ -315,6 +503,7 @@ export async function processDailyEngagementDigests(
       reason: "before_digest_send_hour",
       profileViews: { processed: 0, sent: 0, skipped: 0, failed: 0, missingTable: false },
       newLikes: { processed: 0, sent: 0, skipped: 0, failed: 0, missingTable: false },
+      recommendations: { processed: 0, sent: 0, skipped: 0, failed: 0, missingTable: false },
     };
   }
 
@@ -359,10 +548,16 @@ export async function processDailyEngagementDigests(
     candidates: countByTarget((likes || []) as ActivityRow[]),
   });
 
+  const recommendationsResult = await processRecommendationDigests({
+    supabase,
+    digestDate: window.digestDate,
+  });
+
   return {
     skipped: false,
     digestDate: window.digestDate,
     profileViews: profileViewResult,
     newLikes: newLikesResult,
+    recommendations: recommendationsResult,
   };
 }

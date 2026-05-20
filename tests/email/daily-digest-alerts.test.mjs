@@ -25,3 +25,15 @@ test("daily new likes digest includes the count and likes CTA", () => {
   assert.match(html, /You received <strong>2<\/strong>/);
   assert.match(html, /See Your Likes/);
 });
+
+test("daily recommendations digest includes the count and recommendations CTA", () => {
+  const { subject, html } = generateEmail("daily_recommendations", {
+    recipientName: "Maya",
+    count: 5,
+    dashboardUrl: "https://matchindeed.com/dashboard/discover",
+  });
+
+  assert.equal(subject, "New Recommendations Just for You");
+  assert.match(html, /We found <strong>5<\/strong>/);
+  assert.match(html, /See Your Recommendations/);
+});

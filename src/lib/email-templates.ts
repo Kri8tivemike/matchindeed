@@ -120,6 +120,7 @@ export type EmailTemplate =
   | "new_message"
   | "daily_profile_views"
   | "daily_new_likes"
+  | "daily_recommendations"
   | "meeting_accepted"
   | "meeting_approved"
   | "meeting_cancelled"
@@ -172,6 +173,8 @@ export function generateEmail(
       return dailyProfileViewsEmail(data);
     case "daily_new_likes":
       return dailyNewLikesEmail(data);
+    case "daily_recommendations":
+      return dailyRecommendationsEmail(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
     case "meeting_approved":
@@ -423,6 +426,26 @@ function dailyNewLikesEmail(data: EmailData) {
     </div>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">See Your Likes</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function dailyRecommendationsEmail(data: EmailData) {
+  const count = Number(data.count || 0);
+  const subject = "New Recommendations Just for You";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>New Recommendations Just for You</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p>We found <strong>${count}</strong> profile${count === 1 ? "" : "s"} who match your preferences and energy.</p>
+    <div class="highlight">
+      <p>Take a moment to explore — your next connection might be waiting.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">See Your Recommendations</a>
     </div>
     `
   );

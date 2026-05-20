@@ -418,9 +418,18 @@ export async function generateTopPicks(
     // Get all active user IDs (excluding current user)
     const { data: activeAccounts } = await admin
       .from("accounts")
-      .select("id, account_status")
+      .select("id, account_status, profile_visible, calendar_enabled")
       .eq("account_status", "active")
-      .neq("id", userId) as { data: { id: string; account_status: string }[] | null };
+      .neq("id", userId) as {
+        data:
+          | {
+              id: string;
+              account_status: string;
+              profile_visible: boolean | null;
+              calendar_enabled: boolean | null;
+            }[]
+          | null;
+      };
 
     if (!activeAccounts || activeAccounts.length === 0) {
       return [];
@@ -432,7 +441,7 @@ export async function generateTopPicks(
     // Get profiles for active users
     const { data: profiles } = await admin
       .from("user_profiles")
-      .select("user_id, first_name, last_name, date_of_birth, location, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, ethnicity, updated_at, gender")
+      .select("user_id, first_name, last_name, date_of_birth, location, height_cm, photos, profile_photo_url, education_level, religion, have_children, want_children, smoking_habits, ethnicity, updated_at, gender, profile_completed")
       .in("user_id", activeUserIds) as { data: { 
   user_id: string;
   first_name: string | null;
@@ -450,6 +459,7 @@ export async function generateTopPicks(
   ethnicity: string | null;
   updated_at: string | null;
   gender: string | null;
+  profile_completed: boolean | null;
 }[] | null };
 
     if (!profiles || profiles.length === 0) {
@@ -497,6 +507,13 @@ export async function generateTopPicks(
         if (isAgeRestrictedForMatching(profile.date_of_birth)) return null;
 
         if (
+          profile.profile_completed !== true ||
+          ((!profile.photos || profile.photos.length === 0) && !profile.profile_photo_url)
+        ) {
+          return null;
+        }
+
+        if (
           !evaluateGenderEligibility({
             requesterGender,
             targetGender: profile.gender,
@@ -511,6 +528,9 @@ export async function generateTopPicks(
 
         const account = accountMap.get(profile.user_id);
         if (!account) return null;
+        if (account.profile_visible === false || account.calendar_enabled === false) {
+          return null;
+        }
 
         // Map profile data to match ProfileData interface
         const profileData: ProfileData = {
