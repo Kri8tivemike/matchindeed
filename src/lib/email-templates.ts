@@ -116,6 +116,8 @@ export type EmailTemplate =
   | "meeting_request"
   | "meeting_request_reminder"
   | "no_active_video_slot"
+  | "activity_received"
+  | "new_message"
   | "meeting_accepted"
   | "meeting_approved"
   | "meeting_cancelled"
@@ -160,6 +162,10 @@ export function generateEmail(
       return meetingRequestReminderEmail(data);
     case "no_active_video_slot":
       return noActiveVideoSlotEmail(data);
+    case "activity_received":
+      return activityReceivedEmail(data);
+    case "new_message":
+      return newMessageEmail(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
     case "meeting_approved":
@@ -329,6 +335,48 @@ function noActiveVideoSlotEmail(data: EmailData) {
       <a href="${data.dashboardUrl || "#"}" class="btn">Add Calendar Slot</a>
     </div>
     <p class="meta" style="text-align:center;">We will stop reminding you once you add an active future slot.</p>
+    `
+  );
+  return { subject, html };
+}
+
+function activityReceivedEmail(data: EmailData) {
+  const actionLabel = data.actionLabel || "liked your profile";
+  const subject = `${data.actorName || "Someone"} ${actionLabel} on MatchIndeed`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Someone Noticed You</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p><strong>${data.actorName || "Someone"}</strong> ${actionLabel}.</p>
+    <div class="highlight">
+      <p>This could be a good moment to view their profile and respond while the interest is fresh.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">See Your Likes</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function newMessageEmail(data: EmailData) {
+  const subject = `New message from ${data.senderName || "your match"}`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>New Message</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p><strong>${data.senderName || "Your match"}</strong> just sent you a new message.</p>
+    ${
+      data.preview
+        ? `<div class="highlight"><p>${data.preview}</p></div>`
+        : ""
+    }
+    <p>Great conversations move best when replies are still warm.</p>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Open Chat</a>
+    </div>
     `
   );
   return { subject, html };

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, type PostgrestError } from "@supabase/supabase-js";
+import { sendNewMessageEmail } from "@/lib/email";
 import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
 import {
   getAccountState,
@@ -25,6 +26,11 @@ type ConversationMatch = {
   last_message_preview: string | null;
 };
 
+type UserEmailIdentity = {
+  email: string | null;
+  name: string;
+};
+
 function isMissingReadAtColumn(error: PostgrestError | null): boolean {
   if (!error) return false;
   return (
@@ -47,6 +53,30 @@ async function getAuthUser(request: NextRequest) {
     error,
   } = await supabase.auth.getUser(token);
   return error || !user ? null : user;
+}
+
+async function getUserEmailIdentity(userId: string): Promise<UserEmailIdentity> {
+  const [{ data: account }, { data: profile }] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("email, display_name")
+      .eq("id", userId)
+      .maybeSingle(),
+    supabase
+      .from("user_profiles")
+      .select("first_name")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+
+  const email = account?.email || null;
+  const name =
+    profile?.first_name ||
+    account?.display_name ||
+    email?.split("@")[0] ||
+    "there";
+
+  return { email, name };
 }
 
 // ---------------------------------------------------------------
@@ -507,6 +537,24 @@ export async function POST(request: NextRequest) {
         message_id: message.id,
       },
     });
+
+    const [recipientIdentity, senderIdentity] = await Promise.all([
+      getUserEmailIdentity(partnerId),
+      getUserEmailIdentity(user.id),
+    ]);
+
+    if (recipientIdentity.email) {
+      await sendNewMessageEmail(
+        recipientIdentity.email,
+        {
+          recipientName: recipientIdentity.name,
+          senderName: senderIdentity.name,
+          matchId: String(match_id),
+          preview,
+        },
+        partnerId
+      );
+    }
 
     return NextResponse.json({
       success: true,

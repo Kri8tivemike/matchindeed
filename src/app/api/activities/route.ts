@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
+import { sendActivityReceivedEmail, sendMatchFoundEmail } from "@/lib/email";
 import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
 import { sendNoActiveVideoSlotAlert } from "@/lib/alerts/scheduled-alerts";
 import {
@@ -188,6 +189,19 @@ async function createNotification(
       },
     });
 
+    const targetIdentity = await getUserEmailIdentity(targetUserId);
+    if (targetIdentity.email) {
+      await sendActivityReceivedEmail(
+        targetIdentity.email,
+        {
+          recipientName: targetIdentity.name,
+          actorName: senderName,
+          actionLabel: label,
+        },
+        targetUserId
+      );
+    }
+
     await sendNoActiveVideoSlotAlert({
       supabase: supabaseAdmin,
       userId: targetUserId,
@@ -198,6 +212,33 @@ async function createNotification(
   } catch (error) {
     console.error("Error creating notification:", error);
   }
+}
+
+async function getUserEmailIdentity(userId: string): Promise<{
+  email: string | null;
+  name: string;
+}> {
+  const [{ data: account }, { data: profile }] = await Promise.all([
+    supabaseAdmin
+      .from("accounts")
+      .select("display_name, email")
+      .eq("id", userId)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("user_profiles")
+      .select("first_name")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+
+  const email = account?.email || null;
+  const name =
+    profile?.first_name ||
+    account?.display_name ||
+    email?.split("@")[0] ||
+    "there";
+
+  return { email, name };
 }
 
 async function getUserDisplayName(userId: string): Promise<string> {
@@ -526,6 +567,34 @@ export async function POST(request: NextRequest) {
             matched_user_id: userId,
           },
         }),
+      ]);
+
+      const [actorIdentity, targetIdentity] = await Promise.all([
+        getUserEmailIdentity(userId),
+        getUserEmailIdentity(target_user_id),
+      ]);
+
+      await Promise.all([
+        actorIdentity.email
+          ? sendMatchFoundEmail(
+              actorIdentity.email,
+              {
+                recipientName: actorIdentity.name,
+                partnerName: targetName,
+              },
+              userId
+            )
+          : Promise.resolve(),
+        targetIdentity.email
+          ? sendMatchFoundEmail(
+              targetIdentity.email,
+              {
+                recipientName: targetIdentity.name,
+                partnerName: actorName,
+              },
+              target_user_id
+            )
+          : Promise.resolve(),
       ]);
     }
 

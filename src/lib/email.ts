@@ -83,6 +83,8 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   meeting_request: "meeting_request",
   meeting_request_reminder: "meeting_request",
   no_active_video_slot: "no_active_video_slot",
+  activity_received: "like",
+  new_message: "new_message",
   meeting_accepted: "meeting_accepted",
   meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
@@ -257,6 +259,46 @@ export async function sendNoActiveVideoSlotEmail(
     to: recipientEmail,
     template: "no_active_video_slot",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/calendar` },
+    recipientUserId,
+  });
+}
+
+/** Send an instant email when another member likes/winks/shows interest */
+export async function sendActivityReceivedEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    actorName: string;
+    actionLabel: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "activity_received",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/likes?tab=received` },
+    recipientUserId,
+  });
+}
+
+/** Send an instant email when a match sends a new message */
+export async function sendNewMessageEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    senderName: string;
+    matchId: string;
+    preview?: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "new_message",
+    data: {
+      ...data,
+      dashboardUrl: `${APP_URL}/dashboard/messages/${data.matchId}`,
+    },
     recipientUserId,
   });
 }
