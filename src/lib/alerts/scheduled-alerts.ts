@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  sendInactiveUserReengagementEmail,
   sendInactiveNewPeopleReengagementEmail,
   sendMeetingRequestReminderEmail,
+  sendNewMatchReminderReengagementEmail,
   sendNewMatchesReengagementEmail,
   sendNoActiveVideoSlotEmail,
   sendUnreadMessagesReengagementEmail,
@@ -18,7 +20,11 @@ export type ScheduledAlertType =
   | "no_active_video_slot_reminder"
   | "reengagement_unread_messages"
   | "reengagement_new_people"
-  | "reengagement_new_matches";
+  | "reengagement_new_matches"
+  | "reengagement_new_match_reminder"
+  | "reengagement_inactive_day_7"
+  | "reengagement_inactive_day_14"
+  | "reengagement_inactive_day_30";
 
 type ScheduledAlertPayload = Record<string, unknown>;
 
@@ -81,6 +87,13 @@ function timestamp(value: string | null) {
   if (!value) return null;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function inactiveDayForAlertType(alertType: ScheduledAlertType) {
+  if (alertType === "reengagement_inactive_day_7") return 7;
+  if (alertType === "reengagement_inactive_day_14") return 14;
+  if (alertType === "reengagement_inactive_day_30") return 30;
+  return null;
 }
 
 async function loadUserEmailIdentity(supabase: SupabaseClient, userId: string) {
@@ -517,6 +530,65 @@ async function deliverNewMatchesReengagement(
   return { sent: result.success, error: result.error };
 }
 
+async function deliverNewMatchReminderReengagement(
+  supabase: SupabaseClient,
+  alert: ScheduledAlertRow
+) {
+  const payload = alert.payload || {};
+  if (!(await hasNewMatchesWaiting(supabase, alert.user_id, payload))) {
+    return { sent: false, cancelled: true, reason: "match_opened_or_missing" };
+  }
+
+  if (alert.channel !== "email") {
+    return { sent: false, cancelled: true, reason: "unsupported_channel" };
+  }
+
+  const identity = await loadUserEmailIdentity(supabase, alert.user_id);
+  if (!identity.email) {
+    return { sent: false, cancelled: true, reason: "missing_email" };
+  }
+
+  const result = await sendNewMatchReminderReengagementEmail(
+    identity.email,
+    { recipientName: identity.recipientName },
+    alert.user_id
+  );
+  return { sent: result.success, error: result.error };
+}
+
+async function deliverInactiveUserReengagement(
+  supabase: SupabaseClient,
+  alert: ScheduledAlertRow
+) {
+  const day = inactiveDayForAlertType(alert.alert_type);
+  if (!day) {
+    return { sent: false, cancelled: true, reason: "missing_inactive_day" };
+  }
+
+  if (!(await isStillInactive(supabase, alert.user_id, day))) {
+    return { sent: false, cancelled: true, reason: "user_returned" };
+  }
+
+  if (alert.channel !== "email") {
+    return { sent: false, cancelled: true, reason: "unsupported_channel" };
+  }
+
+  const identity = await loadUserEmailIdentity(supabase, alert.user_id);
+  if (!identity.email) {
+    return { sent: false, cancelled: true, reason: "missing_email" };
+  }
+
+  const result = await sendInactiveUserReengagementEmail(
+    identity.email,
+    {
+      recipientName: identity.recipientName,
+      day,
+    },
+    alert.user_id
+  );
+  return { sent: result.success, error: result.error };
+}
+
 async function deliverScheduledAlert(
   supabase: SupabaseClient,
   alert: ScheduledAlertRow
@@ -532,6 +604,12 @@ async function deliverScheduledAlert(
       return deliverInactiveNewPeopleReengagement(supabase, alert);
     case "reengagement_new_matches":
       return deliverNewMatchesReengagement(supabase, alert);
+    case "reengagement_new_match_reminder":
+      return deliverNewMatchReminderReengagement(supabase, alert);
+    case "reengagement_inactive_day_7":
+    case "reengagement_inactive_day_14":
+    case "reengagement_inactive_day_30":
+      return deliverInactiveUserReengagement(supabase, alert);
     default:
       return { sent: false, cancelled: true, reason: "unknown_alert_type" };
   }

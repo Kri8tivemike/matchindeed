@@ -92,6 +92,10 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   reengagement_unread_messages: "new_message",
   reengagement_new_people: "match_found",
   reengagement_new_matches: "match_found",
+  reengagement_new_match_reminder: "match_found",
+  reengagement_inactive_day_7: "match_found",
+  reengagement_inactive_day_14: "match_found",
+  reengagement_inactive_day_30: "match_found",
   meeting_accepted: "meeting_accepted",
   meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
@@ -426,6 +430,45 @@ export async function sendNewMatchesReengagementEmail(
     to: recipientEmail,
     template: "reengagement_new_matches",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/matches` },
+    recipientUserId,
+  });
+}
+
+/** Send the day-2 new match reminder re-engagement email */
+export async function sendNewMatchReminderReengagementEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "reengagement_new_match_reminder",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/matches` },
+    recipientUserId,
+  });
+}
+
+/** Send a general inactive-user re-engagement email */
+export async function sendInactiveUserReengagementEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    day: 7 | 14 | 30;
+  },
+  recipientUserId?: string
+) {
+  const templateByDay: Record<7 | 14 | 30, EmailTemplate> = {
+    7: "reengagement_inactive_day_7",
+    14: "reengagement_inactive_day_14",
+    30: "reengagement_inactive_day_30",
+  };
+
+  return sendEmail({
+    to: recipientEmail,
+    template: templateByDay[data.day],
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard` },
     recipientUserId,
   });
 }

@@ -125,6 +125,10 @@ export type EmailTemplate =
   | "reengagement_unread_messages"
   | "reengagement_new_people"
   | "reengagement_new_matches"
+  | "reengagement_new_match_reminder"
+  | "reengagement_inactive_day_7"
+  | "reengagement_inactive_day_14"
+  | "reengagement_inactive_day_30"
   | "meeting_accepted"
   | "meeting_approved"
   | "meeting_cancelled"
@@ -187,6 +191,14 @@ export function generateEmail(
       return reengagementNewPeopleEmail(data);
     case "reengagement_new_matches":
       return reengagementNewMatchesEmail(data);
+    case "reengagement_new_match_reminder":
+      return reengagementNewMatchReminderEmail(data);
+    case "reengagement_inactive_day_7":
+      return reengagementInactiveDay7Email(data);
+    case "reengagement_inactive_day_14":
+      return reengagementInactiveDay14Email(data);
+    case "reengagement_inactive_day_30":
+      return reengagementInactiveDay30Email(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
     case "meeting_approved":
@@ -536,6 +548,83 @@ function reengagementNewMatchesEmail(data: EmailData) {
     </div>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">View Matches</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function reengagementNewMatchReminderEmail(data: EmailData) {
+  const subject = `Your New Match Is Waiting, ${data.recipientName || "there"}`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Your New Match Is Waiting</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>You matched with someone recently, but you have not said hello yet.</p>
+    <div class="highlight">
+      <p>A simple message can open the door to a great connection.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Say Hello</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function reengagementInactiveDay7Email(data: EmailData) {
+  const subject = `We Miss You, ${data.recipientName || "there"}`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>We Miss You</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>It has been a little while since we last saw you.</p>
+    <div class="highlight">
+      <p>New people have joined MatchIndeed, and your profile is still getting attention.</p>
+      <p>Come back and reconnect. Your next match could be waiting.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Return to MatchIndeed</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function reengagementInactiveDay14Email(data: EmailData) {
+  const subject = "You're Missing Out on New Matches";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>You're Missing Out on New Matches</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>A lot has happened since your last visit.</p>
+    <div class="highlight">
+      <p>New matches, new likes, new conversations, and you are missing them.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">See What's New</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function reengagementInactiveDay30Email(data: EmailData) {
+  const subject = `We Saved Your Spot, ${data.recipientName || "there"}`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>We Saved Your Spot</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>Your profile, matches, and conversations are still here waiting for you.</p>
+    <div class="highlight">
+      <p>Whenever you are ready, MatchIndeed is ready too.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Come Back Now</a>
     </div>
     `
   );

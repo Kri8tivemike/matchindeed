@@ -34,3 +34,44 @@ test("new matches re-engagement email points members to matches", () => {
   assert.match(html, /View Matches/);
   assert.match(html, /dashboard\/matches/);
 });
+
+test("new match reminder email invites members to say hello", () => {
+  const { subject, html } = generateEmail("reengagement_new_match_reminder", {
+    recipientName: "Maya",
+    dashboardUrl: "https://matchindeed.com/dashboard/matches",
+  });
+
+  assert.equal(subject, "Your New Match Is Waiting, Maya");
+  assert.match(html, /Say Hello/);
+  assert.match(html, /dashboard\/matches/);
+});
+
+test("inactive day 7 email brings members back", () => {
+  const { subject, html } = generateEmail("reengagement_inactive_day_7", {
+    recipientName: "Maya",
+    dashboardUrl: "https://matchindeed.com/dashboard",
+  });
+
+  assert.equal(subject, "We Miss You, Maya");
+  assert.match(html, /Return to MatchIndeed/);
+});
+
+test("inactive day 14 email highlights missed matches", () => {
+  const { subject, html } = generateEmail("reengagement_inactive_day_14", {
+    recipientName: "Maya",
+    dashboardUrl: "https://matchindeed.com/dashboard",
+  });
+
+  assert.equal(subject, "You're Missing Out on New Matches");
+  assert.match(html, /See What&#39;s New|See What's New/);
+});
+
+test("inactive day 30 email keeps the spot saved", () => {
+  const { subject, html } = generateEmail("reengagement_inactive_day_30", {
+    recipientName: "Maya",
+    dashboardUrl: "https://matchindeed.com/dashboard",
+  });
+
+  assert.equal(subject, "We Saved Your Spot, Maya");
+  assert.match(html, /Come Back Now/);
+});
