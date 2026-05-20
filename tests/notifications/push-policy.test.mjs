@@ -9,6 +9,7 @@ import {
 test("passive engagement pushes use quiet windows", () => {
   assert.equal(getPushQuietWindowMs("like"), 120000);
   assert.equal(getPushQuietWindowMs("profile_view"), 180000);
+  assert.equal(getPushQuietWindowMs("people_near_you"), 1800000);
   assert.equal(getPushQuietWindowMs("new_message"), 0);
 });
 

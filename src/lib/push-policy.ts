@@ -6,6 +6,7 @@ const QUIET_WINDOW_BY_TYPE: Record<string, number> = {
   interested: 2 * MINUTE,
   mutual_match: 2 * MINUTE,
   profile_view: 3 * MINUTE,
+  people_near_you: 30 * MINUTE,
 };
 
 export function getPushQuietWindowMs(type: string): number {

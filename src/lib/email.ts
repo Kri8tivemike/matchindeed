@@ -88,6 +88,7 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   daily_profile_views: "profile_view",
   daily_new_likes: "like",
   daily_recommendations: "match_found",
+  people_near_you: "people_near_you",
   meeting_accepted: "meeting_accepted",
   meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
@@ -352,6 +353,23 @@ export async function sendDailyRecommendationsEmail(
   return sendEmail({
     to: recipientEmail,
     template: "daily_recommendations",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/discover` },
+    recipientUserId,
+  });
+}
+
+/** Send the "people near you are active" email */
+export async function sendPeopleNearYouEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    location?: string | null;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "people_near_you",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/discover` },
     recipientUserId,
   });

@@ -124,6 +124,7 @@ const TYPE_TO_CATEGORY: Record<string, NotificationCategory> = {
   mutual_match: "matches",
   match_created: "matches",
   match_found: "matches",
+  people_near_you: "matches",
 
   new_message: "messages",
   message: "messages",

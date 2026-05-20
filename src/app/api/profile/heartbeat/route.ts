@@ -8,6 +8,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  sendPeopleNearYouActiveAlerts,
+  shouldTriggerPeopleNearYouActiveAlert,
+} from "@/lib/alerts/people-near-you";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,6 +19,10 @@ const supabaseAdmin = createClient(
 );
 
 let hasLastActiveAtColumn: boolean | null = null;
+
+type HeartbeatAccount = {
+  last_active_at: string | null;
+};
 
 function isMissingLastActiveAtColumn(error: { code?: string; message?: string } | null) {
   if (!error) return false;
@@ -49,6 +57,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    let previousAccount: HeartbeatAccount | null = null;
+    const previousAccountResult = await supabaseAdmin
+      .from("accounts")
+      .select("last_active_at")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (isMissingLastActiveAtColumn(previousAccountResult.error)) {
+      hasLastActiveAtColumn = false;
+      return NextResponse.json({ ok: true });
+    }
+
+    if (!previousAccountResult.error && previousAccountResult.data) {
+      previousAccount = previousAccountResult.data as HeartbeatAccount;
+    }
+
     // Update last_active_at — gracefully handle missing column
     const { error: updateError } = await supabaseAdmin
       .from("accounts")
@@ -66,6 +90,16 @@ export async function POST(req: NextRequest) {
       console.error("Heartbeat update error:", updateError);
     } else {
       hasLastActiveAtColumn = true;
+      if (shouldTriggerPeopleNearYouActiveAlert(previousAccount?.last_active_at || null)) {
+        try {
+          await sendPeopleNearYouActiveAlerts({
+            supabase: supabaseAdmin,
+            activeUserId: user.id,
+          });
+        } catch (alertError) {
+          console.error("People-near-you alert error:", alertError);
+        }
+      }
     }
 
     return NextResponse.json({ ok: true });

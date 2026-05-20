@@ -37,3 +37,15 @@ test("daily recommendations digest includes the count and recommendations CTA", 
   assert.match(html, /We found <strong>5<\/strong>/);
   assert.match(html, /See Your Recommendations/);
 });
+
+test("people near you email points members to discover", () => {
+  const { subject, html } = generateEmail("people_near_you", {
+    recipientName: "Maya",
+    location: "Lagos, Nigeria",
+    dashboardUrl: "https://matchindeed.com/dashboard/discover",
+  });
+
+  assert.equal(subject, "People Near You Are Active Right Now");
+  assert.match(html, /Singles in Lagos, Nigeria are active/);
+  assert.match(html, /Join the Activity/);
+});

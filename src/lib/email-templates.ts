@@ -121,6 +121,7 @@ export type EmailTemplate =
   | "daily_profile_views"
   | "daily_new_likes"
   | "daily_recommendations"
+  | "people_near_you"
   | "meeting_accepted"
   | "meeting_approved"
   | "meeting_cancelled"
@@ -175,6 +176,8 @@ export function generateEmail(
       return dailyNewLikesEmail(data);
     case "daily_recommendations":
       return dailyRecommendationsEmail(data);
+    case "people_near_you":
+      return peopleNearYouEmail(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
     case "meeting_approved":
@@ -446,6 +449,26 @@ function dailyRecommendationsEmail(data: EmailData) {
     </div>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">See Your Recommendations</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function peopleNearYouEmail(data: EmailData) {
+  const subject = "People Near You Are Active Right Now";
+  const locationCopy = data.location ? ` in ${data.location}` : " near you";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>People Near You Are Active Right Now</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p>Singles${locationCopy} are active on MatchIndeed right now.</p>
+    <div class="highlight">
+      <p>This is the perfect time to log in and connect while people nearby are online.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Join the Activity</a>
     </div>
     `
   );
