@@ -85,6 +85,8 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   no_active_video_slot: "no_active_video_slot",
   activity_received: "like",
   new_message: "new_message",
+  daily_profile_views: "profile_view",
+  daily_new_likes: "like",
   meeting_accepted: "meeting_accepted",
   meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
@@ -299,6 +301,40 @@ export async function sendNewMessageEmail(
       ...data,
       dashboardUrl: `${APP_URL}/dashboard/messages/${data.matchId}`,
     },
+    recipientUserId,
+  });
+}
+
+/** Send the daily profile-view digest email */
+export async function sendDailyProfileViewsEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    count: number;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "daily_profile_views",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/likes?tab=views` },
+    recipientUserId,
+  });
+}
+
+/** Send the daily new-likes digest email */
+export async function sendDailyNewLikesEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    count: number;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "daily_new_likes",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/likes?tab=received` },
     recipientUserId,
   });
 }

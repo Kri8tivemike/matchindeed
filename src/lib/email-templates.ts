@@ -118,6 +118,8 @@ export type EmailTemplate =
   | "no_active_video_slot"
   | "activity_received"
   | "new_message"
+  | "daily_profile_views"
+  | "daily_new_likes"
   | "meeting_accepted"
   | "meeting_approved"
   | "meeting_cancelled"
@@ -166,6 +168,10 @@ export function generateEmail(
       return activityReceivedEmail(data);
     case "new_message":
       return newMessageEmail(data);
+    case "daily_profile_views":
+      return dailyProfileViewsEmail(data);
+    case "daily_new_likes":
+      return dailyNewLikesEmail(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
     case "meeting_approved":
@@ -376,6 +382,47 @@ function newMessageEmail(data: EmailData) {
     <p>Great conversations move best when replies are still warm.</p>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">Open Chat</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function dailyProfileViewsEmail(data: EmailData) {
+  const count = Number(data.count || 0);
+  const plural = count === 1 ? "person viewed" : "people viewed";
+  const subject = `${count} ${plural} your profile today`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Your Profile Views Today</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p>Your profile received <strong>${count}</strong> view${count === 1 ? "" : "s"} today.</p>
+    <div class="highlight">
+      <p>Someone might be interested. Take a moment to check who viewed you and keep the momentum going.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">See Your Views</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function dailyNewLikesEmail(data: EmailData) {
+  const count = Number(data.count || 0);
+  const subject = `You received ${count} new like${count === 1 ? "" : "s"} today`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Your New Likes Today</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p>You received <strong>${count}</strong> new like${count === 1 ? "" : "s"} today.</p>
+    <div class="highlight">
+      <p>Someone is hoping to connect. Open your likes to see who is interested.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">See Your Likes</a>
     </div>
     `
   );
