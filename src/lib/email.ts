@@ -89,6 +89,9 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   daily_new_likes: "like",
   daily_recommendations: "match_found",
   people_near_you: "people_near_you",
+  reengagement_unread_messages: "new_message",
+  reengagement_new_people: "match_found",
+  reengagement_new_matches: "match_found",
   meeting_accepted: "meeting_accepted",
   meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
@@ -371,6 +374,58 @@ export async function sendPeopleNearYouEmail(
     to: recipientEmail,
     template: "people_near_you",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/discover` },
+    recipientUserId,
+  });
+}
+
+/** Send the day-3 unread message re-engagement email */
+export async function sendUnreadMessagesReengagementEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    matchId?: string | null;
+  },
+  recipientUserId?: string
+) {
+  const path = data.matchId
+    ? `/dashboard/messages/${data.matchId}`
+    : "/dashboard/messages";
+  return sendEmail({
+    to: recipientEmail,
+    template: "reengagement_unread_messages",
+    data: { ...data, dashboardUrl: `${APP_URL}${path}` },
+    recipientUserId,
+  });
+}
+
+/** Send the day-6 inactive user new-people re-engagement email */
+export async function sendInactiveNewPeopleReengagementEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "reengagement_new_people",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/discover` },
+    recipientUserId,
+  });
+}
+
+/** Send the day-7 new matches waiting re-engagement email */
+export async function sendNewMatchesReengagementEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "reengagement_new_matches",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/matches` },
     recipientUserId,
   });
 }

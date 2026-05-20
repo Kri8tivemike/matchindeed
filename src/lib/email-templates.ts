@@ -122,6 +122,9 @@ export type EmailTemplate =
   | "daily_new_likes"
   | "daily_recommendations"
   | "people_near_you"
+  | "reengagement_unread_messages"
+  | "reengagement_new_people"
+  | "reengagement_new_matches"
   | "meeting_accepted"
   | "meeting_approved"
   | "meeting_cancelled"
@@ -178,6 +181,12 @@ export function generateEmail(
       return dailyRecommendationsEmail(data);
     case "people_near_you":
       return peopleNearYouEmail(data);
+    case "reengagement_unread_messages":
+      return reengagementUnreadMessagesEmail(data);
+    case "reengagement_new_people":
+      return reengagementNewPeopleEmail(data);
+    case "reengagement_new_matches":
+      return reengagementNewMatchesEmail(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
     case "meeting_approved":
@@ -469,6 +478,64 @@ function peopleNearYouEmail(data: EmailData) {
     </div>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">Join the Activity</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function reengagementUnreadMessagesEmail(data: EmailData) {
+  const subject = `Someone Is Waiting for Your Reply, ${data.recipientName || "there"}`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Someone Is Waiting for Your Reply</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>You have an unread message waiting on MatchIndeed.</p>
+    <div class="highlight">
+      <p>Sometimes a simple reply is all it takes to move a good conversation forward.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Open Chat</a>
+    </div>
+    <p class="meta" style="text-align:center;">We will stop this reminder once you open the chat.</p>
+    `
+  );
+  return { subject, html };
+}
+
+function reengagementNewPeopleEmail(data: EmailData) {
+  const subject = "New People Want to Match with You";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>New People Want to Match with You</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>New people are joining and becoming active on MatchIndeed.</p>
+    <div class="highlight">
+      <p>Take a quick look at Discover. Someone compatible may be waiting for the right first move.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">See New People</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function reengagementNewMatchesEmail(data: EmailData) {
+  const subject = "You Have New Matches Waiting";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>You Have New Matches Waiting</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>You have new matches waiting on MatchIndeed.</p>
+    <div class="highlight">
+      <p>Open your matches to see who connected with you and decide what conversation you want to start next.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">View Matches</a>
     </div>
     `
   );

@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sendMeetingRequestReminderEmail, sendNoActiveVideoSlotEmail } from "@/lib/email";
+import {
+  sendInactiveNewPeopleReengagementEmail,
+  sendMeetingRequestReminderEmail,
+  sendNewMatchesReengagementEmail,
+  sendNoActiveVideoSlotEmail,
+  sendUnreadMessagesReengagementEmail,
+} from "@/lib/email";
 import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
 import { formatInTimeZone, getSafeTimeZone } from "@/lib/timezones";
 
@@ -9,7 +15,10 @@ type NoActiveVideoSlotTrigger = "like" | "wink" | "interested" | "profile_view";
 
 export type ScheduledAlertType =
   | "meeting_request_reminder"
-  | "no_active_video_slot_reminder";
+  | "no_active_video_slot_reminder"
+  | "reengagement_unread_messages"
+  | "reengagement_new_people"
+  | "reengagement_new_matches";
 
 type ScheduledAlertPayload = Record<string, unknown>;
 
@@ -68,6 +77,134 @@ function pushDataValue(value: unknown) {
   return null;
 }
 
+function timestamp(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function loadUserEmailIdentity(supabase: SupabaseClient, userId: string) {
+  const [{ data: account }, { data: profile }] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("email, display_name, last_active_at")
+      .eq("id", userId)
+      .maybeSingle(),
+    supabase
+      .from("user_profiles")
+      .select("first_name")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+
+  return {
+    email: account?.email || null,
+    lastActiveAt: normalizeIso(account?.last_active_at),
+    recipientName: normalizeName(
+      profile?.first_name || account?.display_name || account?.email?.split("@")[0]
+    ),
+  };
+}
+
+async function hasUnreadMessagesWaiting(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: ScheduledAlertPayload
+) {
+  const matchId = normalizeIso(payload.matchId);
+  if (!matchId) return false;
+
+  const { data: match, error: matchError } = await supabase
+    .from("user_matches")
+    .select("user1_id, user2_id")
+    .eq("id", matchId)
+    .maybeSingle();
+
+  if (matchError || !match) {
+    if (matchError) {
+      console.error("[scheduled-alerts] Unable to check unread message match:", matchError);
+    }
+    return false;
+  }
+
+  if (match.user1_id !== userId && match.user2_id !== userId) {
+    return false;
+  }
+
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id")
+    .eq("match_id", matchId)
+    .neq("sender_id", userId)
+    .is("read_at", null)
+    .limit(1);
+
+  if (error) {
+    console.error("[scheduled-alerts] Unable to check unread messages:", error);
+    return false;
+  }
+
+  return (data || []).length > 0;
+}
+
+async function isStillInactive(
+  supabase: SupabaseClient,
+  userId: string,
+  inactiveDays: number
+) {
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("last_active_at")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[scheduled-alerts] Unable to check account activity:", error);
+    return false;
+  }
+
+  const lastActiveAt = timestamp(normalizeIso(data?.last_active_at));
+  if (!lastActiveAt) return true;
+
+  return lastActiveAt <= Date.now() - inactiveDays * 24 * 60 * 60 * 1000;
+}
+
+async function hasNewMatchesWaiting(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: ScheduledAlertPayload
+) {
+  const matchId = normalizeIso(payload.matchId);
+  const sinceIso = normalizeIso(payload.sinceIso) || normalizeIso(payload.matchCreatedAt);
+  const sinceAt = timestamp(sinceIso);
+
+  const identity = await loadUserEmailIdentity(supabase, userId);
+  const lastActiveAt = timestamp(identity.lastActiveAt);
+  if (sinceAt && lastActiveAt && lastActiveAt >= sinceAt) {
+    return false;
+  }
+
+  let query = supabase
+    .from("user_matches")
+    .select("id")
+    .or(`user1_id.eq.${userId},user2_id.eq.${userId}`)
+    .limit(1);
+
+  if (matchId) {
+    query = query.eq("id", matchId);
+  } else if (sinceIso) {
+    query = query.gte("created_at", sinceIso);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("[scheduled-alerts] Unable to check new matches:", error);
+    return false;
+  }
+
+  return (data || []).length > 0;
+}
+
 async function markAlert(
   supabase: SupabaseClient,
   id: string,
@@ -96,9 +233,10 @@ export async function scheduleAlert(params: ScheduleAlertParams) {
     idempotency_key: `${params.idempotencyKey}:${channel}`,
   }));
 
-  const { error } = await params.supabase
+  const { data, error } = await params.supabase
     .from("scheduled_alerts")
-    .upsert(rows, { onConflict: "idempotency_key" });
+    .upsert(rows, { onConflict: "idempotency_key", ignoreDuplicates: true })
+    .select("id");
 
   if (error) {
     if (isMissingScheduledAlertsTable(error)) {
@@ -111,7 +249,7 @@ export async function scheduleAlert(params: ScheduleAlertParams) {
     throw error;
   }
 
-  return { scheduled: rows.length, skipped: false };
+  return { scheduled: (data || []).length, skipped: false };
 }
 
 async function hasFutureVideoSlot(supabase: SupabaseClient, userId: string) {
@@ -294,6 +432,91 @@ async function deliverNoActiveVideoSlotReminder(
   return { sent: pushSent };
 }
 
+async function deliverUnreadMessagesReengagement(
+  supabase: SupabaseClient,
+  alert: ScheduledAlertRow
+) {
+  const payload = alert.payload || {};
+  const matchId = normalizeIso(payload.matchId);
+  if (!matchId) {
+    return { sent: false, cancelled: true, reason: "missing_match_id" };
+  }
+
+  if (!(await hasUnreadMessagesWaiting(supabase, alert.user_id, payload))) {
+    return { sent: false, cancelled: true, reason: "chat_opened_or_no_unread_messages" };
+  }
+
+  if (alert.channel !== "email") {
+    return { sent: false, cancelled: true, reason: "unsupported_channel" };
+  }
+
+  const identity = await loadUserEmailIdentity(supabase, alert.user_id);
+  if (!identity.email) {
+    return { sent: false, cancelled: true, reason: "missing_email" };
+  }
+
+  const result = await sendUnreadMessagesReengagementEmail(
+    identity.email,
+    {
+      recipientName: identity.recipientName,
+      matchId,
+    },
+    alert.user_id
+  );
+  return { sent: result.success, error: result.error };
+}
+
+async function deliverInactiveNewPeopleReengagement(
+  supabase: SupabaseClient,
+  alert: ScheduledAlertRow
+) {
+  if (!(await isStillInactive(supabase, alert.user_id, 6))) {
+    return { sent: false, cancelled: true, reason: "user_returned" };
+  }
+
+  if (alert.channel !== "email") {
+    return { sent: false, cancelled: true, reason: "unsupported_channel" };
+  }
+
+  const identity = await loadUserEmailIdentity(supabase, alert.user_id);
+  if (!identity.email) {
+    return { sent: false, cancelled: true, reason: "missing_email" };
+  }
+
+  const result = await sendInactiveNewPeopleReengagementEmail(
+    identity.email,
+    { recipientName: identity.recipientName },
+    alert.user_id
+  );
+  return { sent: result.success, error: result.error };
+}
+
+async function deliverNewMatchesReengagement(
+  supabase: SupabaseClient,
+  alert: ScheduledAlertRow
+) {
+  const payload = alert.payload || {};
+  if (!(await hasNewMatchesWaiting(supabase, alert.user_id, payload))) {
+    return { sent: false, cancelled: true, reason: "matches_seen_or_missing" };
+  }
+
+  if (alert.channel !== "email") {
+    return { sent: false, cancelled: true, reason: "unsupported_channel" };
+  }
+
+  const identity = await loadUserEmailIdentity(supabase, alert.user_id);
+  if (!identity.email) {
+    return { sent: false, cancelled: true, reason: "missing_email" };
+  }
+
+  const result = await sendNewMatchesReengagementEmail(
+    identity.email,
+    { recipientName: identity.recipientName },
+    alert.user_id
+  );
+  return { sent: result.success, error: result.error };
+}
+
 async function deliverScheduledAlert(
   supabase: SupabaseClient,
   alert: ScheduledAlertRow
@@ -303,6 +526,12 @@ async function deliverScheduledAlert(
       return deliverMeetingRequestReminder(supabase, alert);
     case "no_active_video_slot_reminder":
       return deliverNoActiveVideoSlotReminder(supabase, alert);
+    case "reengagement_unread_messages":
+      return deliverUnreadMessagesReengagement(supabase, alert);
+    case "reengagement_new_people":
+      return deliverInactiveNewPeopleReengagement(supabase, alert);
+    case "reengagement_new_matches":
+      return deliverNewMatchesReengagement(supabase, alert);
     default:
       return { sent: false, cancelled: true, reason: "unknown_alert_type" };
   }
