@@ -114,6 +114,8 @@ export type EmailTemplate =
   | "signup_confirmation"
   | "password_reset"
   | "meeting_request"
+  | "meeting_request_reminder"
+  | "no_active_video_slot"
   | "meeting_accepted"
   | "meeting_approved"
   | "meeting_cancelled"
@@ -154,6 +156,10 @@ export function generateEmail(
       return passwordResetEmail(data);
     case "meeting_request":
       return meetingRequestEmail(data);
+    case "meeting_request_reminder":
+      return meetingRequestReminderEmail(data);
+    case "no_active_video_slot":
+      return noActiveVideoSlotEmail(data);
     case "meeting_accepted":
       return meetingAcceptedEmail(data);
     case "meeting_approved":
@@ -253,13 +259,13 @@ function passwordResetEmail(data: EmailData) {
 }
 
 function meetingRequestEmail(data: EmailData) {
-  const subject = `New Video Dating Meeting Request from ${data.requesterName}`;
+  const subject = `You have a video date request from ${data.requesterName}`;
   const html = baseLayout(
     subject,
     `
-    <h1>New Meeting Request!</h1>
+    <h1>New Video Date Request</h1>
     <p>Hi ${data.recipientName},</p>
-    <p><strong>${data.requesterName}</strong> has requested a video dating meeting with you.</p>
+    <p><strong>${data.requesterName}</strong> has requested a video date with you.</p>
     <div class="highlight">
       <p><strong>Date:</strong> ${data.meetingDate}</p>
       <p><strong>Time:</strong> ${data.meetingTime}</p>
@@ -270,13 +276,59 @@ function meetingRequestEmail(data: EmailData) {
       }
       <p><strong>Type:</strong> ${data.meetingType || "Video Call"}</p>
     </div>
-    <p>Please log in to your dashboard to accept or decline this request.</p>
+    <p>Please review this request and choose whether to accept, decline, or suggest a new time.</p>
     <div style="text-align:center;">
       <a href="${data.dashboardUrl || "#"}" class="btn">View Request</a>
     </div>
     <div class="warning">
-      <p><strong>Reminder:</strong> Once you accept, cancellation fees may apply per our cancellation policy.</p>
+      <p><strong>Safety note:</strong> Only accept when you are comfortable and available. MatchIndeed will guide the next steps after both people accept.</p>
     </div>
+    `
+  );
+  return { subject, html };
+}
+
+function meetingRequestReminderEmail(data: EmailData) {
+  const subject = `Reminder: ${data.requesterName}'s video date request is waiting`;
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Video Date Request Waiting</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p><strong>${data.requesterName}</strong> is still waiting for your response to their video date request.</p>
+    <div class="highlight">
+      <p><strong>Date:</strong> ${data.meetingDate}</p>
+      <p><strong>Time:</strong> ${data.meetingTime}</p>
+      ${
+        data.meetingTimeZone
+          ? `<p><strong>Time zone:</strong> ${data.meetingTimeZone}</p>`
+          : ""
+      }
+    </div>
+    <p>You can accept, decline, or suggest another time from your meetings page.</p>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Respond to Request</a>
+    </div>
+    `
+  );
+  return { subject, html };
+}
+
+function noActiveVideoSlotEmail(data: EmailData) {
+  const subject = "Add a video date slot so matches can book you";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Add a Video Date Slot</h1>
+    <p>Hi ${data.recipientName},</p>
+    <p><strong>${data.actorName}</strong> ${data.triggerLabel || "showed interest in you"}.</p>
+    <div class="highlight">
+      <p>You currently do not have an active video date calendar slot. Add one now so interested members can send you a meeting request.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${data.dashboardUrl || "#"}" class="btn">Add Calendar Slot</a>
+    </div>
+    <p class="meta" style="text-align:center;">We will stop reminding you once you add an active future slot.</p>
     `
   );
   return { subject, html };

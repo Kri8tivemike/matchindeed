@@ -140,6 +140,7 @@ const TYPE_TO_CATEGORY: Record<string, NotificationCategory> = {
   meeting_responses_complete: "meetings",
   meeting_pending_review: "meetings",
   meeting_investigation: "meetings",
+  no_active_video_slot: "meetings",
 
   profile_view: "views",
 

@@ -41,6 +41,7 @@ import { getMonthlyCreditsForTier, normalizeTier } from "@/lib/credits/config";
 import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
 import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
+import { scheduleMeetingRequestReminder } from "@/lib/alerts/scheduled-alerts";
 import { adminAbsoluteUrl } from "@/lib/admin/path";
 import {
   canAcceptStarterTrialMeeting,
@@ -1384,8 +1385,19 @@ export async function POST(request: NextRequest) {
           meetingTime: meetingTimeForHost,
           meetingTimeZone: hostTimeZone,
           meetingType: normalizedMeetingType || "Video Call",
-        });
+        }, target_user_id);
       }
+
+      await scheduleMeetingRequestReminder({
+        supabase,
+        meetingId: meeting.id,
+        targetUserId: target_user_id,
+        requesterId: user.id,
+        requesterName,
+        meetingDate: meetingDateForHost,
+        meetingTime: meetingTimeForHost,
+        meetingTimeZone: hostTimeZone,
+      });
     } catch (notificationError) {
       console.error("Error sending notification:", notificationError);
       // Don't fail the request if notification fails

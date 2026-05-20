@@ -81,6 +81,8 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   signup_confirmation: "signup_confirmation",
   password_reset: "password_reset",
   meeting_request: "meeting_request",
+  meeting_request_reminder: "meeting_request",
+  no_active_video_slot: "no_active_video_slot",
   meeting_accepted: "meeting_accepted",
   meeting_approved: "meeting_accepted",
   meeting_cancelled: "meeting_cancelled",
@@ -216,7 +218,45 @@ export async function sendMeetingRequestEmail(
   return sendEmail({
     to: recipientEmail,
     template: "meeting_request",
-    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/meetings` },
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/meetings?tab=pending` },
+    recipientUserId,
+  });
+}
+
+/** Send a reminder for an unanswered meeting request */
+export async function sendMeetingRequestReminderEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    requesterName: string;
+    meetingDate: string;
+    meetingTime: string;
+    meetingTimeZone?: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "meeting_request_reminder",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/meetings?tab=pending` },
+    recipientUserId,
+  });
+}
+
+/** Prompt a user to create an active video-date calendar slot */
+export async function sendNoActiveVideoSlotEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+    actorName: string;
+    triggerLabel: string;
+  },
+  recipientUserId?: string
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "no_active_video_slot",
+    data: { ...data, dashboardUrl: `${APP_URL}/dashboard/calendar` },
     recipientUserId,
   });
 }

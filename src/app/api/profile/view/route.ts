@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendProfileViewEmail } from "@/lib/email";
 import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
+import { sendNoActiveVideoSlotAlert } from "@/lib/alerts/scheduled-alerts";
 import {
   getAccountState,
   isTargetInteractionUnavailable,
@@ -218,6 +219,14 @@ export async function POST(request: NextRequest) {
         targetUserId
       );
     }
+
+    await sendNoActiveVideoSlotAlert({
+      supabase,
+      userId: targetUserId,
+      actorUserId: user.id,
+      actorName: viewerIdentity.firstName,
+      triggerType: "profile_view",
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

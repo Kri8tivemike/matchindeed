@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
 import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
+import { sendNoActiveVideoSlotAlert } from "@/lib/alerts/scheduled-alerts";
 import {
   getAccountState,
   isTargetInteractionUnavailable,
@@ -185,6 +186,14 @@ async function createNotification(
         from_user_id: userId,
         activity_type: activityType,
       },
+    });
+
+    await sendNoActiveVideoSlotAlert({
+      supabase: supabaseAdmin,
+      userId: targetUserId,
+      actorUserId: userId,
+      actorName: senderName,
+      triggerType: activityType,
     });
   } catch (error) {
     console.error("Error creating notification:", error);
