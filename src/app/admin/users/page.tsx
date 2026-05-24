@@ -6,6 +6,10 @@ import Link from "next/link";
 import { adminPath } from "@/lib/admin/path";
 import Image from "next/image";
 import {
+  formatAdminRoleLabel,
+  getDisplayAdminRole,
+} from "@/lib/admin/growth-manager";
+import {
   Search,
   Filter,
   ChevronLeft,
@@ -162,13 +166,41 @@ export default function AdminUsersPage() {
         return;
       }
 
+      const rows = (data as UserListQueryRow[] | null) || [];
+      const adminRows = rows.filter((user) => user.role === "admin");
+      const adminPermissionsByUser: Record<string, { permissions?: string[] }> = {};
+
+      if (adminRows.length > 0) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session) {
+          const permissionsResponse = await fetch("/api/admin/permissions", {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          if (permissionsResponse.ok) {
+            const permissionsData = (await permissionsResponse.json()) as {
+              by_user?: Record<string, { permissions?: string[] }>;
+            };
+            Object.assign(adminPermissionsByUser, permissionsData.by_user || {});
+          }
+        }
+      }
+
       // Transform data
-      const transformedUsers: UserListItem[] = ((data as UserListQueryRow[] | null) || []).map((user) => ({
+      const transformedUsers: UserListItem[] = rows.map((user) => ({
         id: user.id,
         email: user.email,
         display_name: user.display_name,
         tier: user.tier,
-        role: user.role,
+        role: getDisplayAdminRole(
+          user.role,
+          adminPermissionsByUser[user.id]?.permissions
+        ),
         account_status: user.account_status,
         email_verified: user.email_verified,
         created_at: user.created_at,
@@ -668,7 +700,7 @@ export default function AdminUsersPage() {
                         {user.role !== "user" && (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
                             <Shield className="h-3 w-3" />
-                            {user.role}
+                            {formatAdminRoleLabel(user.role)}
                           </span>
                         )}
                         {user.role === "user" && (

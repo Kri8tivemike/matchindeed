@@ -44,6 +44,11 @@ import {
   Inbox,
 } from "lucide-react";
 import { formatRelationshipStatusLabel } from "@/lib/relationship-status";
+import {
+  formatAdminRoleLabel,
+  getDisplayAdminRole,
+  GROWTH_MANAGER_ROLE,
+} from "@/lib/admin/growth-manager";
 
 // ---------------------------------------------------------------
 // Types
@@ -219,12 +224,37 @@ export default function AdminUserDetailPage() {
         .select("*", { count: "exact", head: true })
         .eq("user_id", userId);
 
+      let displayRole = account.role;
+      if (account.role === "admin") {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session) {
+          const permissionsResponse = await fetch("/api/admin/permissions", {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          if (permissionsResponse.ok) {
+            const permissionsData = (await permissionsResponse.json()) as {
+              by_user?: Record<string, { permissions?: string[] }>;
+            };
+            displayRole = getDisplayAdminRole(
+              account.role,
+              permissionsData.by_user?.[account.id]?.permissions
+            );
+          }
+        }
+      }
+
       setUser({
         id: account.id,
         email: account.email,
         display_name: account.display_name,
         tier: account.tier,
-        role: account.role,
+        role: displayRole,
         account_status: account.account_status,
         email_verified: account.email_verified,
         created_at: account.created_at,
@@ -237,7 +267,7 @@ export default function AdminUserDetailPage() {
       });
 
       setEditedTier(account.tier);
-      setEditedRole(account.role);
+      setEditedRole(displayRole);
     } catch (error) {
       console.error("Error:", error);
     } finally {
@@ -678,7 +708,7 @@ export default function AdminUserDetailPage() {
           <p
             className={`text-lg font-bold ${user.role !== "user" ? "text-purple-700" : "text-gray-900"}`}
           >
-            {user.role}
+            {formatAdminRoleLabel(user.role)}
           </p>
           <p className="text-[10px] text-gray-500 uppercase">Role</p>
         </div>
@@ -825,6 +855,7 @@ export default function AdminUserDetailPage() {
                     >
                       <option value="user">User</option>
                       <option value="coordinator">Coordinator</option>
+                      <option value={GROWTH_MANAGER_ROLE}>Growth Manager</option>
                       <option value="admin">Admin</option>
                       <option value="superadmin">Super Admin</option>
                     </select>
@@ -833,7 +864,7 @@ export default function AdminUserDetailPage() {
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium ${user.role !== "user" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"}`}
                     >
                       <Shield className="h-3.5 w-3.5" />
-                      {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                      {formatAdminRoleLabel(user.role)}
                     </span>
                   )}
                 </div>

@@ -3,6 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 import { adminHasAnyPermission, requireAdminAccess } from "@/lib/admin/permissions";
 import { buildDeletedAccountEmailTombstone } from "@/lib/account-provisioning";
 import { clearAccountPermissions, getDefaultAccountPermissions, saveAccountPermissions } from "@/lib/account-permissions";
+import {
+  GROWTH_MANAGER_PERMISSIONS,
+  GROWTH_MANAGER_ROLE,
+} from "@/lib/admin/growth-manager";
 
 /**
  * Admin User Actions API
@@ -584,13 +588,15 @@ export async function POST(request: NextRequest) {
         const { role } = params;
         if (
           !role ||
-          !["user", "coordinator", "admin", "superadmin"].includes(role)
+          !["user", "coordinator", "admin", "superadmin", GROWTH_MANAGER_ROLE].includes(role)
         ) {
           return NextResponse.json(
             { error: "Valid role required" },
             { status: 400 }
           );
         }
+        const requestedRole = String(role);
+        const storedRole = requestedRole === GROWTH_MANAGER_ROLE ? "admin" : requestedRole;
 
         const { data: current } = await supabase
           .from("accounts")
@@ -600,12 +606,12 @@ export async function POST(request: NextRequest) {
 
         const { error } = await supabase
           .from("accounts")
-          .update({ role })
+          .update({ role: storedRole })
           .eq("id", targetUserId);
 
         if (error) throw error;
 
-        if (role === "coordinator") {
+        if (storedRole === "coordinator") {
           const coordinatorEmail = String(current?.email || "").trim().toLowerCase();
           if (coordinatorEmail) {
             const { error: coordinatorError } = await supabase
@@ -632,18 +638,24 @@ export async function POST(request: NextRequest) {
             configuredBy: adminId,
           });
         } else {
-          if (role === "admin") {
+          if (requestedRole === GROWTH_MANAGER_ROLE) {
+            await saveAccountPermissions({
+              userId: targetUserId,
+              permissions: GROWTH_MANAGER_PERMISSIONS,
+              configuredBy: adminId,
+            });
+          } else if (storedRole === "admin") {
             await saveAccountPermissions({
               userId: targetUserId,
               permissions: getDefaultAccountPermissions("admin"),
               configuredBy: adminId,
             });
-          } else if (role === "user") {
+          } else if (storedRole === "user") {
             await clearAccountPermissions(targetUserId);
           }
         }
 
-        if (current?.role === "coordinator" && role !== "coordinator") {
+        if (current?.role === "coordinator" && storedRole !== "coordinator") {
           const { error: coordinatorError } = await supabase
             .from("meeting_coordinators")
             .update({ enabled: false })
@@ -656,11 +668,19 @@ export async function POST(request: NextRequest) {
           adminId,
           targetUserId,
           "user_role_updated",
-          { old_role: current?.role, new_role: role },
+          {
+            old_role: current?.role,
+            new_role: requestedRole,
+            stored_role: storedRole,
+          },
           ip
         );
 
-        return NextResponse.json({ success: true, role });
+        return NextResponse.json({
+          success: true,
+          role: requestedRole,
+          stored_role: storedRole,
+        });
       }
 
       case "adjust_credits": {
