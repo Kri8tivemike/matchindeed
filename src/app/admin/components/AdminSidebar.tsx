@@ -10,6 +10,11 @@ import {
   matchesAdminPathname,
 } from "@/lib/admin/path";
 import {
+  formatAdminRoleLabel,
+  getDisplayAdminRole,
+  GROWTH_MANAGER_ROLE,
+} from "@/lib/admin/growth-manager";
+import {
   LayoutDashboard,
   Users,
   CreditCard,
@@ -275,10 +280,16 @@ export default function AdminSidebar({
   };
 
   // Get role badge color
-  const getRoleBadgeColor = (role: AdminRole): string => {
-    switch (role) {
+  const displayRole = getDisplayAdminRole(role, permissions);
+  const roleLabel = formatAdminRoleLabel(displayRole);
+
+  // Get role badge color
+  const getRoleBadgeColor = (displayRole: string): string => {
+    switch (displayRole) {
       case "superadmin":
         return "bg-purple-100 text-purple-700";
+      case GROWTH_MANAGER_ROLE:
+        return "bg-emerald-100 text-emerald-700";
       case "admin":
         return "bg-blue-100 text-blue-700";
       default:
@@ -311,8 +322,8 @@ export default function AdminSidebar({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{userName}</p>
-            <span className={`inline-flex text-xs px-2 py-0.5 rounded-full ${getRoleBadgeColor(role)}`}>
-              {role.charAt(0).toUpperCase() + role.slice(1)}
+            <span className={`inline-flex text-xs px-2 py-0.5 rounded-full ${getRoleBadgeColor(displayRole)}`}>
+              {roleLabel}
             </span>
           </div>
         </div>
