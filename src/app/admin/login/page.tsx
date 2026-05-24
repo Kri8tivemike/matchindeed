@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ADMIN_BASE_PATH, ADMIN_MFA_SETUP_PATH } from "@/lib/admin/path";
+import { isGrowthManagerPermissionSet } from "@/lib/admin/growth-manager";
 import { COORDINATOR_LOGIN_PATH } from "@/lib/coordinator/path";
+import { GROWTH_MANAGER_DASHBOARD_PATH } from "@/lib/growth-manager/path";
 import {
   Shield,
   Mail,
@@ -82,6 +84,32 @@ export default function AdminLoginPage() {
     return session?.access_token || null;
   };
 
+  const redirectGrowthManagerIfNeeded = async () => {
+    const accessToken = await getAccessToken();
+    if (!accessToken) return false;
+
+    const response = await fetch("/api/admin/permissions/me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    const permissions = Array.isArray(data.permissions)
+      ? data.permissions.map(String)
+      : [];
+
+    if (
+      response.ok &&
+      data.role === "admin" &&
+      isGrowthManagerPermissionSet(permissions)
+    ) {
+      router.replace(GROWTH_MANAGER_DASHBOARD_PATH);
+      return true;
+    }
+
+    return false;
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -143,6 +171,10 @@ export default function AdminLoginPage() {
         setError("You don't have permission to access the admin panel.");
         await supabase.auth.signOut();
         setLoading(false);
+        return;
+      }
+
+      if (await redirectGrowthManagerIfNeeded()) {
         return;
       }
 
@@ -208,7 +240,9 @@ export default function AdminLoginPage() {
           return;
         }
 
-        router.push(`${ADMIN_MFA_SETUP_PATH}?recovered=true`);
+        if (!(await redirectGrowthManagerIfNeeded())) {
+          router.push(`${ADMIN_MFA_SETUP_PATH}?recovered=true`);
+        }
         return;
       }
 
@@ -240,7 +274,9 @@ export default function AdminLoginPage() {
         return;
       }
 
-      router.push(ADMIN_BASE_PATH);
+      if (!(await redirectGrowthManagerIfNeeded())) {
+        router.push(ADMIN_BASE_PATH);
+      }
     } catch (verifyError) {
       console.error("MFA verification error:", verifyError);
       setError("An unexpected error occurred. Please try again.");
