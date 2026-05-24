@@ -44,6 +44,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [referralCode, setReferralCode] = useState("");
 
   const passwordValidation = useMemo(() => evaluatePassword(password), [password]);
 
@@ -57,6 +58,19 @@ export default function RegisterPage() {
 
     const startedAtRaw = sessionStorage.getItem("signupStartedFromLanding");
     const searchPreferences = sessionStorage.getItem("searchPreferences");
+    const referralFromUrl =
+      new URLSearchParams(window.location.search).get("ref") || "";
+    if (referralFromUrl) {
+      const normalizedReferral = referralFromUrl
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9-]/g, "")
+        .slice(0, 32);
+      setReferralCode(normalizedReferral);
+      sessionStorage.setItem("matchindeedReferralCode", normalizedReferral);
+    } else {
+      setReferralCode(sessionStorage.getItem("matchindeedReferralCode") || "");
+    }
     const startedAt = Number(startedAtRaw || "");
     const startedRecently =
       Number.isFinite(startedAt) &&
@@ -73,7 +87,7 @@ export default function RegisterPage() {
       }
     }
 
-    if (!parsedLookingFor || !startedRecently) {
+    if ((!parsedLookingFor || !startedRecently) && !referralFromUrl) {
       router.replace("/?focusSignup=1");
       return;
     }
@@ -91,7 +105,7 @@ export default function RegisterPage() {
       return;
     }
 
-    if (!initialLookingFor) {
+    if (!initialLookingFor && !referralCode) {
       setError("Please start signup from the homepage form.");
       return;
     }
@@ -118,7 +132,8 @@ export default function RegisterPage() {
           email: email.trim(),
           password,
           turnstileToken,
-          initialLookingFor,
+          initialLookingFor: initialLookingFor || "",
+          referralCode: referralCode || undefined,
         }),
       });
 
@@ -130,6 +145,7 @@ export default function RegisterPage() {
       if (typeof window !== "undefined") {
         sessionStorage.removeItem("signupStartedFromLanding");
         sessionStorage.removeItem("searchPreferences");
+        sessionStorage.removeItem("matchindeedReferralCode");
       }
 
       const { error: signInError } = await supabase.auth.signInWithPassword({

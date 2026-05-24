@@ -5,6 +5,7 @@ import { allocateSubscriptionCredits } from "@/lib/credits/allocation";
 import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
 import { clearStarterTrialSlot } from "@/lib/starter-trial";
 import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
+import { evaluateFirstSubscriptionReferralReward } from "@/lib/referrals/rewards";
 
 type ProcessingRow = {
   session_id: string;
@@ -357,6 +358,18 @@ export async function processSubscriptionCheckoutSession(
       stripe_subscription_id: stripeSubscriptionId,
       starts_at: startsAt,
       expires_at: expiresAt,
+    });
+
+    await evaluateFirstSubscriptionReferralReward(supabase, userId, {
+      tier,
+      amount_cents: amountCents,
+      stripe_session_id: session.id,
+      stripe_subscription_id: stripeSubscriptionId,
+    }).catch((referralError) => {
+      console.warn(
+        "[checkout-processing] referral subscription reward skipped:",
+        referralError
+      );
     });
 
     return {

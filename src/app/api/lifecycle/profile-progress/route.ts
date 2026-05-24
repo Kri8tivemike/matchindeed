@@ -5,6 +5,7 @@ import {
   identifyCustomerSafely,
   trackCustomerEventSafely,
 } from "@/lib/customerio";
+import { evaluateProfilePreferencesReferralReward } from "@/lib/referrals/rewards";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -131,6 +132,15 @@ export async function POST(request: NextRequest) {
         }
       );
     }
+
+    await evaluateProfilePreferencesReferralReward(supabase, user.id).catch(
+      (referralError) => {
+        console.warn(
+          "[lifecycle/profile-progress] referral reward evaluation skipped:",
+          referralError
+        );
+      }
+    );
 
     return NextResponse.json({
       success: true,

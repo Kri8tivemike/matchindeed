@@ -26,6 +26,7 @@ import {
 } from "@/lib/matching/interest-preference";
 import { sendSignupConfirmationEmail } from "@/lib/email";
 import { ensureBaselineUserRecords } from "@/lib/account-provisioning";
+import { createReferralFromCode } from "@/lib/referrals/rewards";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -53,6 +54,7 @@ type RegistrationPayload = {
   selectedTier: string;
   photos: File[];
   initialLookingFor: string;
+  referralCode?: string;
 };
 
 const ALLOWED_GENDER = ["male", "female", "other", "prefer_not_to_say"];
@@ -194,6 +196,7 @@ async function parsePayload(request: NextRequest): Promise<RegistrationPayload> 
       selectedTier: toStringOrEmpty(formData.get("selectedTier")),
       photos,
       initialLookingFor: toStringOrEmpty(formData.get("initialLookingFor")),
+      referralCode: toStringOrEmpty(formData.get("referralCode")),
     };
   }
 
@@ -222,6 +225,7 @@ async function parsePayload(request: NextRequest): Promise<RegistrationPayload> 
     selectedTier: (body.selectedTier || "").trim(),
     photos: [],
     initialLookingFor: (body.initialLookingFor || "").trim(),
+    referralCode: (body.referralCode || "").trim(),
   };
 }
 
@@ -494,6 +498,19 @@ export async function POST(request: NextRequest) {
 
     if (progressError) {
       console.error("Progress creation error:", progressError);
+    }
+
+    if (payload.referralCode) {
+      await createReferralFromCode(supabaseAdmin, {
+        referredUserId: userId,
+        referralCode: payload.referralCode,
+        metadata: {
+          source: "register_api",
+          client_ip: clientIp,
+        },
+      }).catch((referralError) => {
+        console.warn("[register] referral capture skipped:", referralError);
+      });
     }
 
     await Promise.allSettled([

@@ -2,7 +2,7 @@
 import NextLink from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentProps } from "react";
-import { ChevronRight, ChevronDown, HelpCircle, User, Users, Calendar, Heart, Search, Compass, Eye, Settings, Sliders, Bell, CreditCard, Info, LogOut, CalendarCheck, Wallet, MessageCircle, Home, History as HistoryIcon } from "lucide-react";
+import { ChevronRight, ChevronDown, HelpCircle, User, Users, Calendar, Heart, Search, Compass, Eye, Settings, Sliders, Bell, CreditCard, Info, LogOut, CalendarCheck, Wallet, MessageCircle, Home, History as HistoryIcon, Gift } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { supabase } from "@/lib/supabase";
 import { getSafeDisplayName } from "@/lib/name";
@@ -29,7 +29,7 @@ function Link({ prefetch, ...props }: NextLinkProps) {
 }
 
 type SidebarProps = {
-  active?: "home" | "profile" | "my-account" | "preference" | "calendar" | "appointments" | "history" | "notifications" | "subscription" | "wallet" | "about" | "signout" | "edit" | "discover" | "likes" | "matches" | "search" | "messages";
+  active?: "home" | "profile" | "my-account" | "preference" | "calendar" | "appointments" | "history" | "notifications" | "subscription" | "wallet" | "referrals" | "about" | "signout" | "edit" | "discover" | "likes" | "matches" | "search" | "messages";
 };
 
 type UserInfo = {
@@ -71,6 +71,7 @@ export default function Sidebar({ active }: SidebarProps) {
     if (pathname?.includes("/dashboard/notifications") || pathname?.includes("/profile/notifications")) return "notifications";
     if (pathname?.includes("/profile/subscription")) return "subscription";
     if (pathname?.includes("/profile/wallet") || pathname?.includes("/wallet")) return "wallet";
+    if (pathname?.includes("/dashboard/referrals")) return "referrals";
     if (pathname?.includes("/profile")) return "profile";
     if (pathname?.includes("/calendar")) return "calendar";
     if (pathname?.includes("/dashboard/history")) return "history";
@@ -495,6 +496,14 @@ export default function Sidebar({ active }: SidebarProps) {
             )}
           </span>
           <ChevronRight className={`h-4 w-4 ${currentActive === "messages" ? "text-[#1f419a]" : "text-gray-400"}`}/>
+        </Link>
+
+        <Link href="/dashboard/referrals" className={itemClass("referrals")}>
+          <span className="flex items-center gap-2">
+            <Gift className="h-4 w-4" />
+            Invite & Earn
+          </span>
+          <ChevronRight className={`h-4 w-4 ${currentActive === "referrals" ? "text-[#1f419a]" : "text-gray-400"}`}/>
         </Link>
 
         {/* Divider */}

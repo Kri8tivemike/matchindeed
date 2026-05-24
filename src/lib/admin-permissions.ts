@@ -26,6 +26,10 @@ export const ALL_PERMISSIONS = [
   "manage_activity_limits",
   "manage_subadmins",
   "manage_2fa_auth",
+  "view_referrals",
+  "manage_referral_rewards",
+  "manage_referral_settings",
+  "review_referral_fraud",
 ] as const;
 
 export type Permission = (typeof ALL_PERMISSIONS)[number];
@@ -63,6 +67,10 @@ export const ACCOUNT_PERMISSION_LABELS: Record<
   manage_activity_limits: "Manage activity limits",
   manage_subadmins: "Manage sub-admins",
   manage_2fa_auth: "2FA Auth setup",
+  view_referrals: "View referrals",
+  manage_referral_rewards: "Manage referral rewards",
+  manage_referral_settings: "Manage referral settings",
+  review_referral_fraud: "Review referral fraud",
   view_assigned_meetings: "View assigned meetings",
   view_upcoming_meetings: "View upcoming meetings",
   join_approved_meetings: "Join approved meetings",
