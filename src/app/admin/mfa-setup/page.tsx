@@ -4,6 +4,8 @@ import { useEffect, useState, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ADMIN_BASE_PATH, ADMIN_LOGIN_PATH } from "@/lib/admin/path";
+import { isGrowthManagerPermissionSet } from "@/lib/admin/growth-manager";
+import { GROWTH_MANAGER_DASHBOARD_PATH } from "@/lib/growth-manager/path";
 import {
   Shield,
   ShieldCheck,
@@ -141,6 +143,30 @@ export default function AdminMfaSetupPage() {
       if (!user) {
         router.push(ADMIN_LOGIN_PATH);
         return;
+      }
+
+      const accessToken = await getAccessToken();
+      if (accessToken) {
+        const permissionsResponse = await fetch("/api/admin/permissions/me", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const permissionsData = await permissionsResponse
+          .json()
+          .catch(() => ({}));
+        const permissions = Array.isArray(permissionsData.permissions)
+          ? permissionsData.permissions.map(String)
+          : [];
+
+        if (
+          permissionsResponse.ok &&
+          permissionsData.role === "admin" &&
+          isGrowthManagerPermissionSet(permissions)
+        ) {
+          router.replace(GROWTH_MANAGER_DASHBOARD_PATH);
+          return;
+        }
       }
 
       const { data: factors, error: factorsError } = await supabase.auth.mfa.listFactors();

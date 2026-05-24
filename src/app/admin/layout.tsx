@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ADMIN_LOGIN_PATH, matchesAdminPathname } from "@/lib/admin/path";
+import { isGrowthManagerPermissionSet } from "@/lib/admin/growth-manager";
+import { GROWTH_MANAGER_DASHBOARD_PATH } from "@/lib/growth-manager/path";
 import AdminSidebar from "./components/AdminSidebar";
 import { Loader2 } from "lucide-react";
 
@@ -103,6 +105,14 @@ export default function AdminLayout({
           permissions = Array.isArray(permissionsData.permissions)
             ? permissionsData.permissions
             : [];
+        }
+
+        if (
+          account.role === "admin" &&
+          isGrowthManagerPermissionSet(permissions)
+        ) {
+          router.replace(GROWTH_MANAGER_DASHBOARD_PATH);
+          return;
         }
 
         setAdminUser({
