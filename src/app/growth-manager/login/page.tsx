@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import CloudflareTurnstile from "@/components/CloudflareTurnstile";
 import { supabase } from "@/lib/supabase";
-import { ADMIN_MFA_SETUP_PATH } from "@/lib/admin/path";
 import { COORDINATOR_LOGIN_PATH } from "@/lib/coordinator/path";
 import { GROWTH_MANAGER_DASHBOARD_PATH } from "@/lib/growth-manager/path";
 
@@ -232,7 +231,7 @@ function GrowthManagerLoginContent() {
         return;
       }
 
-      router.push(ADMIN_MFA_SETUP_PATH);
+      goToReferralDashboard();
     } catch (loginError) {
       console.error("Growth Manager login error:", loginError);
       setError("An unexpected error occurred. Please try again.");
@@ -276,7 +275,7 @@ function GrowthManagerLoginContent() {
           return;
         }
 
-        router.push(`${ADMIN_MFA_SETUP_PATH}?recovered=true`);
+        goToReferralDashboard();
         return;
       }
 
