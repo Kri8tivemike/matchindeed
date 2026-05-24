@@ -19,8 +19,9 @@ import {
 } from "lucide-react";
 import CloudflareTurnstile from "@/components/CloudflareTurnstile";
 import { supabase } from "@/lib/supabase";
-import { adminPath, ADMIN_MFA_SETUP_PATH } from "@/lib/admin/path";
+import { ADMIN_MFA_SETUP_PATH } from "@/lib/admin/path";
 import { COORDINATOR_LOGIN_PATH } from "@/lib/coordinator/path";
+import { GROWTH_MANAGER_DASHBOARD_PATH } from "@/lib/growth-manager/path";
 
 type MfaMode = "totp" | "recovery";
 
@@ -134,7 +135,7 @@ function GrowthManagerLoginContent() {
   };
 
   const goToReferralDashboard = () => {
-    router.push(adminPath("/referrals"));
+    router.push(GROWTH_MANAGER_DASHBOARD_PATH);
   };
 
   const handleLogin = async (e: React.FormEvent) => {

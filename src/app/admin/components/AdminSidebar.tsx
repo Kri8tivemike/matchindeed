@@ -35,7 +35,6 @@ import {
   RotateCcw,
   Gauge,
   KeyRound,
-  Gift,
 } from "lucide-react";
 
 type NextLinkProps = ComponentProps<typeof NextLink>;
@@ -165,19 +164,6 @@ export default function AdminSidebar({
       icon: <Wallet className="h-5 w-5" />,
       roles: ["admin", "superadmin"],
       anyPermissions: ["view_wallet", "manage_wallet"],
-      section: "operations",
-    },
-    {
-      href: adminPath("/referrals"),
-      label: "Referral System",
-      icon: <Gift className="h-5 w-5" />,
-      roles: ["admin", "superadmin"],
-      anyPermissions: [
-        "view_referrals",
-        "manage_referral_rewards",
-        "manage_referral_settings",
-        "review_referral_fraud",
-      ],
       section: "operations",
     },
     {
