@@ -26,6 +26,12 @@ import {
   ALL_PERMISSIONS,
   COORDINATOR_PERMISSIONS,
 } from "@/lib/admin-permissions";
+import {
+  formatAdminRoleLabel,
+  getDisplayAdminRole,
+  GROWTH_MANAGER_PERMISSIONS,
+  isGrowthManagerPermissionSet,
+} from "@/lib/admin/growth-manager";
 
 type PermissionSubject = {
   id: string;
@@ -147,8 +153,13 @@ export default function AdminSubAdminsPage() {
   const getSubjectPermissions = (subject: PermissionSubject) =>
     subject.role === "coordinator" ? COORDINATOR_PERMISSIONS : ALL_PERMISSIONS;
 
+  const getSubjectDisplayRole = (subject: PermissionSubject) =>
+    getDisplayAdminRole(subject.role, permissionsByUser[subject.id]);
+
   const getRoleBadgeClass = (role: string) => {
     switch (role) {
+      case "growth_manager":
+        return "bg-emerald-100 text-emerald-700";
       case "coordinator":
         return "bg-purple-100 text-purple-700";
       case "admin":
@@ -191,32 +202,36 @@ export default function AdminSubAdminsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {subjects.map((admin) => (
-                <tr key={admin.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">{admin.display_name || "—"}</td>
-                  <td className="px-6 py-4">{admin.email}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeClass(admin.role)}`}>
-                      {admin.role}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      admin.account_status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
-                    }`}>
-                      {admin.account_status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <Link
-                      href={adminPath(`/users/${admin.id}`)}
-                      className="px-3 py-1 rounded-lg text-sm border border-gray-200 hover:bg-gray-50"
-                    >
-                      Manage
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {subjects.map((admin) => {
+                const displayRole = getSubjectDisplayRole(admin);
+
+                return (
+                  <tr key={admin.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">{admin.display_name || "—"}</td>
+                    <td className="px-6 py-4">{admin.email}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeClass(displayRole)}`}>
+                        {formatAdminRoleLabel(displayRole)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        admin.account_status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+                      }`}>
+                        {admin.account_status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <Link
+                        href={adminPath(`/users/${admin.id}`)}
+                        className="px-3 py-1 rounded-lg text-sm border border-gray-200 hover:bg-gray-50"
+                      >
+                        Manage
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -240,6 +255,10 @@ export default function AdminSubAdminsPage() {
               {subjects.map((subject) => {
                 const availablePermissions = getSubjectPermissions(subject);
                 const currentPermissions = permissionsByUser[subject.id] || [];
+                const displayRole = getSubjectDisplayRole(subject);
+                const isGrowthManager =
+                  subject.role === "admin" &&
+                  isGrowthManagerPermissionSet(currentPermissions);
                 const isEditing = editingUserId === subject.id;
 
                 return (
@@ -251,8 +270,8 @@ export default function AdminSubAdminsPage() {
                       </h3>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                         <span>{subject.email}</span>
-                        <span className={`rounded-full px-2 py-0.5 font-medium capitalize ${getRoleBadgeClass(subject.role)}`}>
-                          {subject.role}
+                        <span className={`rounded-full px-2 py-0.5 font-medium ${getRoleBadgeClass(displayRole)}`}>
+                          {formatAdminRoleLabel(displayRole)}
                         </span>
                         <span
                           className={`rounded-full px-2 py-0.5 font-medium ${
@@ -269,6 +288,19 @@ export default function AdminSubAdminsPage() {
                     </div>
                     {isEditing ? (
                       <div className="flex gap-2">
+                        {subject.role === "admin" && !isGrowthManager && (
+                          <button
+                            onClick={() =>
+                              setPermissionsByUser((prev) => ({
+                                ...prev,
+                                [subject.id]: [...GROWTH_MANAGER_PERMISSIONS],
+                              }))
+                            }
+                            className="px-3 py-1.5 text-sm rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                          >
+                            Growth Manager profile
+                          </button>
+                        )}
                         <button
                           onClick={() => setEditingUserId(null)}
                           className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 hover:bg-gray-50"
@@ -285,13 +317,28 @@ export default function AdminSubAdminsPage() {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => setEditingUserId(subject.id)}
-                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1"
-                      >
-                        <Shield className="h-4 w-4" />
-                        Edit
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        {subject.role === "admin" && !isGrowthManager && (
+                          <button
+                            onClick={() =>
+                              handleSavePermissions(subject, [
+                                ...GROWTH_MANAGER_PERMISSIONS,
+                              ])
+                            }
+                            disabled={savingPerms}
+                            className="px-3 py-1.5 text-sm rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                          >
+                            Make Growth Manager
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setEditingUserId(subject.id)}
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-1"
+                        >
+                          <Shield className="h-4 w-4" />
+                          Edit
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
