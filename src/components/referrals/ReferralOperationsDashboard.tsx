@@ -22,6 +22,11 @@ type OverviewPayload = {
     approved_credits: number;
     risk_flags: number;
   };
+  funnel: {
+    source: "database";
+    analytics_configured: boolean;
+    steps: FunnelStep[];
+  };
   settings: ReferralSettings;
   admin: {
     permissions: string[];
@@ -44,6 +49,15 @@ type RewardRow = {
   created_at: string;
   referrer?: { email: string | null; display_name: string | null } | null;
   referred_user?: { email: string | null; display_name: string | null } | null;
+};
+
+type FunnelStep = {
+  key: string;
+  label: string;
+  value: number;
+  rate_label: string | null;
+  rate: number | null;
+  helper: string;
 };
 
 function milestoneLabel(value: string) {
@@ -219,6 +233,63 @@ export default function ReferralOperationsDashboard() {
             );
           })}
         </div>
+      )}
+
+      {overview?.funnel && (
+        <section className="mb-6 rounded-xl bg-white shadow-sm ring-1 ring-black/5">
+          <div className="flex flex-col gap-2 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-900">Core product funnel</h2>
+              <p className="text-sm text-gray-500">
+                Database-backed view of the key product milestones now tracked by analytics.
+              </p>
+            </div>
+            <span
+              className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${
+                overview.funnel.analytics_configured
+                  ? "bg-green-50 text-green-700 ring-green-200"
+                  : "bg-amber-50 text-amber-700 ring-amber-200"
+              }`}
+            >
+              Mixpanel {overview.funnel.analytics_configured ? "configured" : "not configured"}
+            </span>
+          </div>
+          <div className="grid gap-0 divide-y divide-gray-100 md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4">
+            {overview.funnel.steps.map((step) => {
+              const maxValue = Math.max(
+                ...overview.funnel.steps.map((funnelStep) => funnelStep.value),
+                1
+              );
+              const width = `${Math.max(4, Math.round((step.value / maxValue) * 100))}%`;
+              return (
+                <div key={step.key} className="p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">{step.label}</p>
+                      <p className="mt-1 text-2xl font-bold text-gray-900">
+                        {step.value.toLocaleString()}
+                      </p>
+                    </div>
+                    {step.rate !== null && (
+                      <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+                        {step.rate}% {step.rate_label}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-100">
+                    <div
+                      className="h-full rounded-full bg-[#1f419a]"
+                      style={{ width }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">
+                    {step.helper}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
