@@ -9,6 +9,10 @@ import {
 import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
 import { clearStarterTrialSlot } from "@/lib/starter-trial";
 import { evaluateFirstSubscriptionReferralReward } from "@/lib/referrals/rewards";
+import {
+  PRODUCT_ANALYTICS_EVENTS,
+  trackProductEventSafely,
+} from "@/lib/product-analytics";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -274,6 +278,16 @@ async function processWalletBalancePaymentFallback(params: {
           referralError
         );
       });
+
+      await trackProductEventSafely(
+        userId,
+        PRODUCT_ANALYTICS_EVENTS.SUBSCRIPTION_PURCHASED,
+        {
+          tier: normalizedTier,
+          amount_cents: amountCents,
+          payment_provider: "wallet_balance",
+        }
+      );
 
       description = `Subscription payment for ${normalizedTier} - ${(amountCents / 100).toFixed(2)}`;
       successMessage = "Subscription activated successfully";

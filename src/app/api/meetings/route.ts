@@ -40,6 +40,10 @@ import {
 import { getMonthlyCreditsForTier, normalizeTier } from "@/lib/credits/config";
 import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
 import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
+import {
+  PRODUCT_ANALYTICS_EVENTS,
+  trackProductEventSafely,
+} from "@/lib/product-analytics";
 import { sendPushNotificationIfAllowed } from "@/lib/onesignal";
 import { scheduleMeetingRequestReminder } from "@/lib/alerts/scheduled-alerts";
 import { adminAbsoluteUrl } from "@/lib/admin/path";
@@ -1413,6 +1417,20 @@ export async function POST(request: NextRequest) {
       credits_used: requiredCredits,
     });
 
+    await trackProductEventSafely(
+      user.id,
+      PRODUCT_ANALYTICS_EVENTS.MEETING_REQUESTED,
+      {
+        meeting_id: meeting.id,
+        meeting_type: normalizedMeetingType,
+        scheduled_at: scheduledAt.toISOString(),
+        target_user_id,
+        requester_tier: requesterTier,
+        target_tier: targetTier,
+        credits_used: requiredCredits,
+      }
+    );
+
     return NextResponse.json({ 
       meeting: {
         ...meeting,
@@ -1803,6 +1821,24 @@ export async function PATCH(request: NextRequest) {
                     scheduled_at: meeting.scheduled_at,
                     accepted_by: user.id,
                     participant_role: entry.role,
+                  }
+                )
+              )
+            );
+
+            await Promise.all(
+              (acceptedParticipants || []).map((entry) =>
+                trackProductEventSafely(
+                  entry.user_id,
+                  PRODUCT_ANALYTICS_EVENTS.MEETING_BOOKED,
+                  {
+                    meeting_id,
+                    meeting_type: meeting.type || "one_on_one",
+                    scheduled_at: meeting.scheduled_at,
+                    accepted_by: user.id,
+                    participant_role: entry.role,
+                    workflow_state: "accepted",
+                    requires_admin_approval: true,
                   }
                 )
               )

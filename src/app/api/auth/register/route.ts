@@ -16,6 +16,10 @@ import {
   trackCustomerEventSafely,
 } from "@/lib/customerio";
 import {
+  PRODUCT_ANALYTICS_EVENTS,
+  trackProductEventSafely,
+} from "@/lib/product-analytics";
+import {
   calculateAge,
   MINIMUM_PLATFORM_AGE,
 } from "@/lib/age-restrictions";
@@ -529,6 +533,14 @@ export async function POST(request: NextRequest) {
         partner_gender_preference: normalizedPartnerGender || null,
         uploaded_photos: uploadedPhotoUrls.length,
         rejected_photos: uploadResult.rejectedCount,
+      }),
+      trackProductEventSafely(userId, PRODUCT_ANALYTICS_EVENTS.SIGNUP_COMPLETED, {
+        selected_tier: normalizedTier,
+        looking_for: normalizedLookingFor || null,
+        partner_gender_preference: normalizedPartnerGender || null,
+        uploaded_photos: uploadedPhotoUrls.length,
+        rejected_photos: uploadResult.rejectedCount,
+        referral_code_used: Boolean(payload.referralCode),
       }),
     ]);
 

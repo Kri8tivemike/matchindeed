@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { recordCreditTransaction } from "@/lib/credits/transactions";
+import {
+  PRODUCT_ANALYTICS_EVENTS,
+  trackProductEventSafely,
+} from "@/lib/product-analytics";
 import { normalizeReferralCode } from "@/lib/referrals/codes";
 
 export type ReferralMilestone =
@@ -289,6 +293,19 @@ async function addReferralCredits(
     },
   });
 
+  await trackProductEventSafely(
+    reward.referrer_id,
+    PRODUCT_ANALYTICS_EVENTS.REFERRAL_REWARD_EARNED,
+    {
+      referral_id: reward.referral_id,
+      reward_id: reward.id,
+      referred_user_id: reward.referred_user_id,
+      milestone: reward.milestone,
+      credits_awarded: reward.credits_awarded,
+      credit_transaction_id: transactionId,
+    }
+  );
+
   return transactionId;
 }
 
@@ -473,4 +490,3 @@ export async function updateReferralRewardStatus(
 
   return { success: true };
 }
-

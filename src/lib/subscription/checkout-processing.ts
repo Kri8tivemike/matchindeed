@@ -5,6 +5,10 @@ import { allocateSubscriptionCredits } from "@/lib/credits/allocation";
 import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
 import { clearStarterTrialSlot } from "@/lib/starter-trial";
 import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
+import {
+  PRODUCT_ANALYTICS_EVENTS,
+  trackProductEventSafely,
+} from "@/lib/product-analytics";
 import { evaluateFirstSubscriptionReferralReward } from "@/lib/referrals/rewards";
 
 type ProcessingRow = {
@@ -371,6 +375,20 @@ export async function processSubscriptionCheckoutSession(
       expires_at: expiresAt,
     });
 
+    await trackProductEventSafely(
+      userId,
+      PRODUCT_ANALYTICS_EVENTS.SUBSCRIPTION_PURCHASED,
+      {
+        tier,
+        amount_cents: amountCents,
+        payment_provider: "stripe",
+        stripe_session_id: session.id,
+        stripe_subscription_id: stripeSubscriptionId,
+        starts_at: startsAt,
+        expires_at: expiresAt,
+      }
+    );
+
     await evaluateFirstSubscriptionReferralReward(supabase, userId, {
       tier,
       amount_cents: amountCents,
@@ -607,6 +625,21 @@ export async function processSubscriptionFlutterwavePayment(
       starts_at: startsAt.toISOString(),
       expires_at: expiresAt.toISOString(),
     });
+
+    await trackProductEventSafely(
+      payment.userId,
+      PRODUCT_ANALYTICS_EVENTS.SUBSCRIPTION_PURCHASED,
+      {
+        tier,
+        amount_cents: payment.amountCents,
+        currency: payment.currency,
+        payment_provider: "flutterwave",
+        flutterwave_transaction_id: payment.transactionId,
+        flutterwave_tx_ref: sessionId,
+        starts_at: startsAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      }
+    );
 
     await evaluateFirstSubscriptionReferralReward(supabase, payment.userId, {
       tier,

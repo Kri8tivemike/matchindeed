@@ -5,6 +5,10 @@ import {
   identifyCustomerSafely,
   trackCustomerEventSafely,
 } from "@/lib/customerio";
+import {
+  PRODUCT_ANALYTICS_EVENTS,
+  trackProductEventSafely,
+} from "@/lib/product-analytics";
 import { evaluateProfilePreferencesReferralReward } from "@/lib/referrals/rewards";
 
 const supabase = createClient(
@@ -119,12 +123,32 @@ export async function POST(request: NextRequest) {
           completed_at: new Date().toISOString(),
         }
       );
+
+      await trackProductEventSafely(
+        user.id,
+        PRODUCT_ANALYTICS_EVENTS.PROFILE_COMPLETED,
+        {
+          ...eventData,
+          source: "dashboard_profile_edit",
+          completed_at: new Date().toISOString(),
+        }
+      );
     }
 
     if (rawStep === "preferences_completed") {
       eventTracked = await trackCustomerEventSafely(
         user.id,
         CIO_EVENTS.PREFERENCES_SET,
+        {
+          ...eventData,
+          source: "dashboard_preferences",
+          completed_at: new Date().toISOString(),
+        }
+      );
+
+      await trackProductEventSafely(
+        user.id,
+        PRODUCT_ANALYTICS_EVENTS.PREFERENCES_COMPLETED,
         {
           ...eventData,
           source: "dashboard_preferences",
