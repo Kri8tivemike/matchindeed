@@ -8,7 +8,7 @@
  * - 4-column plan comparison cards with visual hierarchy
  * - Wallet-pay confirmation modal (replaces confirm())
  * - Global toast notifications
- * - Stripe checkout + admin pricing integration preserved
+ * - Flutterwave checkout + admin pricing integration preserved
  */
 
 import Image from "next/image";
@@ -102,7 +102,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
     id: "standard",
     name: "Standard",
     pricing: { ngn: 15000, usd: 19.99, gbp: 16.99 },
-    priceId: process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID || "",
+    priceId: "",
     credits: 10,
     calendarDays: 15,
     customDates: 5,
@@ -123,7 +123,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
     id: "premium",
     name: "Premium",
     pricing: { ngn: 27000, usd: 34.99, gbp: 29.99 },
-    priceId: process.env.NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID || "",
+    priceId: "",
     credits: 30,
     calendarDays: 30,
     customDates: 30,
@@ -143,7 +143,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
     id: "vip",
     name: "VIP",
     pricing: { ngn: 1500000, usd: 1000, gbp: 800 },
-    priceId: process.env.NEXT_PUBLIC_STRIPE_VIP_PRICE_ID || "",
+    priceId: "",
     credits: 0,
     calendarDays: 0,
     customDates: 0,
@@ -206,7 +206,7 @@ function getPrice(tier: SubscriptionTier, currency: Currency): number {
   return tier.pricing.usd;
 }
 
-async function redirectToStripeCheckout(
+async function redirectToPaymentCheckout(
   url: string | null | undefined
 ) {
   if (!url) {
@@ -222,7 +222,7 @@ async function redirectToStripeCheckout(
   })();
 
   if (isFramed) {
-    // Stripe Checkout must be opened as a top-level page, not inside an iframe.
+    // Hosted payment checkout must be opened as a top-level page, not inside an iframe.
     try {
       if (window.top) {
         window.top.location.href = url;
@@ -352,13 +352,14 @@ function SubscriptionContent() {
   }, [fetchSubscriptionState]);
 
   const verifyAndProcessSubscription = useCallback(async (
-    sessionId: string
+    transactionId: string,
+    txRef: string | null
   ): Promise<VerifySubscriptionResult> => {
     try {
       const res = await fetch("/api/verify-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ transactionId, txRef }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -400,31 +401,34 @@ function SubscriptionContent() {
         success: false,
         retryable: true,
         message:
-          "We're still waiting for Stripe to confirm your subscription. Please hold on for a moment.",
+          "We're still waiting for Flutterwave to confirm your subscription. Please hold on for a moment.",
       };
     }
   }, [fetchSubscriptionState]);
 
-  // Stripe redirect handling
+  // Flutterwave redirect handling
   const successParam = searchParams.get("success");
   const canceledParam = searchParams.get("canceled");
-  const sessionIdParam = searchParams.get("session_id");
+  const transactionIdParam = searchParams.get("transaction_id");
+  const txRefParam = searchParams.get("tx_ref");
 
   useEffect(() => {
     const clearCheckoutParams = () => {
       if (typeof window === "undefined") return;
       const url = new URL(window.location.href);
       url.searchParams.delete("success");
-      url.searchParams.delete("session_id");
+      url.searchParams.delete("transaction_id");
+      url.searchParams.delete("tx_ref");
+      url.searchParams.delete("status");
       url.searchParams.delete("canceled");
       window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     };
 
-    if (successParam === "true" && sessionIdParam) {
-      if (processedSubscriptionSessionsRef.current.has(sessionIdParam)) {
+    if (successParam === "true" && transactionIdParam) {
+      if (processedSubscriptionSessionsRef.current.has(transactionIdParam)) {
         return;
       }
-      processedSubscriptionSessionsRef.current.add(sessionIdParam);
+      processedSubscriptionSessionsRef.current.add(transactionIdParam);
       let cancelled = false;
       let redirectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -437,7 +441,7 @@ function SubscriptionContent() {
 
       const runVerification = async () => {
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          const result = await verifyAndProcessSubscription(sessionIdParam);
+          const result = await verifyAndProcessSubscription(transactionIdParam, txRefParam);
 
           if (cancelled) return;
 
@@ -515,7 +519,8 @@ function SubscriptionContent() {
   }, [
     successParam,
     canceledParam,
-    sessionIdParam,
+    transactionIdParam,
+    txRefParam,
     toast,
     dismissAll,
     verifyAndProcessSubscription,
@@ -565,7 +570,7 @@ function SubscriptionContent() {
           toast.error(err.error || "Wallet payment failed.");
           return;
         }
-        // 402 = insufficient, fall through to Stripe
+        // 402 = insufficient, fall through to card checkout
       }
 
       // Check if wallet can cover it (show modal instead of confirm())
@@ -583,12 +588,11 @@ function SubscriptionContent() {
         }
       }
 
-      // Stripe checkout
+      // Flutterwave checkout
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          priceId: tier.priceId || undefined,
           tier: tier.id,
           userId: user.id,
           currency,
@@ -600,7 +604,7 @@ function SubscriptionContent() {
         throw new Error(err.error || "Checkout failed");
       }
       const { url } = await res.json();
-      await redirectToStripeCheckout(url);
+      await redirectToPaymentCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
       if (shouldCenterCheckoutError(msg)) {
@@ -901,7 +905,7 @@ function SubscriptionContent() {
               <button
                 onClick={() => {
                   setWalletPayModal({ isOpen: false, tier: null, amountCents: 0 });
-                  // Fall through to Stripe
+                  // Fall through to card checkout
                   if (walletPayModal.tier) {
                     handleSubscribe(walletPayModal.tier, false);
                   }

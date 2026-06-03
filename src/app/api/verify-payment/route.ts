@@ -1,38 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { processOneTimeFlutterwavePayment } from "@/lib/payments/checkout-processing";
 import {
-  extractOneTimeCheckoutPayload,
-  processOneTimeCheckoutSession,
-} from "@/lib/payments/checkout-processing";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-01-28.clover" as Stripe.StripeConfig["apiVersion"],
-  typescript: true,
-});
+  amountToSmallestUnit,
+  normalizeFlutterwaveMeta,
+  verifyFlutterwaveTransaction,
+} from "@/lib/payments/flutterwave";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-function isRetryableStripeError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
+function parsePositiveInteger(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
 
-  const type = String((error as { type?: unknown }).type || "");
-  return (
-    type === "StripeRateLimitError" ||
-    type === "StripeAPIError" ||
-    type === "StripeConnectionError"
-  );
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-/**
- * Verify a Stripe payment session and return its metadata
- * This is used to check payment status when webhook might not have fired yet
- */
+function normalizeCurrency(value: unknown) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : "usd";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const cookieStore = await cookies();
@@ -63,58 +61,103 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const sessionId = searchParams.get("sessionId");
+    const transactionId = searchParams.get("transactionId") || searchParams.get("transaction_id");
+    const txRef = searchParams.get("txRef") || searchParams.get("tx_ref");
 
-    if (!sessionId) {
+    if (!transactionId) {
       return NextResponse.json(
-        { error: "Session ID is required" },
+        { error: "Flutterwave transaction ID is required" },
         { status: 400 }
       );
     }
 
-    // Retrieve the checkout session
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    const sessionUserId = session.metadata?.userId || session.client_reference_id;
+    const transaction = await verifyFlutterwaveTransaction(transactionId);
+    const meta = normalizeFlutterwaveMeta(transaction.meta);
+    const paymentType = meta.type;
+    const sessionUserId = meta.userId;
 
-    if (!sessionUserId || sessionUserId !== user.id) {
+    if (sessionUserId !== user.id) {
       return NextResponse.json(
-        { error: "Unauthorized payment session access" },
+        { error: "Unauthorized payment transaction access" },
         { status: 403 }
       );
     }
 
-    const payload = extractOneTimeCheckoutPayload(session);
-    const result = payload
-      ? await processOneTimeCheckoutSession(supabase, session)
-      : {
-          success: false,
-          retryable: false,
-          message: "Unsupported Stripe checkout session type.",
-        };
+    if (transaction.tx_ref !== txRef && txRef) {
+      return NextResponse.json(
+        { error: "Payment reference mismatch" },
+        { status: 400 }
+      );
+    }
+
+    if (paymentType !== "wallet_topup" && paymentType !== "credit_purchase") {
+      return NextResponse.json(
+        { error: "Unsupported Flutterwave payment type" },
+        { status: 400 }
+      );
+    }
+
+    const amountCents =
+      parsePositiveInteger(meta.amountCents) || amountToSmallestUnit(transaction.amount);
+    const currency = normalizeCurrency(meta.currency || transaction.currency);
+    const verifiedAmountCents = amountToSmallestUnit(transaction.amount);
+
+    if (verifiedAmountCents < amountCents || normalizeCurrency(transaction.currency) !== currency) {
+      return NextResponse.json(
+        { error: "Verified payment amount or currency does not match checkout metadata" },
+        { status: 400 }
+      );
+    }
+
+    const credits =
+      paymentType === "credit_purchase" ? parsePositiveInteger(meta.credits) : null;
+
+    if (paymentType === "credit_purchase" && !credits) {
+      return NextResponse.json(
+        { error: "Credit purchase metadata is missing" },
+        { status: 400 }
+      );
+    }
+
+    const result =
+      paymentType === "wallet_topup"
+        ? await processOneTimeFlutterwavePayment(supabase, {
+            transactionId: String(transaction.id),
+            txRef: transaction.tx_ref,
+            status: transaction.status,
+            paymentType: "wallet_topup",
+            userId: user.id,
+            amountCents,
+            currency,
+          })
+        : await processOneTimeFlutterwavePayment(supabase, {
+            transactionId: String(transaction.id),
+            txRef: transaction.tx_ref,
+            status: transaction.status,
+            paymentType: "credit_purchase",
+            userId: user.id,
+            amountCents,
+            currency,
+            credits: credits!,
+          });
 
     return NextResponse.json({
       ...result,
-      paid: session.payment_status === "paid",
-      payment_status: session.payment_status,
-      status: session.status,
-      mode: session.mode,
-      type: payload?.paymentType || session.metadata?.type || null,
-      userId: payload?.userId || null,
-      credits: payload?.paymentType === "credit_purchase" ? payload.credits : null,
-      amountCents: payload?.amountCents || null,
-      currency: payload?.currency || session.currency || null,
+      paid: transaction.status === "successful",
+      payment_status: transaction.status,
+      status: transaction.status,
+      mode: "payment",
+      type: paymentType,
+      userId: user.id,
+      credits: paymentType === "credit_purchase" ? credits : null,
+      amountCents,
+      currency,
+      provider: "flutterwave",
     });
   } catch (error: unknown) {
     const errorMessage =
       error instanceof Error ? error.message : "Failed to verify payment";
-    console.error("Error verifying payment:", error);
-    if (isRetryableStripeError(error)) {
-      return NextResponse.json({
-        success: false,
-        retryable: true,
-        message: "Payment verification is processing. Please refresh in a few seconds.",
-      });
-    }
+    console.error("Error verifying Flutterwave payment:", error);
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }

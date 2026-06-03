@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { processSubscriptionCheckoutSession } from "@/lib/subscription/checkout-processing";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-01-28.clover" as Stripe.StripeConfig["apiVersion"],
-  typescript: true,
-});
+import { processSubscriptionFlutterwavePayment } from "@/lib/subscription/checkout-processing";
+import {
+  amountToSmallestUnit,
+  normalizeFlutterwaveMeta,
+  verifyFlutterwaveTransaction,
+} from "@/lib/payments/flutterwave";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -17,23 +16,25 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const getErrorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
 
-function isRetryableStripeError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
+function parsePositiveInteger(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
 
-  const type = String((error as { type?: unknown }).type || "");
-  return (
-    type === "StripeRateLimitError" ||
-    type === "StripeAPIError" ||
-    type === "StripeConnectionError"
-  );
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-/**
- * Verify a Stripe subscription session and process subscription if webhook hasn't fired yet
- */
+function normalizeCurrency(value: unknown) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : "usd";
+}
+
 export async function POST(request: NextRequest) {
   try {
-    // Get authenticated user from server-side session
     const cookieStore = await cookies();
     const supabaseServer = createServerClient(
       supabaseUrl,
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
                 cookieStore.set(name, value, options);
               });
             } catch {
-              // Ignore cookie setting errors
+              // Ignore cookie setting errors.
             }
           },
         },
@@ -62,43 +63,78 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { sessionId } = await request.json();
+    const { transactionId, txRef } = await request.json();
 
-    if (!sessionId) {
-      return NextResponse.json({ error: "Session ID is required" }, { status: 400 });
+    if (!transactionId) {
+      return NextResponse.json(
+        { error: "Flutterwave transaction ID is required" },
+        { status: 400 }
+      );
     }
 
-    // Retrieve the checkout session and expand subscription for more reliable status checks.
-    const session = await stripe.checkout.sessions.retrieve(sessionId, {
-      expand: ["subscription"],
-    });
-    const sessionUserId = session.metadata?.userId || session.client_reference_id || user.id;
+    const transaction = await verifyFlutterwaveTransaction(transactionId);
+    const meta = normalizeFlutterwaveMeta(transaction.meta);
 
-    if (sessionUserId !== user.id) {
+    if (meta.userId !== user.id) {
       return NextResponse.json(
-        { error: "Unauthorized subscription session access" },
+        { error: "Unauthorized subscription transaction access" },
         { status: 403 }
       );
     }
 
-    const result = await processSubscriptionCheckoutSession(supabase, session);
+    if (txRef && transaction.tx_ref !== txRef) {
+      return NextResponse.json(
+        { error: "Subscription payment reference mismatch" },
+        { status: 400 }
+      );
+    }
+
+    if (meta.type !== "subscription") {
+      return NextResponse.json(
+        { error: "Unsupported Flutterwave subscription payment type" },
+        { status: 400 }
+      );
+    }
+
+    const tier = typeof meta.tier === "string" ? meta.tier.toLowerCase() : "";
+    if (!tier) {
+      return NextResponse.json(
+        { error: "Subscription tier metadata is missing" },
+        { status: 400 }
+      );
+    }
+
+    const amountCents =
+      parsePositiveInteger(meta.amountCents) || amountToSmallestUnit(transaction.amount);
+    const currency = normalizeCurrency(meta.currency || transaction.currency);
+    const verifiedAmountCents = amountToSmallestUnit(transaction.amount);
+
+    if (verifiedAmountCents < amountCents || normalizeCurrency(transaction.currency) !== currency) {
+      return NextResponse.json(
+        { error: "Verified subscription amount or currency does not match checkout metadata" },
+        { status: 400 }
+      );
+    }
+
+    const result = await processSubscriptionFlutterwavePayment(supabase, {
+      transactionId: String(transaction.id),
+      txRef: transaction.tx_ref,
+      userId: user.id,
+      tier,
+      amountCents,
+      currency,
+      status: transaction.status,
+    });
 
     return NextResponse.json({
       ...result,
-      payment_status: session.payment_status,
-      status: session.status,
-      mode: session.mode,
+      payment_status: transaction.status,
+      status: transaction.status,
+      mode: "payment",
+      provider: "flutterwave",
     });
   } catch (error: unknown) {
-    console.error("Error verifying subscription:", error);
-    if (isRetryableStripeError(error)) {
-      return NextResponse.json({
-        success: false,
-        message:
-          "Subscription verification is processing. Please refresh in a few seconds.",
-        retryable: true,
-      });
-    }
+    console.error("Error verifying Flutterwave subscription:", error);
 
     return NextResponse.json(
       { error: getErrorMessage(error, "Failed to verify subscription") },

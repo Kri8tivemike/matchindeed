@@ -10,7 +10,7 @@
  * - Transaction history with type-based filtering
  * - Top-up and credit-purchase modals
  * - Global toast notifications (no inline banners)
- * - Stripe checkout integration preserved
+ * - Flutterwave checkout integration preserved
  */
 
 import Image from "next/image";
@@ -90,23 +90,16 @@ type CreditPurchaseAvailability = {
 // Helpers
 // ---------------------------------------------------------------
 
-/** Stripe minimum charge amounts per currency (in main unit, e.g. pounds/dollars) */
-const STRIPE_MINIMUM_AMOUNT: Record<Currency, number> = {
+/** Payment minimum charge amounts per currency (in main unit, e.g. pounds/dollars) */
+const PAYMENT_MINIMUM_AMOUNT: Record<Currency, number> = {
   USD: 0.50,  // $0.50
   GBP: 0.30,  // £0.30
   NGN: 50.00, // ₦50.00
 };
 
-/** Compute the minimum number of credits needed to meet Stripe's per-transaction minimum */
-function getMinCreditQuantity(pricePerCredit: number, currency: Currency): number {
-  if (pricePerCredit <= 0) return 1;
-  const min = STRIPE_MINIMUM_AMOUNT[currency];
-  return Math.max(1, Math.ceil(min / pricePerCredit));
-}
-
 /** Compute the minimum wallet top-up amount for the selected currency */
 function getMinTopUpAmount(currency: Currency): number {
-  return STRIPE_MINIMUM_AMOUNT[currency];
+  return PAYMENT_MINIMUM_AMOUNT[currency];
 }
 
 /** Detect user currency based on IP (Nigeria → NGN, UK → GBP, else USD). Uses /api/geo; client-side fallback for Tailscale. */
@@ -247,7 +240,7 @@ function getCreditPurchaseAvailability(
   return { canPurchase: true, pricePerCredit, reason: "" };
 }
 
-async function redirectToStripeCheckout(
+async function redirectToPaymentCheckout(
   url: string | null | undefined
 ) {
   if (!url) {
@@ -263,7 +256,7 @@ async function redirectToStripeCheckout(
   })();
 
   if (isFramed) {
-    // Stripe Checkout must be opened as a top-level page, not inside an iframe.
+    // Hosted payment checkout must be opened as a top-level page, not inside an iframe.
     try {
       if (window.top) {
         window.top.location.href = url;
@@ -314,7 +307,7 @@ function WalletContent() {
 
   const processedSessionsRef = useRef<Set<string>>(new Set());
   const fetchWalletDataRef = useRef<() => Promise<void>>(async () => {});
-  const verifyAndProcessPaymentRef = useRef<(sessionId: string) => Promise<void>>(
+  const verifyAndProcessPaymentRef = useRef<(transactionId: string, txRef: string | null) => Promise<void>>(
     async () => {}
   );
 
@@ -323,28 +316,31 @@ function WalletContent() {
     detectCurrency().then(setCurrency).catch(() => setCurrency("USD"));
   }, []);
 
-  // Check for success/cancel query params from Stripe redirect
+  // Check for success/cancel query params from Flutterwave redirect
   const successParam = searchParams.get("success");
   const canceledParam = searchParams.get("canceled");
-  const sessionIdParam = searchParams.get("session_id");
+  const transactionIdParam = searchParams.get("transaction_id");
+  const txRefParam = searchParams.get("tx_ref");
   const openParam = searchParams.get("open");
 
   useEffect(() => {
-    if (successParam === "true" && sessionIdParam) {
-      if (handledSuccessRef.current.has(sessionIdParam)) {
+    if (successParam === "true" && transactionIdParam) {
+      if (handledSuccessRef.current.has(transactionIdParam)) {
         return;
       }
-      handledSuccessRef.current.add(sessionIdParam);
+      handledSuccessRef.current.add(transactionIdParam);
 
       toast.success("Payment successful! Updating your wallet...");
       fetchWalletDataRef
         .current()
-        .then(() => verifyAndProcessPaymentRef.current(sessionIdParam));
+        .then(() => verifyAndProcessPaymentRef.current(transactionIdParam, txRefParam));
 
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
         url.searchParams.delete("success");
-        url.searchParams.delete("session_id");
+        url.searchParams.delete("transaction_id");
+        url.searchParams.delete("tx_ref");
+        url.searchParams.delete("status");
         window.history.replaceState({}, "", `${url.pathname}${url.search}`);
       }
     }
@@ -352,7 +348,7 @@ function WalletContent() {
       handledCancelRef.current = true;
       toast.warning("Payment was canceled.");
     }
-  }, [successParam, canceledParam, sessionIdParam, toast]);
+  }, [successParam, canceledParam, transactionIdParam, txRefParam, toast]);
 
   useEffect(() => {
     if (!openParam || loading) return;
@@ -388,9 +384,9 @@ function WalletContent() {
   ]);
 
   // ---------------------------------------------------------------
-  // Verify payment after Stripe redirect
+  // Verify payment after Flutterwave redirect
   // ---------------------------------------------------------------
-  const verifyAndProcessPayment = async (sessionId: string) => {
+  const verifyAndProcessPayment = async (transactionId: string, txRef: string | null) => {
     try {
       const user = await getCurrentUserSafe();
       if (!user) return;
@@ -399,11 +395,11 @@ function WalletContent() {
         return;
       }
 
-      if (processedSessionsRef.current.has(sessionId)) {
+      if (processedSessionsRef.current.has(transactionId)) {
         return;
       }
 
-      processedSessionsRef.current.add(sessionId);
+      processedSessionsRef.current.add(transactionId);
       const maxAttempts = 4;
 
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -411,7 +407,9 @@ function WalletContent() {
           await new Promise((resolve) => setTimeout(resolve, 2000));
         }
 
-        const response = await fetch(`/api/verify-payment?sessionId=${sessionId}`, {
+        const params = new URLSearchParams({ transactionId });
+        if (txRef) params.set("txRef", txRef);
+        const response = await fetch(`/api/verify-payment?${params.toString()}`, {
           cache: "no-store",
         });
 
@@ -457,7 +455,7 @@ function WalletContent() {
     } catch {
       toast.error("Failed to verify payment. Please refresh.");
     } finally {
-      processedSessionsRef.current.delete(sessionId);
+      processedSessionsRef.current.delete(transactionId);
     }
   };
 
@@ -696,7 +694,7 @@ function WalletContent() {
         }
       }
 
-      // Stripe fallback
+      // Card checkout fallback
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -714,7 +712,7 @@ function WalletContent() {
         throw new Error(err.error || "Checkout failed");
       }
       const { url } = await res.json();
-      await redirectToStripeCheckout(url);
+      await redirectToPaymentCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
       if (shouldCenterCheckoutError(msg)) {
@@ -746,7 +744,7 @@ function WalletContent() {
       return;
     }
 
-    // Enforce Stripe minimum top-up amount
+    // Enforce payment minimum top-up amount
     const minTopUp = getMinTopUpAmount(currency);
     if (topUpAmount < minTopUp) {
       toast.centerError(
@@ -775,7 +773,7 @@ function WalletContent() {
         throw new Error(err.error || "Checkout failed");
       }
       const { url } = await res.json();
-      await redirectToStripeCheckout(url);
+      await redirectToPaymentCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
       if (shouldCenterCheckoutError(msg)) {

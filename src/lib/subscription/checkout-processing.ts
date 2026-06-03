@@ -24,6 +24,16 @@ type ProcessResult = {
   rolloverAdded?: number;
 };
 
+export type FlutterwaveSubscriptionPayment = {
+  transactionId: string;
+  txRef: string;
+  userId: string;
+  tier: string;
+  amountCents: number;
+  currency: string;
+  status: string;
+};
+
 const PROCESSING_STALE_MS = 60_000;
 
 function getStripeSubscriptionWindow(
@@ -65,7 +75,8 @@ async function claimProcessingRow(
   userId: string,
   tier: string,
   stripeSubscriptionId: string | null,
-  amountCents: number
+  amountCents: number,
+  source = "stripe_checkout"
 ) {
   const { data: existingRow, error: readError } = await supabase
     .from("subscription_checkout_processing")
@@ -99,7 +110,7 @@ async function claimProcessingRow(
     status: "processing" as const,
     processing_token: processingToken,
     error: null,
-    source: "stripe_checkout",
+    source,
     processed_at: null,
     updated_at: new Date().toISOString(),
   };
@@ -395,6 +406,243 @@ export async function processSubscriptionCheckoutSession(
         updated_at: new Date().toISOString(),
       })
       .eq("session_id", session.id)
+      .eq("processing_token", claim.processingToken);
+
+    throw error;
+  }
+}
+
+export async function processSubscriptionFlutterwavePayment(
+  supabase: SupabaseClient,
+  payment: FlutterwaveSubscriptionPayment
+): Promise<ProcessResult> {
+  const tier = payment.tier?.toLowerCase();
+  const sessionId = payment.txRef || `flw-${payment.transactionId}`;
+
+  if (!payment.userId || !tier) {
+    throw new Error("Missing Flutterwave subscription metadata.");
+  }
+
+  if (payment.status !== "successful") {
+    return {
+      success: false,
+      retryable: payment.status === "pending",
+      tier,
+      message:
+        payment.status === "pending"
+          ? "Subscription payment is still processing."
+          : "Subscription payment has not been completed successfully.",
+    };
+  }
+
+  const claim = await claimProcessingRow(
+    supabase,
+    sessionId,
+    payment.userId,
+    tier,
+    String(payment.transactionId),
+    payment.amountCents,
+    "flutterwave_checkout"
+  );
+
+  if (claim.state === "completed") {
+    return {
+      success: true,
+      alreadyProcessed: true,
+      message: "Subscription already processed.",
+      tier,
+    };
+  }
+
+  if (claim.state === "processing") {
+    return {
+      success: false,
+      retryable: true,
+      message: "Subscription activation is already in progress.",
+      tier,
+    };
+  }
+
+  try {
+    const startsAt = new Date();
+    const expiresAt = new Date(startsAt);
+    expiresAt.setMonth(expiresAt.getMonth() + 1);
+
+    const { error: accountError } = await supabase
+      .from("accounts")
+      .update({ tier })
+      .eq("id", payment.userId);
+
+    if (accountError) {
+      throw accountError;
+    }
+
+    const { data: existingMembership, error: membershipLookupError } = await supabase
+      .from("memberships")
+      .select("id")
+      .eq("user_id", payment.userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ id: string }>();
+
+    if (membershipLookupError) {
+      throw membershipLookupError;
+    }
+
+    const membershipData = {
+      user_id: payment.userId,
+      tier,
+      status: "active",
+      starts_at: startsAt.toISOString(),
+      expires_at: expiresAt.toISOString(),
+      price_cents: payment.amountCents,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (existingMembership?.id) {
+      const { error: membershipUpdateError } = await supabase
+        .from("memberships")
+        .update(membershipData)
+        .eq("id", existingMembership.id);
+
+      if (membershipUpdateError) {
+        throw membershipUpdateError;
+      }
+    } else {
+      const { error: membershipInsertError } = await supabase
+        .from("memberships")
+        .insert(membershipData);
+
+      if (membershipInsertError) {
+        throw membershipInsertError;
+      }
+    }
+
+    const { data: existingSubscriptionPayment, error: existingSubscriptionPaymentError } =
+      await supabase
+        .from("wallet_transactions")
+        .select("id")
+        .eq("reference_id", sessionId)
+        .eq("type", "subscription_payment")
+        .maybeSingle<{ id: string }>();
+
+    if (existingSubscriptionPaymentError) {
+      throw existingSubscriptionPaymentError;
+    }
+
+    const { data: currentWallet, error: walletLookupError } = await supabase
+      .from("wallets")
+      .select("balance_cents")
+      .eq("user_id", payment.userId)
+      .maybeSingle<{ balance_cents: number | null }>();
+
+    if (walletLookupError) {
+      throw walletLookupError;
+    }
+
+    if (!existingSubscriptionPayment?.id) {
+      const walletBalance = Number(currentWallet?.balance_cents || 0);
+      const { error: walletTransactionError } = await supabase
+        .from("wallet_transactions")
+        .insert({
+          user_id: payment.userId,
+          type: "subscription_payment",
+          amount_cents: payment.amountCents,
+          balance_before_cents: walletBalance,
+          balance_after_cents: walletBalance,
+          description: `Subscription payment for ${tier} plan via Flutterwave`,
+          reference_id: sessionId,
+        });
+
+      if (walletTransactionError) {
+        throw walletTransactionError;
+      }
+    }
+
+    const creditResult = await allocateSubscriptionCredits(supabase, payment.userId, tier);
+
+    await restoreCreditLockedProfileIfEligible(supabase, payment.userId).catch(
+      (restoreError) => {
+        console.warn(
+          "[checkout-processing] Credit-locked profile restore skipped:",
+          restoreError
+        );
+      }
+    );
+
+    const { error: clearStarterError } = await clearStarterTrialSlot(
+      supabase,
+      payment.userId
+    );
+    if (clearStarterError) {
+      console.warn(
+        "[checkout-processing] Failed to clear starter trial slot pointer:",
+        clearStarterError
+      );
+    }
+
+    const { error: completeError } = await supabase
+      .from("subscription_checkout_processing")
+      .update({
+        status: "completed",
+        credits_allocated: creditResult.creditsToAdd,
+        processed_at: new Date().toISOString(),
+        error: null,
+        processing_token: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("session_id", sessionId)
+      .eq("processing_token", claim.processingToken);
+
+    if (completeError) {
+      throw completeError;
+    }
+
+    await trackCustomerEventSafely(payment.userId, CIO_EVENTS.SUBSCRIPTION_UPGRADED, {
+      tier,
+      amount_cents: payment.amountCents,
+      currency: payment.currency,
+      flutterwave_transaction_id: payment.transactionId,
+      flutterwave_tx_ref: sessionId,
+      starts_at: startsAt.toISOString(),
+      expires_at: expiresAt.toISOString(),
+    });
+
+    await evaluateFirstSubscriptionReferralReward(supabase, payment.userId, {
+      tier,
+      amount_cents: payment.amountCents,
+      flutterwave_transaction_id: payment.transactionId,
+      flutterwave_tx_ref: sessionId,
+    }).catch((referralError) => {
+      console.warn(
+        "[checkout-processing] referral subscription reward skipped:",
+        referralError
+      );
+    });
+
+    return {
+      success: true,
+      tier,
+      creditsAdded: creditResult.creditsToAdd,
+      rolloverAdded: creditResult.rolloverAdded || 0,
+      message:
+        creditResult.rolloverAdded && creditResult.rolloverAdded > 0
+          ? `Subscription processed successfully. ${creditResult.rolloverAdded} unused credit(s) rolled over.`
+          : "Subscription processed successfully.",
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to process subscription";
+
+    await supabase
+      .from("subscription_checkout_processing")
+      .update({
+        status: "failed",
+        error: message,
+        processing_token: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("session_id", sessionId)
       .eq("processing_token", claim.processingToken);
 
     throw error;

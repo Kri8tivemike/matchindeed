@@ -41,21 +41,40 @@ async function testSupabase(): Promise<TestResult> {
   }
 }
 
-/** 2. Stripe — list 1 product */
-async function testStripe(): Promise<TestResult> {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) return { service: "Stripe", status: "skip", message: "Missing STRIPE_SECRET_KEY" };
+/** 2. Flutterwave — list banks to verify API access */
+async function testFlutterwave(): Promise<TestResult> {
+  const key = process.env.FLUTTERWAVE_SECRET_KEY;
+  if (!key) {
+    return {
+      service: "Flutterwave",
+      status: "skip",
+      message: "Missing FLUTTERWAVE_SECRET_KEY",
+    };
+  }
 
   const start = Date.now();
   try {
-    const res = await fetch("https://api.stripe.com/v1/products?limit=1", {
+    const res = await fetch("https://api.flutterwave.com/v3/banks/NG", {
       headers: { Authorization: `Bearer ${key}` },
     });
-    const data = await res.json();
-    if (data.error) return { service: "Stripe", status: "fail", message: data.error.message, responseTime: Date.now() - start };
-    return { service: "Stripe", status: "pass", message: `Connected — ${data.data?.length ?? 0} product(s) found`, responseTime: Date.now() - start };
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.status === "error") {
+      return {
+        service: "Flutterwave",
+        status: "fail",
+        message: data.message || `HTTP ${res.status}`,
+        responseTime: Date.now() - start,
+      };
+    }
+    const count = Array.isArray(data.data) ? data.data.length : 0;
+    return {
+      service: "Flutterwave",
+      status: "pass",
+      message: `Connected — bank API reachable (${count} listed)`,
+      responseTime: Date.now() - start,
+    };
   } catch (e: unknown) {
-    return { service: "Stripe", status: "fail", message: String(e), responseTime: Date.now() - start };
+    return { service: "Flutterwave", status: "fail", message: String(e), responseTime: Date.now() - start };
   }
 }
 
@@ -551,7 +570,7 @@ export async function GET(request: NextRequest) {
   // Run all tests in parallel
   const results = await Promise.all([
     testSupabase(),
-    testStripe(),
+    testFlutterwave(),
     testResend(),
     testZoom(),
     testSentry(),
