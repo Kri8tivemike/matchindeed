@@ -5,6 +5,11 @@ import {
   trackProductEventSafely,
 } from "@/lib/product-analytics";
 import { normalizeReferralCode } from "@/lib/referrals/codes";
+import {
+  insertReferralNotification,
+  notifyReferralOperators,
+  referralMilestoneLabel,
+} from "@/lib/referrals/operations";
 
 export type ReferralMilestone =
   | "profile_preferences_completed"
@@ -169,6 +174,12 @@ export async function updateReferralSettings(
     action: "referral_settings_updated",
     meta: { before, after },
   });
+  await notifyReferralOperators(supabase, {
+    type: "referral_settings_updated",
+    title: "Referral settings updated",
+    message: "Referral reward settings were updated in the Growth Manager dashboard.",
+    data: { actor_id: actorId, before, after },
+  });
 
   return after;
 }
@@ -292,6 +303,20 @@ async function addReferralCredits(
       credit_transaction_id: transactionId,
     },
   });
+  await insertReferralNotification(supabase, {
+    userId: reward.referrer_id,
+    type: "referral_reward_approved",
+    title: "Referral credits approved",
+    message: `You earned ${reward.credits_awarded} booking credit(s) for ${referralMilestoneLabel(reward.milestone)}.`,
+    data: {
+      referral_id: reward.referral_id,
+      reward_id: reward.id,
+      referred_user_id: reward.referred_user_id,
+      milestone: reward.milestone,
+      credits_awarded: reward.credits_awarded,
+      credit_transaction_id: transactionId,
+    },
+  });
 
   await trackProductEventSafely(
     reward.referrer_id,
@@ -357,8 +382,36 @@ async function createRewardForMilestone(
   }
   if (!reward) return { created: false, reason: "insert_failed" };
 
+  await supabase.from("referral_audit_logs").insert({
+    referral_id: reward.referral_id,
+    reward_id: reward.id,
+    action: "referral_reward_created",
+    meta: {
+      milestone: reward.milestone,
+      credits_awarded: reward.credits_awarded,
+      status: reward.status,
+      risk_level: "low",
+      auto_approve_low_risk_rewards: autoApprove,
+    },
+  });
+
   if (autoApprove) {
     await addReferralCredits(supabase, reward, null);
+  } else {
+    await notifyReferralOperators(supabase, {
+      type: "referral_reward_pending_review",
+      title: "Referral reward pending review",
+      message: `A ${credits}-credit referral reward needs review before approval.`,
+      data: {
+        referral_id: reward.referral_id,
+        reward_id: reward.id,
+        referrer_id: reward.referrer_id,
+        referred_user_id: reward.referred_user_id,
+        milestone: reward.milestone,
+        credits_awarded: reward.credits_awarded,
+        risk_level: "low",
+      },
+    });
   }
 
   return { created: true, rewardId: reward.id, autoApproved: autoApprove };
@@ -450,6 +503,19 @@ export async function updateReferralRewardStatus(
   actorId: string,
   status: "held" | "rejected"
 ) {
+  const { data: before, error: beforeError } = await supabase
+    .from("referral_rewards")
+    .select(
+      "id, referral_id, referrer_id, referred_user_id, milestone, credits_awarded, status, risk_level, risk_reasons, credit_transaction_id"
+    )
+    .eq("id", rewardId)
+    .maybeSingle<RewardRow & { risk_level?: string | null; risk_reasons?: string[] | null }>();
+
+  if (beforeError) throw beforeError;
+  if (!before || before.credit_transaction_id) {
+    throw new Error("Reward not found or already credited.");
+  }
+
   const update: Record<string, unknown> = {
     status,
     updated_at: new Date().toISOString(),
@@ -485,6 +551,26 @@ export async function updateReferralRewardStatus(
     meta: {
       milestone: data.milestone,
       credits_awarded: data.credits_awarded,
+      previous_status: before.status,
+      new_status: status,
+      risk_level: before.risk_level || "low",
+      risk_reasons: before.risk_reasons || [],
+    },
+  });
+  await notifyReferralOperators(supabase, {
+    type: `referral_reward_${status}`,
+    title: `Referral reward ${status}`,
+    message: `A ${data.credits_awarded}-credit referral reward was ${status}.`,
+    data: {
+      actor_id: actorId,
+      referral_id: data.referral_id,
+      reward_id: data.id,
+      referrer_id: before.referrer_id,
+      referred_user_id: before.referred_user_id,
+      milestone: data.milestone,
+      credits_awarded: data.credits_awarded,
+      previous_status: before.status,
+      new_status: status,
     },
   });
 

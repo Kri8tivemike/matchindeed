@@ -10,6 +10,7 @@ import {
   Clock,
   CreditCard,
   Gift,
+  History,
   Loader2,
   RefreshCw,
   Save,
@@ -58,6 +59,17 @@ type RewardRow = {
   referred_user?: { email: string | null; display_name: string | null } | null;
 };
 
+type AuditLogRow = {
+  id: string;
+  actor_id: string | null;
+  referral_id: string | null;
+  reward_id: string | null;
+  action: string;
+  meta: Record<string, unknown> | null;
+  created_at: string;
+  actor?: { email: string | null; display_name: string | null } | null;
+};
+
 type FunnelStep = {
   key: string;
   label: string;
@@ -67,7 +79,7 @@ type FunnelStep = {
   helper: string;
 };
 
-type DashboardSection = "overview" | "funnel" | "rewards" | "settings";
+type DashboardSection = "overview" | "funnel" | "rewards" | "settings" | "audit";
 
 function milestoneLabel(value: string) {
   if (value === "profile_preferences_completed") return "Profile + preferences";
@@ -92,9 +104,46 @@ function stepWidth(step: FunnelStep, maxValue: number) {
   return `${Math.max(5, Math.round((step.value / maxValue) * 100))}%`;
 }
 
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function auditActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    referral_created: "Referral created",
+    referral_reward_created: "Reward created",
+    referral_reward_approved: "Reward approved",
+    referral_reward_held: "Reward held",
+    referral_reward_rejected: "Reward rejected",
+    referral_settings_updated: "Settings updated",
+  };
+  return labels[action] || action.replace(/_/g, " ");
+}
+
+function auditSummary(log: AuditLogRow) {
+  const meta = log.meta || {};
+  if (log.action === "referral_settings_updated") {
+    return "Reward credit settings were updated.";
+  }
+  if (typeof meta.credits_awarded === "number" && typeof meta.milestone === "string") {
+    return `${meta.credits_awarded} credit(s) for ${milestoneLabel(meta.milestone)}.`;
+  }
+  if (typeof meta.referral_code === "string") {
+    return `Referral code ${meta.referral_code} was used.`;
+  }
+  return "Referral activity recorded.";
+}
+
 export default function ReferralOperationsDashboard() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [rewards, setRewards] = useState<RewardRow[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [settings, setSettings] = useState<ReferralSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -167,6 +216,12 @@ export default function ReferralOperationsDashboard() {
       helper: "Credit rules",
       Icon: SlidersHorizontal,
     },
+    {
+      key: "audit",
+      label: "Audit Trail",
+      helper: "Changes and decisions",
+      Icon: History,
+    },
   ];
   const sectionKeys = sectionMenu.map((section) => section.key);
   const sectionParam = searchParams.get("section") as DashboardSection | null;
@@ -204,19 +259,23 @@ export default function ReferralOperationsDashboard() {
     setLoading(true);
     setMessage(null);
     try {
-      const [overviewResponse, rewardsResponse] = await Promise.all([
+      const [overviewResponse, rewardsResponse, auditResponse] = await Promise.all([
         authedFetch("/api/admin/referrals/overview"),
         authedFetch("/api/admin/referrals/rewards?limit=50"),
+        authedFetch("/api/admin/referrals/audit?limit=50"),
       ]);
 
       if (!overviewResponse.ok) throw new Error("Unable to load referral overview.");
       if (!rewardsResponse.ok) throw new Error("Unable to load referral rewards.");
+      if (!auditResponse.ok) throw new Error("Unable to load referral audit logs.");
 
       const overviewPayload = (await overviewResponse.json()) as OverviewPayload;
       const rewardsPayload = (await rewardsResponse.json()) as { rewards: RewardRow[] };
+      const auditPayload = (await auditResponse.json()) as { audit_logs: AuditLogRow[] };
       setOverview(overviewPayload);
       setSettings(overviewPayload.settings);
       setRewards(rewardsPayload.rewards || []);
+      setAuditLogs(auditPayload.audit_logs || []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load referrals.");
     } finally {
@@ -320,7 +379,7 @@ export default function ReferralOperationsDashboard() {
       )}
 
       <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-        <div className="grid gap-2 md:grid-cols-4">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
           {sectionMenu.map(({ key, label, helper, Icon }) => {
             const isActive = activeSection === key;
             return (
@@ -630,6 +689,41 @@ export default function ReferralOperationsDashboard() {
               </button>
             </div>
           )}
+        </section>
+      )}
+
+      {activeSection === "audit" && (
+        <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-4">
+            <h2 className="font-semibold text-gray-950">Audit trail</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Recent referral setting changes, reward approvals, holds, rejections, and system events.
+            </p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {auditLogs.length === 0 ? (
+              <div className="px-5 py-10 text-center text-sm text-gray-500">
+                No referral audit history yet.
+              </div>
+            ) : (
+              auditLogs.map((log) => (
+                <div key={log.id} className="grid gap-3 px-5 py-4 hover:bg-gray-50/70 md:grid-cols-[220px_1fr_190px] md:items-center">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-950">
+                      {auditActionLabel(log.action)}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {log.actor?.display_name || log.actor?.email || "System"}
+                    </p>
+                  </div>
+                  <p className="text-sm text-gray-600">{auditSummary(log)}</p>
+                  <p className="text-xs font-medium text-gray-500 md:text-right">
+                    {formatDateTime(log.created_at)}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
         </section>
       )}
     </div>
