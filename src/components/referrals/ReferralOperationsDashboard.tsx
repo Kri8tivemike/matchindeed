@@ -1,21 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   BarChart3,
   CheckCircle2,
-  ClipboardList,
   Clock,
   CreditCard,
   Gift,
-  History,
   Loader2,
   RefreshCw,
   Save,
   Shield,
-  SlidersHorizontal,
   UserCheck,
   Users,
 } from "lucide-react";
@@ -80,6 +76,14 @@ type FunnelStep = {
 };
 
 type DashboardSection = "overview" | "funnel" | "rewards" | "settings" | "audit";
+
+const VALID_DASHBOARD_SECTIONS: DashboardSection[] = [
+  "overview",
+  "funnel",
+  "rewards",
+  "settings",
+  "audit",
+];
 
 function milestoneLabel(value: string) {
   if (value === "profile_preferences_completed") return "Profile + preferences";
@@ -148,7 +152,6 @@ export default function ReferralOperationsDashboard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const permissions = useMemo(
@@ -186,59 +189,10 @@ export default function ReferralOperationsDashboard() {
   const meetingSteps = ["meeting_requested", "meeting_booked"]
     .map((key) => stepByKey.get(key))
     .filter(Boolean) as FunnelStep[];
-  const sectionMenu: Array<{
-    key: DashboardSection;
-    label: string;
-    helper: string;
-    Icon: typeof BarChart3;
-  }> = [
-    {
-      key: "overview",
-      label: "Overview",
-      helper: "Referral KPIs",
-      Icon: BarChart3,
-    },
-    {
-      key: "funnel",
-      label: "Product Funnel",
-      helper: "Signup to subscription",
-      Icon: UserCheck,
-    },
-    {
-      key: "rewards",
-      label: "Reward Ledger",
-      helper: "Approvals and risk",
-      Icon: ClipboardList,
-    },
-    {
-      key: "settings",
-      label: "Reward Settings",
-      helper: "Credit rules",
-      Icon: SlidersHorizontal,
-    },
-    {
-      key: "audit",
-      label: "Audit Trail",
-      helper: "Changes and decisions",
-      Icon: History,
-    },
-  ];
-  const sectionKeys = sectionMenu.map((section) => section.key);
   const sectionParam = searchParams.get("section") as DashboardSection | null;
-  const activeSection = sectionParam && sectionKeys.includes(sectionParam)
+  const activeSection = sectionParam && VALID_DASHBOARD_SECTIONS.includes(sectionParam)
     ? sectionParam
     : "overview";
-
-  const sectionHref = (section: DashboardSection) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (section === "overview") {
-      params.delete("section");
-    } else {
-      params.set("section", section);
-    }
-    const query = params.toString();
-    return query ? `${pathname}?${query}` : pathname;
-  };
 
   const authedFetch = useCallback(async (url: string, init?: RequestInit) => {
     const {
@@ -377,40 +331,6 @@ export default function ReferralOperationsDashboard() {
           {message}
         </div>
       )}
-
-      <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-          {sectionMenu.map(({ key, label, helper, Icon }) => {
-            const isActive = activeSection === key;
-            return (
-              <Link
-                key={key}
-                aria-pressed={isActive}
-                href={sectionHref(key)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors ${
-                  isActive
-                    ? "bg-[#1f419a] text-white"
-                    : "text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <span
-                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                    isActive ? "bg-white/15" : "bg-blue-50 text-[#1f419a]"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold">{label}</span>
-                  <span className={`block text-xs ${isActive ? "text-blue-100" : "text-gray-500"}`}>
-                    {helper}
-                  </span>
-                </span>
-              </Link>
-            );
-          })}
-        </div>
-      </div>
 
       {overview && activeSection === "overview" && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">

@@ -1,14 +1,18 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   BarChart3,
   Gift,
+  History,
   LogOut,
   Settings,
   Shield,
+  SlidersHorizontal,
+  UserCheck,
 } from "lucide-react";
 import {
   GROWTH_MANAGER_DASHBOARD_PATH,
@@ -22,8 +26,50 @@ type GrowthManagerSidebarProps = {
 export default function GrowthManagerSidebar({
   userName,
 }: GrowthManagerSidebarProps) {
+  return (
+    <Suspense fallback={<GrowthManagerSidebarShell userName={userName} />}>
+      <GrowthManagerSidebarContent userName={userName} />
+    </Suspense>
+  );
+}
+
+function GrowthManagerSidebarContent({
+  userName,
+}: GrowthManagerSidebarProps) {
   const pathname = usePathname();
-  const isDashboard = pathname === GROWTH_MANAGER_DASHBOARD_PATH;
+  const searchParams = useSearchParams();
+  const currentSection = searchParams.get("section") || "overview";
+  const sectionHref = (section: string) =>
+    section === "overview"
+      ? GROWTH_MANAGER_DASHBOARD_PATH
+      : `${GROWTH_MANAGER_DASHBOARD_PATH}?section=${section}`;
+  const referralNavItems = [
+    {
+      section: "overview",
+      label: "Dashboard",
+      Icon: BarChart3,
+    },
+    {
+      section: "funnel",
+      label: "Product Funnel",
+      Icon: UserCheck,
+    },
+    {
+      section: "rewards",
+      label: "Reward Queue",
+      Icon: Gift,
+    },
+    {
+      section: "settings",
+      label: "Reward Settings",
+      Icon: SlidersHorizontal,
+    },
+    {
+      section: "audit",
+      label: "Audit Trail",
+      Icon: History,
+    },
+  ];
 
   return (
     <aside className="flex min-h-screen w-64 flex-col border-r border-gray-200 bg-white">
@@ -62,21 +108,25 @@ export default function GrowthManagerSidebar({
           <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
             Referral System
           </p>
-          <Link
-            href={GROWTH_MANAGER_DASHBOARD_PATH}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-              isDashboard
-                ? "bg-[#1f419a] text-white"
-                : "text-gray-700 hover:bg-gray-100"
-            }`}
-          >
-            <BarChart3 className="h-5 w-5" />
-            <span>Dashboard</span>
-          </Link>
-          <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-400">
-            <Gift className="h-5 w-5" />
-            <span>Reward Queue</span>
-          </div>
+          {referralNavItems.map(({ section, label, Icon }) => {
+            const isActive =
+              pathname === GROWTH_MANAGER_DASHBOARD_PATH &&
+              currentSection === section;
+            return (
+              <Link
+                key={section}
+                href={sectionHref(section)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-[#1f419a] text-white"
+                    : "text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{label}</span>
+              </Link>
+            );
+          })}
         </div>
       </nav>
 
@@ -103,6 +153,46 @@ export default function GrowthManagerSidebar({
           <span>Sign Out</span>
         </Link>
       </div>
+    </aside>
+  );
+}
+
+function GrowthManagerSidebarShell({ userName }: GrowthManagerSidebarProps) {
+  return (
+    <aside className="flex min-h-screen w-64 flex-col border-r border-gray-200 bg-white">
+      <div className="border-b border-gray-200 p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1f419a] to-[#2a44a3]">
+            <Shield className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h1 className="font-bold text-gray-900">MatchIndeed</h1>
+            <p className="text-xs text-gray-500">Referral operations</p>
+          </div>
+        </div>
+      </div>
+      <div className="border-b border-gray-200 p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200">
+            <span className="text-sm font-medium text-gray-600">
+              {userName?.[0]?.toUpperCase() || "G"}
+            </span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-gray-900">
+              {userName}
+            </p>
+            <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
+              Growth Manager
+            </span>
+          </div>
+        </div>
+      </div>
+      <nav className="flex-1 p-4">
+        <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+          Referral System
+        </p>
+      </nav>
     </aside>
   );
 }
