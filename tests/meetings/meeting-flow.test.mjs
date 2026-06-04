@@ -22,10 +22,11 @@ test("deriveWorkflowState falls back from meeting status when workflow state is 
   );
 });
 
-test("resolveStateForAcceptance progresses from requested to accepted/confirmed", () => {
+test("resolveStateForAcceptance progresses requests into admin approval", () => {
   assert.equal(resolveStateForAcceptance("requested", false), "accepted");
-  assert.equal(resolveStateForAcceptance("requested", true), "confirmed");
+  assert.equal(resolveStateForAcceptance("requested", true), "accepted");
   assert.equal(resolveStateForAcceptance("accepted", false), "accepted");
+  assert.equal(resolveStateForAcceptance("accepted", true), "accepted");
 });
 
 test("meeting transition guard allows valid transitions", () => {

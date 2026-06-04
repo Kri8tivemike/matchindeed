@@ -72,14 +72,16 @@ test("Standard private meetings enforce monthly limit", () => {
   assert.equal(result.limit, STANDARD_PRIVATE_MEETING_MONTHLY_LIMIT);
 });
 
-test("Premium one-on-one request remains allowed", () => {
+test("Premium one-on-one request cannot target VIP users", () => {
   const result = evaluateMeetingRequestRules({
     requesterTier: "premium",
     targetTier: "vip",
     meetingType: "one_on_one",
   });
 
-  assert.equal(result.allowed, true);
+  assert.equal(result.allowed, false);
+  assert.equal(result.code, "premium_private_target_restricted");
+  assert.equal(result.requiresUpgrade, true);
   assert.equal(result.normalizedRequesterTier, "premium");
   assert.equal(result.normalizedMeetingType, "one_on_one");
 });

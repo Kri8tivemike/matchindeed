@@ -17,10 +17,24 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let supabaseAdmin:
+  | ReturnType<typeof createClient>
+  | null
+  | undefined;
+
+function getSupabaseAdmin() {
+  if (supabaseAdmin !== undefined) return supabaseAdmin;
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    supabaseAdmin = null;
+    return supabaseAdmin;
+  }
+
+  supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+  return supabaseAdmin;
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -162,7 +176,10 @@ export async function getUserNotificationPrefs(
   userId: string
 ): Promise<UserNotificationPrefs> {
   try {
-    const modernResult = await supabaseAdmin
+    const client = getSupabaseAdmin();
+    if (!client) return { ...DEFAULTS };
+
+    const modernResult = await client
       .from("notification_preferences")
       .select("*")
       .eq("user_id", userId)
@@ -177,11 +194,11 @@ export async function getUserNotificationPrefs(
     }
 
     // Backward-compatible fallback for environments with notification_prefs JSONB
-    const legacyResult = await supabaseAdmin
+    const legacyResult = await client
       .from("notification_prefs")
       .select("prefs")
       .eq("user_id", userId)
-      .maybeSingle();
+      .maybeSingle<{ prefs: unknown }>();
 
     if (legacyResult.error) {
       console.error("Error loading notification_prefs:", legacyResult.error);

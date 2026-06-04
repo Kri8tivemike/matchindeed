@@ -87,8 +87,10 @@ export function resolveStateForAcceptance(
   currentState: MeetingWorkflowState,
   allAccepted: boolean
 ): MeetingWorkflowState {
-  void allAccepted;
   if (currentState === "requested") {
+    return "accepted";
+  }
+  if (currentState === "accepted" && allAccepted) {
     return "accepted";
   }
   return currentState;
