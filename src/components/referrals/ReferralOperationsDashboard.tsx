@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
+  BarChart3,
   CheckCircle2,
+  Clock,
+  CreditCard,
   Gift,
   Loader2,
   RefreshCw,
   Save,
   Shield,
+  UserCheck,
   Users,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -73,6 +76,16 @@ function statusClass(status: string) {
   return "bg-blue-50 text-blue-700 ring-blue-200";
 }
 
+function riskClass(riskLevel: string) {
+  if (riskLevel === "high") return "bg-red-50 text-red-700 ring-red-200";
+  if (riskLevel === "medium") return "bg-amber-50 text-amber-700 ring-amber-200";
+  return "bg-green-50 text-green-700 ring-green-200";
+}
+
+function stepWidth(step: FunnelStep, maxValue: number) {
+  return `${Math.max(5, Math.round((step.value / maxValue) * 100))}%`;
+}
+
 export default function ReferralOperationsDashboard() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [rewards, setRewards] = useState<RewardRow[]>([]);
@@ -89,6 +102,33 @@ export default function ReferralOperationsDashboard() {
     permissions.has("*") || permissions.has("manage_referral_settings");
   const canManageRewards =
     permissions.has("*") || permissions.has("manage_referral_rewards");
+  const funnelSteps = useMemo(
+    () => overview?.funnel.steps || [],
+    [overview?.funnel.steps]
+  );
+  const maxFunnelValue = useMemo(
+    () => Math.max(...funnelSteps.map((step) => step.value), 1),
+    [funnelSteps]
+  );
+  const stepByKey = useMemo(
+    () =>
+      new Map(
+        funnelSteps.map((step) => [step.key, step])
+      ),
+    [funnelSteps]
+  );
+  const onboardingSteps = [
+    "signup_completed",
+    "profile_completed",
+    "preferences_completed",
+    "subscription_purchased",
+  ]
+    .map((key) => stepByKey.get(key))
+    .filter(Boolean) as FunnelStep[];
+  const rewardStep = stepByKey.get("referral_reward_earned");
+  const meetingSteps = ["meeting_requested", "meeting_booked"]
+    .map((key) => stepByKey.get(key))
+    .filter(Boolean) as FunnelStep[];
 
   const authedFetch = useCallback(async (url: string, init?: RequestInit) => {
     const {
@@ -187,17 +227,30 @@ export default function ReferralOperationsDashboard() {
   }
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-6 p-6 lg:p-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Referral System</h1>
-          <p className="text-gray-500">
-            Manage invited users, reward credits, fraud review, and Growth Manager settings.
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-950">Referral System</h1>
+            {overview?.funnel && (
+              <span
+                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${
+                  overview.funnel.analytics_configured
+                    ? "bg-green-50 text-green-700 ring-green-200"
+                    : "bg-amber-50 text-amber-700 ring-amber-200"
+                }`}
+              >
+                Analytics {overview.funnel.analytics_configured ? "configured" : "not configured"}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-gray-500">
+            Monitor invite conversion, approve referral credits, and manage reward rules.
           </p>
         </div>
         <button
           onClick={loadData}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
           type="button"
         >
           <RefreshCw className="h-4 w-4" />
@@ -206,29 +259,34 @@ export default function ReferralOperationsDashboard() {
       </div>
 
       {message && (
-        <div className="mb-5 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
           {message}
         </div>
       )}
 
       {overview && (
-        <div className="mb-6 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           {[
-            ["Total referrals", overview.metrics.total_referrals, Users],
-            ["Active codes", overview.metrics.active_codes, Gift],
-            ["Pending rewards", overview.metrics.pending_rewards, AlertTriangle],
-            ["Approved rewards", overview.metrics.approved_rewards, CheckCircle2],
-            ["Credits awarded", overview.metrics.approved_credits, Gift],
-            ["Risk flags", overview.metrics.risk_flags, Shield],
-          ].map(([label, value, Icon]) => {
+            ["Total referrals", overview.metrics.total_referrals, Users, "Invited users"],
+            ["Active codes", overview.metrics.active_codes, Gift, "Live referral codes"],
+            ["Pending rewards", overview.metrics.pending_rewards, Clock, "Need review"],
+            ["Approved rewards", overview.metrics.approved_rewards, CheckCircle2, "Completed decisions"],
+            ["Credits awarded", overview.metrics.approved_credits, CreditCard, "Booking credits"],
+            ["Risk flags", overview.metrics.risk_flags, Shield, "Fraud signals"],
+          ].map(([label, value, Icon, helper]) => {
             const TypedIcon = Icon as typeof Gift;
             return (
-              <div key={label as string} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-500">{label as string}</p>
-                  <TypedIcon className="h-5 w-5 text-[#1f419a]" />
+              <div key={label as string} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label as string}</p>
+                    <p className="mt-2 text-2xl font-bold text-gray-950">{String(value)}</p>
+                    <p className="mt-1 text-xs text-gray-500">{helper as string}</p>
+                  </div>
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#1f419a]">
+                    <TypedIcon className="h-4 w-4" />
+                  </span>
                 </div>
-                <p className="mt-2 text-2xl font-bold text-gray-900">{String(value)}</p>
               </div>
             );
           })}
@@ -236,66 +294,118 @@ export default function ReferralOperationsDashboard() {
       )}
 
       {overview?.funnel && (
-        <section className="mb-6 rounded-xl bg-white shadow-sm ring-1 ring-black/5">
+        <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="flex flex-col gap-2 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="font-semibold text-gray-900">Core product funnel</h2>
-              <p className="text-sm text-gray-500">
-                Database-backed view of the key product milestones now tracked by analytics.
-              </p>
+              <h2 className="font-semibold text-gray-950">Core product funnel</h2>
+              <p className="text-sm text-gray-500">Referral eligibility depends on profile completion and first subscription progress.</p>
             </div>
-            <span
-              className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${
-                overview.funnel.analytics_configured
-                  ? "bg-green-50 text-green-700 ring-green-200"
-                  : "bg-amber-50 text-amber-700 ring-amber-200"
-              }`}
-            >
-              Mixpanel {overview.funnel.analytics_configured ? "configured" : "not configured"}
+            <span className="inline-flex w-fit items-center gap-2 rounded-full bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 ring-1 ring-gray-200">
+              <BarChart3 className="h-3.5 w-3.5" />
+              Database source
             </span>
           </div>
-          <div className="grid gap-0 divide-y divide-gray-100 md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4">
-            {overview.funnel.steps.map((step) => {
-              const maxValue = Math.max(
-                ...overview.funnel.steps.map((funnelStep) => funnelStep.value),
-                1
-              );
-              const width = `${Math.max(4, Math.round((step.value / maxValue) * 100))}%`;
-              return (
-                <div key={step.key} className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">{step.label}</p>
-                      <p className="mt-1 text-2xl font-bold text-gray-900">
-                        {step.value.toLocaleString()}
-                      </p>
+          <div className="grid lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+            <div className="p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <UserCheck className="h-4 w-4 text-[#1f419a]" />
+                <h3 className="text-sm font-semibold text-gray-950">User onboarding milestones</h3>
+              </div>
+              <div className="space-y-4">
+                {onboardingSteps.map((step, index) => (
+                  <div key={step.key}>
+                    <div className="grid gap-3 sm:grid-cols-[170px_1fr_110px] sm:items-center">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{step.label}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">{step.helper}</p>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                        <div
+                          className="h-full rounded-full bg-[#1f419a]"
+                          style={{ width: stepWidth(step, maxFunnelValue) }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-3 sm:justify-end">
+                        <span className="text-lg font-bold text-gray-950">{step.value.toLocaleString()}</span>
+                        {step.rate !== null && (
+                          <span className="min-w-14 rounded-full bg-blue-50 px-2 py-1 text-center text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+                            {step.rate}%
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    {step.rate !== null && (
-                      <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
-                        {step.rate}% {step.rate_label}
-                      </span>
+                    {index < onboardingSteps.length - 1 && (
+                      <div className="ml-2 mt-3 h-px bg-gray-100" />
                     )}
                   </div>
-                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-100">
-                    <div
-                      className="h-full rounded-full bg-[#1f419a]"
-                      style={{ width }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-gray-500">
-                    {step.helper}
-                  </p>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-gray-100 lg:border-l lg:border-t-0">
+              <div className="border-b border-gray-100 p-5">
+                <div className="mb-4 flex items-center gap-2">
+                  <Gift className="h-4 w-4 text-[#1f419a]" />
+                  <h3 className="text-sm font-semibold text-gray-950">Reward health</h3>
                 </div>
-              );
-            })}
+                {rewardStep && (
+                  <div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{rewardStep.label}</p>
+                        <p className="mt-1 text-xs text-gray-500">{rewardStep.helper}</p>
+                      </div>
+                      <span className="text-2xl font-bold text-gray-950">{rewardStep.value.toLocaleString()}</span>
+                    </div>
+                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full bg-green-500"
+                        style={{ width: stepWidth(rewardStep, maxFunnelValue) }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="p-5">
+                <div className="mb-4 flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-[#1f419a]" />
+                  <h3 className="text-sm font-semibold text-gray-950">Meeting activity</h3>
+                </div>
+                <div className="space-y-4">
+                  {meetingSteps.map((step) => (
+                    <div key={step.key}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800">{step.label}</p>
+                          <p className="mt-1 text-xs text-gray-500">{step.helper}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-gray-950">{step.value.toLocaleString()}</p>
+                          {step.rate !== null && (
+                            <p className="text-xs font-semibold text-blue-700">{step.rate}% {step.rate_label}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+                        <div
+                          className="h-full rounded-full bg-[#1f419a]"
+                          style={{ width: stepWidth(step, maxFunnelValue) }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       )}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-        <section className="rounded-xl bg-white shadow-sm ring-1 ring-black/5">
+        <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-5 py-4">
-            <h2 className="font-semibold text-gray-900">Reward ledger</h2>
+            <h2 className="font-semibold text-gray-950">Reward ledger</h2>
+            <p className="mt-1 text-sm text-gray-500">Latest referral reward decisions and review status.</p>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-100 text-sm">
@@ -319,8 +429,8 @@ export default function ReferralOperationsDashboard() {
                   </tr>
                 ) : (
                   rewards.map((reward) => (
-                    <tr key={reward.id}>
-                      <td className="px-5 py-3 text-gray-700">
+                    <tr key={reward.id} className="hover:bg-gray-50/70">
+                      <td className="px-5 py-3 font-medium text-gray-800">
                         {reward.referrer?.display_name || reward.referrer?.email || "User"}
                       </td>
                       <td className="px-5 py-3 text-gray-700">
@@ -335,7 +445,11 @@ export default function ReferralOperationsDashboard() {
                           {reward.status.replace(/_/g, " ")}
                         </span>
                       </td>
-                      <td className="px-5 py-3 capitalize text-gray-700">{reward.risk_level}</td>
+                      <td className="px-5 py-3">
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1 ${riskClass(reward.risk_level)}`}>
+                          {reward.risk_level || "low"}
+                        </span>
+                      </td>
                       <td className="px-5 py-3">
                         {canManageRewards && !["approved", "rejected"].includes(reward.status) ? (
                           <div className="flex gap-2">
@@ -355,8 +469,8 @@ export default function ReferralOperationsDashboard() {
           </div>
         </section>
 
-        <aside className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-          <h2 className="font-semibold text-gray-900">Reward settings</h2>
+        <aside className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="font-semibold text-gray-950">Reward settings</h2>
           <p className="mt-1 text-sm text-gray-500">
             Growth Managers can adjust the credits awarded for each referral milestone.
           </p>
@@ -378,7 +492,7 @@ export default function ReferralOperationsDashboard() {
                       profilePreferencesCompletedCredits: Number(event.target.value),
                     })
                   }
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#1f419a]"
+                  className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
                 />
               </label>
               <label className="block">
@@ -396,7 +510,7 @@ export default function ReferralOperationsDashboard() {
                       firstSubscriptionPurchasedCredits: Number(event.target.value),
                     })
                   }
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#1f419a]"
+                  className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
                 />
               </label>
               <label className="flex items-center gap-2 text-sm text-gray-700">
