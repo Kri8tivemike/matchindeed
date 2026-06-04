@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
+  Award,
   BarChart3,
   Gift,
   History,
@@ -59,6 +60,11 @@ function GrowthManagerSidebarContent({
       section: "rewards",
       label: "Reward Queue",
       Icon: Gift,
+    },
+    {
+      section: "ambassadors",
+      label: "Ambassadors",
+      Icon: Award,
     },
     {
       section: "settings",

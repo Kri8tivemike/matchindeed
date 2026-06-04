@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  Award,
   BarChart3,
   CheckCircle2,
   Clock,
@@ -12,7 +13,9 @@ import {
   RefreshCw,
   Rocket,
   Save,
+  Search,
   Shield,
+  Target,
   UserCheck,
   Users,
 } from "lucide-react";
@@ -68,6 +71,49 @@ type AuditLogRow = {
   actor?: { email: string | null; display_name: string | null } | null;
 };
 
+type AmbassadorRow = {
+  id: string;
+  user_id: string;
+  status: "active" | "paused" | "ended";
+  contract_target_referrals: number;
+  contract_target_subscriptions: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  referral_code: string | null;
+  account: {
+    email: string | null;
+    display_name: string | null;
+    tier: string | null;
+  } | null;
+  performance: {
+    referrals: number;
+    profile_rewards: number;
+    subscription_conversions: number;
+    approved_credits: number;
+    referral_target_progress: number;
+    subscription_target_progress: number;
+  };
+};
+
+type AmbassadorSummary = {
+  total: number;
+  active: number;
+  totalReferrals: number;
+  totalSubscriptionConversions: number;
+  totalCreditsAwarded: number;
+};
+
+type AmbassadorCandidate = {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  tier: string | null;
+  ambassador_status: string | null;
+};
+
 type FunnelStep = {
   key: string;
   label: string;
@@ -95,12 +141,20 @@ type RolloutStatus = {
   };
 };
 
-type DashboardSection = "overview" | "funnel" | "rewards" | "settings" | "audit" | "rollout";
+type DashboardSection =
+  | "overview"
+  | "funnel"
+  | "rewards"
+  | "ambassadors"
+  | "settings"
+  | "audit"
+  | "rollout";
 
 const VALID_DASHBOARD_SECTIONS: DashboardSection[] = [
   "overview",
   "funnel",
   "rewards",
+  "ambassadors",
   "settings",
   "audit",
   "rollout",
@@ -165,6 +219,8 @@ function auditActionLabel(action: string) {
     referral_reward_held: "Reward held",
     referral_reward_rejected: "Reward rejected",
     referral_settings_updated: "Settings updated",
+    referral_ambassador_saved: "Ambassador saved",
+    referral_ambassador_updated: "Ambassador updated",
   };
   return labels[action] || action.replace(/_/g, " ");
 }
@@ -187,6 +243,18 @@ export default function ReferralOperationsDashboard() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [rewards, setRewards] = useState<RewardRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [ambassadors, setAmbassadors] = useState<AmbassadorRow[]>([]);
+  const [ambassadorSummary, setAmbassadorSummary] =
+    useState<AmbassadorSummary | null>(null);
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidateResults, setCandidateResults] = useState<AmbassadorCandidate[]>([]);
+  const [selectedCandidate, setSelectedCandidate] =
+    useState<AmbassadorCandidate | null>(null);
+  const [ambassadorForm, setAmbassadorForm] = useState({
+    contractTargetReferrals: 10,
+    contractTargetSubscriptions: 2,
+    notes: "",
+  });
   const [settings, setSettings] = useState<ReferralSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -252,23 +320,31 @@ export default function ReferralOperationsDashboard() {
     setLoading(true);
     setMessage(null);
     try {
-      const [overviewResponse, rewardsResponse, auditResponse] = await Promise.all([
+      const [overviewResponse, rewardsResponse, auditResponse, ambassadorResponse] = await Promise.all([
         authedFetch("/api/admin/referrals/overview"),
         authedFetch("/api/admin/referrals/rewards?limit=50"),
         authedFetch("/api/admin/referrals/audit?limit=50"),
+        authedFetch("/api/admin/referrals/ambassadors"),
       ]);
 
       if (!overviewResponse.ok) throw new Error("Unable to load referral overview.");
       if (!rewardsResponse.ok) throw new Error("Unable to load referral rewards.");
       if (!auditResponse.ok) throw new Error("Unable to load referral audit logs.");
+      if (!ambassadorResponse.ok) throw new Error("Unable to load ambassadors.");
 
       const overviewPayload = (await overviewResponse.json()) as OverviewPayload;
       const rewardsPayload = (await rewardsResponse.json()) as { rewards: RewardRow[] };
       const auditPayload = (await auditResponse.json()) as { audit_logs: AuditLogRow[] };
+      const ambassadorPayload = (await ambassadorResponse.json()) as {
+        ambassadors: AmbassadorRow[];
+        summary: AmbassadorSummary;
+      };
       setOverview(overviewPayload);
       setSettings(overviewPayload.settings);
       setRewards(rewardsPayload.rewards || []);
       setAuditLogs(auditPayload.audit_logs || []);
+      setAmbassadors(ambassadorPayload.ambassadors || []);
+      setAmbassadorSummary(ambassadorPayload.summary || null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load referrals.");
     } finally {
@@ -322,6 +398,83 @@ export default function ReferralOperationsDashboard() {
       setMessage(`Reward ${action} action completed.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : `Unable to ${action} reward.`);
+    }
+  };
+
+  const searchCandidates = async () => {
+    setMessage(null);
+    try {
+      const response = await authedFetch(
+        `/api/admin/referrals/ambassadors/candidates?search=${encodeURIComponent(candidateSearch)}`
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Unable to search users.");
+      setCandidateResults(payload.users || []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to search users.");
+    }
+  };
+
+  const saveAmbassador = async () => {
+    if (!selectedCandidate) {
+      setMessage("Select a user before saving an Ambassador.");
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await authedFetch("/api/admin/referrals/ambassadors", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: selectedCandidate.id,
+          status: "active",
+          ...ambassadorForm,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to save Ambassador.");
+      }
+      setAmbassadors(payload.ambassadors || []);
+      setAmbassadorSummary(payload.summary || null);
+      setSelectedCandidate(null);
+      setCandidateResults([]);
+      setCandidateSearch("");
+      setMessage("Ambassador saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save Ambassador.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateAmbassadorStatus = async (
+    ambassador: AmbassadorRow,
+    status: AmbassadorRow["status"]
+  ) => {
+    setMessage(null);
+    try {
+      const response = await authedFetch("/api/admin/referrals/ambassadors", {
+        method: "PATCH",
+        body: JSON.stringify({
+          ambassadorId: ambassador.id,
+          status,
+          contractTargetReferrals: ambassador.contract_target_referrals,
+          contractTargetSubscriptions: ambassador.contract_target_subscriptions,
+          startsAt: ambassador.starts_at,
+          endsAt: ambassador.ends_at,
+          notes: ambassador.notes,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to update Ambassador.");
+      }
+      setAmbassadors(payload.ambassadors || []);
+      setAmbassadorSummary(payload.summary || null);
+      setMessage("Ambassador status updated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update Ambassador.");
     }
   };
 
@@ -701,6 +854,296 @@ export default function ReferralOperationsDashboard() {
                 )}
               </tbody>
             </table>
+          </div>
+        </section>
+      )}
+
+      {activeSection === "ambassadors" && (
+        <section className="space-y-6">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ["Ambassadors", ambassadorSummary?.total || 0, Award, "Tracked users"],
+              ["Active", ambassadorSummary?.active || 0, UserCheck, "Currently contracted"],
+              ["Referrals", ambassadorSummary?.totalReferrals || 0, Users, "From ambassadors"],
+              [
+                "Subscriptions",
+                ambassadorSummary?.totalSubscriptionConversions || 0,
+                Target,
+                "Converted referrals",
+              ],
+            ].map(([label, value, Icon, helper]) => {
+              const TypedIcon = Icon as typeof Award;
+              return (
+                <div key={label as string} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label as string}</p>
+                      <p className="mt-2 text-2xl font-bold text-gray-950">{String(value)}</p>
+                      <p className="mt-1 text-xs text-gray-500">{helper as string}</p>
+                    </div>
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#1f419a]">
+                      <TypedIcon className="h-4 w-4" />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 px-5 py-4">
+                <h2 className="font-semibold text-gray-950">Ambassador performance</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Track selected users against referral and subscription targets.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-100 text-sm">
+                  <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                    <tr>
+                      <th className="px-5 py-3">Ambassador</th>
+                      <th className="px-5 py-3">Code</th>
+                      <th className="px-5 py-3">Referral target</th>
+                      <th className="px-5 py-3">Subscription target</th>
+                      <th className="px-5 py-3">Credits</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {ambassadors.length === 0 ? (
+                      <tr>
+                        <td className="px-5 py-10 text-center text-gray-500" colSpan={7}>
+                          No Ambassadors have been added yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      ambassadors.map((ambassador) => (
+                        <tr key={ambassador.id} className="hover:bg-gray-50/70">
+                          <td className="px-5 py-4">
+                            <p className="font-semibold text-gray-950">
+                              {ambassador.account?.display_name ||
+                                ambassador.account?.email ||
+                                "User"}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {ambassador.account?.email || "No email"}
+                            </p>
+                          </td>
+                          <td className="px-5 py-4 font-medium text-gray-700">
+                            {ambassador.referral_code || "No code"}
+                          </td>
+                          <td className="px-5 py-4">
+                            <div className="min-w-40">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="font-semibold text-gray-950">
+                                  {ambassador.performance.referrals} / {ambassador.contract_target_referrals}
+                                </span>
+                                <span className="text-xs font-semibold text-blue-700">
+                                  {ambassador.performance.referral_target_progress}%
+                                </span>
+                              </div>
+                              <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+                                <div
+                                  className="h-full rounded-full bg-[#1f419a]"
+                                  style={{
+                                    width: `${ambassador.performance.referral_target_progress}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4">
+                            <div className="min-w-40">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="font-semibold text-gray-950">
+                                  {ambassador.performance.subscription_conversions} / {ambassador.contract_target_subscriptions}
+                                </span>
+                                <span className="text-xs font-semibold text-blue-700">
+                                  {ambassador.performance.subscription_target_progress}%
+                                </span>
+                              </div>
+                              <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+                                <div
+                                  className="h-full rounded-full bg-green-500"
+                                  style={{
+                                    width: `${ambassador.performance.subscription_target_progress}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 font-semibold text-gray-950">
+                            {ambassador.performance.approved_credits}
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1 ${
+                              ambassador.status === "active"
+                                ? "bg-green-50 text-green-700 ring-green-200"
+                                : ambassador.status === "paused"
+                                  ? "bg-amber-50 text-amber-700 ring-amber-200"
+                                  : "bg-gray-50 text-gray-600 ring-gray-200"
+                            }`}>
+                              {ambassador.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4">
+                            {canManageSettings ? (
+                              <select
+                                value={ambassador.status}
+                                onChange={(event) =>
+                                  updateAmbassadorStatus(
+                                    ambassador,
+                                    event.target.value as AmbassadorRow["status"]
+                                  )
+                                }
+                                className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-xs font-semibold text-gray-700 outline-none focus:border-[#1f419a]"
+                              >
+                                <option value="active">Active</option>
+                                <option value="paused">Paused</option>
+                                <option value="ended">Ended</option>
+                              </select>
+                            ) : (
+                              <span className="text-xs text-gray-400">No action</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <aside className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+              <h2 className="font-semibold text-gray-950">Add Ambassador</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Select an existing MatchIndeed user and set contract targets.
+              </p>
+              <div className="mt-5 space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">
+                    Search user
+                  </label>
+                  <div className="mt-1 flex gap-2">
+                    <input
+                      value={candidateSearch}
+                      onChange={(event) => setCandidateSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          searchCandidates();
+                        }
+                      }}
+                      className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
+                      placeholder="Name or email"
+                    />
+                    <button
+                      onClick={searchCandidates}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+                      type="button"
+                    >
+                      <Search className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {candidateResults.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-100">
+                    {candidateResults.map((candidate) => {
+                      const selected = selectedCandidate?.id === candidate.id;
+                      return (
+                        <button
+                          key={candidate.id}
+                          onClick={() => setSelectedCandidate(candidate)}
+                          className={`block w-full border-b border-gray-100 px-3 py-3 text-left last:border-b-0 ${
+                            selected ? "bg-blue-50" : "hover:bg-gray-50"
+                          }`}
+                          type="button"
+                        >
+                          <p className="text-sm font-semibold text-gray-950">
+                            {candidate.display_name || candidate.email || "User"}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {candidate.email || "No email"}
+                          </p>
+                          {candidate.ambassador_status && (
+                            <span className="mt-2 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                              Existing Ambassador: {candidate.ambassador_status}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    Referral target
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={ambassadorForm.contractTargetReferrals}
+                    onChange={(event) =>
+                      setAmbassadorForm({
+                        ...ambassadorForm,
+                        contractTargetReferrals: Number(event.target.value),
+                      })
+                    }
+                    className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    Subscription target
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={ambassadorForm.contractTargetSubscriptions}
+                    onChange={(event) =>
+                      setAmbassadorForm({
+                        ...ambassadorForm,
+                        contractTargetSubscriptions: Number(event.target.value),
+                      })
+                    }
+                    className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700">
+                    Contract notes
+                  </span>
+                  <textarea
+                    value={ambassadorForm.notes}
+                    onChange={(event) =>
+                      setAmbassadorForm({
+                        ...ambassadorForm,
+                        notes: event.target.value,
+                      })
+                    }
+                    rows={3}
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#1f419a]"
+                    placeholder="Optional target details"
+                  />
+                </label>
+
+                <button
+                  onClick={saveAmbassador}
+                  disabled={!canManageSettings || saving}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#1f419a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#17357f] disabled:cursor-not-allowed disabled:opacity-50"
+                  type="button"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Award className="h-4 w-4" />}
+                  Save Ambassador
+                </button>
+              </div>
+            </aside>
           </div>
         </section>
       )}
