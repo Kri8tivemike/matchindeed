@@ -9,6 +9,7 @@ import {
   Gift,
   History,
   LogOut,
+  Rocket,
   Settings,
   Shield,
   SlidersHorizontal,
@@ -68,6 +69,11 @@ function GrowthManagerSidebarContent({
       section: "audit",
       label: "Audit Trail",
       Icon: History,
+    },
+    {
+      section: "rollout",
+      label: "Rollout",
+      Icon: Rocket,
     },
   ];
 

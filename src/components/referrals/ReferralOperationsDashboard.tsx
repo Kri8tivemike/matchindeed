@@ -10,6 +10,7 @@ import {
   Gift,
   Loader2,
   RefreshCw,
+  Rocket,
   Save,
   Shield,
   UserCheck,
@@ -31,6 +32,7 @@ type OverviewPayload = {
     analytics_configured: boolean;
     steps: FunnelStep[];
   };
+  rollout: RolloutStatus;
   settings: ReferralSettings;
   admin: {
     permissions: string[];
@@ -75,7 +77,25 @@ type FunnelStep = {
   helper: string;
 };
 
-type DashboardSection = "overview" | "funnel" | "rewards" | "settings" | "audit";
+type RolloutCheck = {
+  key: string;
+  label: string;
+  status: "ready" | "warning" | "blocked";
+  detail: string;
+};
+
+type RolloutStatus = {
+  status: "setup_required" | "pilot_ready" | "pilot_monitoring";
+  readiness_percent: number;
+  checks: RolloutCheck[];
+  pilot: {
+    referral_target: number;
+    reward_review_window_days: number;
+    current_referrals: number;
+  };
+};
+
+type DashboardSection = "overview" | "funnel" | "rewards" | "settings" | "audit" | "rollout";
 
 const VALID_DASHBOARD_SECTIONS: DashboardSection[] = [
   "overview",
@@ -83,6 +103,7 @@ const VALID_DASHBOARD_SECTIONS: DashboardSection[] = [
   "rewards",
   "settings",
   "audit",
+  "rollout",
 ];
 
 function milestoneLabel(value: string) {
@@ -101,6 +122,24 @@ function statusClass(status: string) {
 function riskClass(riskLevel: string) {
   if (riskLevel === "high") return "bg-red-50 text-red-700 ring-red-200";
   if (riskLevel === "medium") return "bg-amber-50 text-amber-700 ring-amber-200";
+  return "bg-green-50 text-green-700 ring-green-200";
+}
+
+function rolloutStatusLabel(status: RolloutStatus["status"]) {
+  if (status === "setup_required") return "Setup required";
+  if (status === "pilot_monitoring") return "Pilot monitoring";
+  return "Pilot ready";
+}
+
+function rolloutStatusClass(status: RolloutStatus["status"]) {
+  if (status === "setup_required") return "bg-amber-50 text-amber-700 ring-amber-200";
+  if (status === "pilot_monitoring") return "bg-blue-50 text-blue-700 ring-blue-200";
+  return "bg-green-50 text-green-700 ring-green-200";
+}
+
+function rolloutCheckClass(status: RolloutCheck["status"]) {
+  if (status === "blocked") return "bg-red-50 text-red-700 ring-red-200";
+  if (status === "warning") return "bg-amber-50 text-amber-700 ring-amber-200";
   return "bg-green-50 text-green-700 ring-green-200";
 }
 
@@ -330,6 +369,134 @@ export default function ReferralOperationsDashboard() {
         <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
           {message}
         </div>
+      )}
+
+      {overview && activeSection === "rollout" && (
+        <section className="space-y-6">
+          <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center">
+              <div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-[#1f419a]">
+                    <Rocket className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h2 className="font-semibold text-gray-950">Controlled rollout</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Pilot readiness for referral rewards, monitoring, and review controls.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Rollout status
+                    </p>
+                    <p className="mt-2 text-2xl font-bold text-gray-950">
+                      {overview.rollout.readiness_percent}%
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${rolloutStatusClass(overview.rollout.status)}`}>
+                    {rolloutStatusLabel(overview.rollout.status)}
+                  </span>
+                </div>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
+                  <div
+                    className="h-full rounded-full bg-[#1f419a]"
+                    style={{ width: `${overview.rollout.readiness_percent}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 px-5 py-4">
+                <h3 className="font-semibold text-gray-950">Readiness checks</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Operational checks before expanding referral rewards beyond pilot users.
+                </p>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {overview.rollout.checks.map((check) => (
+                  <div key={check.key} className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_110px] sm:items-center">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-950">{check.label}</p>
+                      <p className="mt-1 text-sm text-gray-500">{check.detail}</p>
+                    </div>
+                    <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 sm:justify-self-end ${rolloutCheckClass(check.status)}`}>
+                      {check.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                <h3 className="font-semibold text-gray-950">Pilot window</h3>
+                <div className="mt-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-sm text-gray-500">Pilot referrals</span>
+                    <span className="text-sm font-semibold text-gray-950">
+                      {overview.rollout.pilot.current_referrals} / {overview.rollout.pilot.referral_target}
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                    <div
+                      className="h-full rounded-full bg-[#1f419a]"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.round(
+                            (overview.rollout.pilot.current_referrals /
+                              Math.max(overview.rollout.pilot.referral_target, 1)) *
+                              100
+                          )
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Review window
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-gray-950">
+                      {overview.rollout.pilot.reward_review_window_days} days
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                <h3 className="font-semibold text-gray-950">Launch guardrails</h3>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">Pending rewards</span>
+                    <span className="font-semibold text-gray-950">
+                      {overview.metrics.pending_rewards}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">Risk flags</span>
+                    <span className="font-semibold text-gray-950">
+                      {overview.metrics.risk_flags}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">Credits awarded</span>
+                    <span className="font-semibold text-gray-950">
+                      {overview.metrics.approved_credits}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       )}
 
       {overview && activeSection === "overview" && (
