@@ -247,6 +247,22 @@ function extractTikTokPixelId(value: string) {
   return trimmed;
 }
 
+function hasValidMetaPixelId(value: string) {
+  return /^[0-9]{5,30}$/.test(value.trim());
+}
+
+function hasValidTikTokPixelId(value: string) {
+  return /^[A-Za-z0-9_-]{8,80}$/.test(value.trim());
+}
+
+function hasValidGoogleTagId(value: string) {
+  return /^(G|AW|GT|DC)-[A-Za-z0-9_-]{3,80}$/.test(value.trim());
+}
+
+function hasValidGoogleTagManagerContainerId(value: string) {
+  return /^GTM-[A-Za-z0-9_-]{3,80}$/.test(value.trim());
+}
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -1721,15 +1737,23 @@ export default function ReferralOperationsDashboard() {
                     <span className="text-sm font-medium text-gray-700">
                       Meta / Facebook Pixel ID
                     </span>
-                    <input
-                      disabled={!canManageSettings}
-                      value={settings.metaPixelId}
-                      onChange={(event) =>
-                        setSettings({ ...settings, metaPixelId: event.target.value })
-                      }
-                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
-                      placeholder="Example: 123456789012345"
-                    />
+                    <div className="relative mt-1">
+                      <input
+                        disabled={!canManageSettings}
+                        value={settings.metaPixelId}
+                        onChange={(event) =>
+                          setSettings({ ...settings, metaPixelId: event.target.value })
+                        }
+                        className="h-10 w-full rounded-lg border border-gray-200 px-3 pr-10 text-sm outline-none focus:border-[#1f419a]"
+                        placeholder="Example: 123456789012345"
+                      />
+                      {hasValidMetaPixelId(settings.metaPixelId) && (
+                        <CheckCircle2
+                          aria-label="Meta Pixel ID format verified"
+                          className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-emerald-600"
+                        />
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">
                       From Meta Events Manager after creating the website pixel/dataset.
                     </p>
@@ -1747,18 +1771,26 @@ export default function ReferralOperationsDashboard() {
                     <span className="text-sm font-medium text-gray-700">
                       TikTok Pixel ID
                     </span>
-                    <input
-                      disabled={!canManageSettings}
-                      value={settings.tiktokPixelId}
-                      onChange={(event) =>
-                        setSettings({
-                          ...settings,
-                          tiktokPixelId: extractTikTokPixelId(event.target.value),
-                        })
-                      }
-                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
-                      placeholder="Example: D8HF70RC77UE8A9K664G"
-                    />
+                    <div className="relative mt-1">
+                      <input
+                        disabled={!canManageSettings}
+                        value={settings.tiktokPixelId}
+                        onChange={(event) =>
+                          setSettings({
+                            ...settings,
+                            tiktokPixelId: extractTikTokPixelId(event.target.value),
+                          })
+                        }
+                        className="h-10 w-full rounded-lg border border-gray-200 px-3 pr-10 text-sm outline-none focus:border-[#1f419a]"
+                        placeholder="Example: D8HF70RC77UE8A9K664G"
+                      />
+                      {hasValidTikTokPixelId(settings.tiktokPixelId) && (
+                        <CheckCircle2
+                          aria-label="TikTok Pixel ID format verified"
+                          className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-emerald-600"
+                        />
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">
                       Paste the Pixel ID only. If you paste the full TikTok base code, the dashboard will extract the ID from ttq.load(...).
                     </p>
@@ -1776,15 +1808,23 @@ export default function ReferralOperationsDashboard() {
                     <span className="text-sm font-medium text-gray-700">
                       Google tag ID
                     </span>
-                    <input
-                      disabled={!canManageSettings}
-                      value={settings.googleTagId}
-                      onChange={(event) =>
-                        setSettings({ ...settings, googleTagId: event.target.value })
-                      }
-                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
-                      placeholder="Example: G-XXXXXXXX or AW-XXXXXXXX"
-                    />
+                    <div className="relative mt-1">
+                      <input
+                        disabled={!canManageSettings}
+                        value={settings.googleTagId}
+                        onChange={(event) =>
+                          setSettings({ ...settings, googleTagId: event.target.value })
+                        }
+                        className="h-10 w-full rounded-lg border border-gray-200 px-3 pr-10 text-sm outline-none focus:border-[#1f419a]"
+                        placeholder="Example: G-XXXXXXXX or AW-XXXXXXXX"
+                      />
+                      {hasValidGoogleTagId(settings.googleTagId) && (
+                        <CheckCircle2
+                          aria-label="Google tag ID format verified"
+                          className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-emerald-600"
+                        />
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">
                       Use a GA4 Measurement ID or Google Ads tag ID for website measurement.
                     </p>
@@ -1812,18 +1852,28 @@ export default function ReferralOperationsDashboard() {
                     <span className="text-sm font-medium text-gray-700">
                       Google Tag Manager container ID
                     </span>
-                    <input
-                      disabled={!canManageSettings}
-                      value={settings.googleTagManagerContainerId}
-                      onChange={(event) =>
-                        setSettings({
-                          ...settings,
-                          googleTagManagerContainerId: event.target.value,
-                        })
-                      }
-                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
-                      placeholder="Example: GTM-XXXXXXX"
-                    />
+                    <div className="relative mt-1">
+                      <input
+                        disabled={!canManageSettings}
+                        value={settings.googleTagManagerContainerId}
+                        onChange={(event) =>
+                          setSettings({
+                            ...settings,
+                            googleTagManagerContainerId: event.target.value,
+                          })
+                        }
+                        className="h-10 w-full rounded-lg border border-gray-200 px-3 pr-10 text-sm outline-none focus:border-[#1f419a]"
+                        placeholder="Example: GTM-XXXXXXX"
+                      />
+                      {hasValidGoogleTagManagerContainerId(
+                        settings.googleTagManagerContainerId
+                      ) && (
+                        <CheckCircle2
+                          aria-label="Google Tag Manager container ID format verified"
+                          className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-emerald-600"
+                        />
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">
                       Optional central container for managing Meta, TikTok, and Google tags.
                     </p>
