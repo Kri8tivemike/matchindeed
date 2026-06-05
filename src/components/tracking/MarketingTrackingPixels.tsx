@@ -184,6 +184,7 @@ export default function MarketingTrackingPixels() {
                 n=document.createElement("script");n.type="text/javascript",n.async=!0,n.src=r+"?sdkid="+e+"&lib="+t;
                 e=document.getElementsByTagName("script")[0];e.parentNode.insertBefore(n,e)};
                 ttq.load('${config.tiktokPixelId}');
+                ttq.page();
               }(window, document, 'ttq');
             `,
           }}

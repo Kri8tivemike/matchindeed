@@ -192,6 +192,9 @@ const VALID_DASHBOARD_SECTIONS: DashboardSection[] = [
   "rollout",
 ];
 
+const TIKTOK_EVENTS_MANAGER_URL =
+  "https://ads.tiktok.com/i18n/events_manager/datasource/list?aadvid=7647568381838639120&org_id=7647568355013656592&open_from=ttam_nav";
+
 function milestoneLabel(value: string) {
   if (value === "profile_preferences_completed") return "Profile + preferences";
   if (value === "first_subscription_purchased") return "First subscription";
@@ -231,6 +234,17 @@ function rolloutCheckClass(status: RolloutCheck["status"]) {
 
 function stepWidth(step: FunnelStep, maxValue: number) {
   return `${Math.max(5, Math.round((step.value / maxValue) * 100))}%`;
+}
+
+function extractTikTokPixelId(value: string) {
+  const trimmed = value.trim();
+  const loadMatch = trimmed.match(/ttq\.load\(\s*['"]([A-Za-z0-9_-]{8,80})['"]\s*\)/);
+  if (loadMatch?.[1]) return loadMatch[1];
+
+  const sdkMatch = trimmed.match(/[?&]sdkid=([A-Za-z0-9_-]{8,80})/);
+  if (sdkMatch?.[1]) return sdkMatch[1];
+
+  return trimmed;
 }
 
 function formatDateTime(value: string) {
@@ -1737,21 +1751,24 @@ export default function ReferralOperationsDashboard() {
                       disabled={!canManageSettings}
                       value={settings.tiktokPixelId}
                       onChange={(event) =>
-                        setSettings({ ...settings, tiktokPixelId: event.target.value })
+                        setSettings({
+                          ...settings,
+                          tiktokPixelId: extractTikTokPixelId(event.target.value),
+                        })
                       }
                       className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
-                      placeholder="Example: C123ABC456DEF"
+                      placeholder="Example: D8HF70RC77UE8A9K664G"
                     />
                     <p className="mt-1 text-xs text-gray-500">
-                      From TikTok Ads Manager: Tools &gt; Events &gt; Manage Web Events.
+                      Paste the Pixel ID only. If you paste the full TikTok base code, the dashboard will extract the ID from ttq.load(...).
                     </p>
                     <a
-                      href="https://ads.tiktok.com/"
+                      href={TIKTOK_EVENTS_MANAGER_URL}
                       target="_blank"
                       rel="noreferrer"
                       className="mt-2 inline-flex text-xs font-semibold text-[#1f419a] hover:text-[#17357f]"
                     >
-                      Open TikTok Ads Manager
+                      Open client TikTok Events Manager
                     </a>
                   </label>
 
