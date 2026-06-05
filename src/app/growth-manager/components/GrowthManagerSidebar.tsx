@@ -46,46 +46,66 @@ function GrowthManagerSidebarContent({
     section === "overview"
       ? GROWTH_MANAGER_DASHBOARD_PATH
       : `${GROWTH_MANAGER_DASHBOARD_PATH}?section=${section}`;
-  const referralNavItems = [
+  const referralNavGroups = [
     {
-      section: "overview",
-      label: "Dashboard",
-      Icon: BarChart3,
+      label: "Overview",
+      items: [
+        {
+          section: "overview",
+          label: "Dashboard",
+          Icon: BarChart3,
+        },
+        {
+          section: "funnel",
+          label: "Product Funnel",
+          Icon: UserCheck,
+        },
+      ],
     },
     {
-      section: "funnel",
-      label: "Product Funnel",
-      Icon: UserCheck,
+      label: "Operations",
+      items: [
+        {
+          section: "ambassadors",
+          label: "Ambassadors",
+          Icon: Award,
+        },
+        {
+          section: "rewards",
+          label: "Reward Queue",
+          Icon: Gift,
+        },
+      ],
     },
     {
-      section: "rewards",
-      label: "Reward Queue",
-      Icon: Gift,
+      label: "Configuration",
+      items: [
+        {
+          section: "tracking",
+          label: "Tracking Pixels",
+          Icon: MousePointerClick,
+        },
+        {
+          section: "settings",
+          label: "Reward Settings",
+          Icon: SlidersHorizontal,
+        },
+      ],
     },
     {
-      section: "ambassadors",
-      label: "Ambassadors",
-      Icon: Award,
-    },
-    {
-      section: "settings",
-      label: "Reward Settings",
-      Icon: SlidersHorizontal,
-    },
-    {
-      section: "tracking",
-      label: "Tracking Pixels",
-      Icon: MousePointerClick,
-    },
-    {
-      section: "audit",
-      label: "Audit Trail",
-      Icon: History,
-    },
-    {
-      section: "rollout",
-      label: "Rollout",
-      Icon: Rocket,
+      label: "Governance",
+      items: [
+        {
+          section: "rollout",
+          label: "Rollout",
+          Icon: Rocket,
+        },
+        {
+          section: "audit",
+          label: "Audit Trail",
+          Icon: History,
+        },
+      ],
     },
   ];
 
@@ -122,30 +142,32 @@ function GrowthManagerSidebarContent({
       </div>
 
       <nav className="flex-1 space-y-5 overflow-y-auto p-4">
-        <div className="space-y-1.5">
-          <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-            Referral System
-          </p>
-          {referralNavItems.map(({ section, label, Icon }) => {
-            const isActive =
-              pathname === GROWTH_MANAGER_DASHBOARD_PATH &&
-              currentSection === section;
-            return (
-              <Link
-                key={section}
-                href={sectionHref(section)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-[#1f419a] text-white"
-                    : "text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                <span>{label}</span>
-              </Link>
-            );
-          })}
-        </div>
+        {referralNavGroups.map((group) => (
+          <div key={group.label} className="space-y-1.5">
+            <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+              {group.label}
+            </p>
+            {group.items.map(({ section, label, Icon }) => {
+              const isActive =
+                pathname === GROWTH_MANAGER_DASHBOARD_PATH &&
+                currentSection === section;
+              return (
+                <Link
+                  key={section}
+                  href={sectionHref(section)}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                    isActive
+                      ? "bg-[#1f419a] text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  <Icon className="h-5 w-5" />
+                  <span>{label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="space-y-1 border-t border-gray-200 p-4">
