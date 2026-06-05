@@ -23,6 +23,15 @@ import { supabase } from "@/lib/supabase";
 import { normalizeLookingForOption } from "@/lib/matching/interest-preference";
 
 type NextLinkProps = ComponentProps<typeof NextLink>;
+type SignupAttribution = {
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
+  landing_path?: string;
+  signup_source?: string;
+};
 
 function Link({ prefetch, ...props }: NextLinkProps) {
   return <NextLink {...props} prefetch={prefetch ?? false} />;
@@ -31,6 +40,57 @@ function Link({ prefetch, ...props }: NextLinkProps) {
 function isEmailConfirmationError(message: string) {
   const normalized = message.toLowerCase();
   return normalized.includes("email not confirmed") || normalized.includes("email_not_confirmed");
+}
+
+const ATTRIBUTION_KEYS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+] as const;
+
+function cleanAttributionValue(value: string | null) {
+  return (value || "").trim().slice(0, 120);
+}
+
+function readSignupAttribution() {
+  if (typeof window === "undefined") return {};
+
+  const params = new URLSearchParams(window.location.search);
+  const storedRaw = sessionStorage.getItem("matchindeedSignupAttribution");
+  let stored: SignupAttribution = {};
+
+  if (storedRaw) {
+    try {
+      stored = JSON.parse(storedRaw) as SignupAttribution;
+    } catch {
+      stored = {};
+    }
+  }
+
+  const attribution: SignupAttribution = {
+    ...stored,
+    landing_path: stored.landing_path || window.location.pathname,
+  };
+
+  for (const key of ATTRIBUTION_KEYS) {
+    const value = cleanAttributionValue(params.get(key));
+    if (value) attribution[key] = value;
+  }
+
+  const ref = cleanAttributionValue(params.get("ref"));
+  if (ref) {
+    attribution.signup_source = attribution.utm_source || "referral_link";
+  } else if (attribution.utm_source) {
+    attribution.signup_source = attribution.utm_source;
+  }
+
+  sessionStorage.setItem(
+    "matchindeedSignupAttribution",
+    JSON.stringify(attribution)
+  );
+  return attribution;
 }
 
 export default function RegisterPage() {
@@ -45,6 +105,7 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [referralCode, setReferralCode] = useState("");
+  const [signupAttribution, setSignupAttribution] = useState<SignupAttribution>({});
 
   const passwordValidation = useMemo(() => evaluatePassword(password), [password]);
 
@@ -60,6 +121,9 @@ export default function RegisterPage() {
     const searchPreferences = sessionStorage.getItem("searchPreferences");
     const referralFromUrl =
       new URLSearchParams(window.location.search).get("ref") || "";
+    const attribution = readSignupAttribution();
+    setSignupAttribution(attribution);
+
     if (referralFromUrl) {
       const normalizedReferral = referralFromUrl
         .trim()
@@ -134,6 +198,7 @@ export default function RegisterPage() {
           turnstileToken,
           initialLookingFor: initialLookingFor || "",
           referralCode: referralCode || undefined,
+          attribution: signupAttribution,
         }),
       });
 
@@ -146,6 +211,7 @@ export default function RegisterPage() {
         sessionStorage.removeItem("signupStartedFromLanding");
         sessionStorage.removeItem("searchPreferences");
         sessionStorage.removeItem("matchindeedReferralCode");
+        sessionStorage.removeItem("matchindeedSignupAttribution");
       }
 
       const { error: signInError } = await supabase.auth.signInWithPassword({

@@ -10,6 +10,7 @@ import {
   Gift,
   History,
   LogOut,
+  MousePointerClick,
   Rocket,
   Settings,
   Shield,
@@ -70,6 +71,11 @@ function GrowthManagerSidebarContent({
       section: "settings",
       label: "Reward Settings",
       Icon: SlidersHorizontal,
+    },
+    {
+      section: "tracking",
+      label: "Tracking Pixels",
+      Icon: MousePointerClick,
     },
     {
       section: "audit",

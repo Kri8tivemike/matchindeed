@@ -14,6 +14,74 @@ function percentage(numerator: number, denominator: number) {
   return Math.round((numerator / denominator) * 100);
 }
 
+function getAttributionValue(
+  metadata: Record<string, unknown> | null | undefined,
+  key: string
+) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function formatSourceLabel(value: string | null | undefined) {
+  if (!value) return "Direct / unknown";
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function summarizeReferralSources(
+  referrals: Array<{ source: string | null; metadata: Record<string, unknown> | null }>
+) {
+  const counts = new Map<
+    string,
+    {
+      source: string;
+      label: string;
+      count: number;
+      campaigns: Map<string, number>;
+    }
+  >();
+
+  for (const referral of referrals) {
+    const source =
+      getAttributionValue(referral.metadata, "utm_source") ||
+      referral.source ||
+      "direct";
+    const campaign = getAttributionValue(referral.metadata, "utm_campaign");
+    const key = source.toLowerCase();
+    const current =
+      counts.get(key) ||
+      {
+        source,
+        label: formatSourceLabel(source),
+        count: 0,
+        campaigns: new Map<string, number>(),
+      };
+
+    current.count += 1;
+    if (campaign) {
+      current.campaigns.set(campaign, (current.campaigns.get(campaign) || 0) + 1);
+    }
+    counts.set(key, current);
+  }
+
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+    .map((item) => {
+      const topCampaign = [...item.campaigns.entries()].sort(
+        (a, b) => b[1] - a[1]
+      )[0]?.[0];
+
+      return {
+        source: item.source,
+        label: item.label,
+        count: item.count,
+        top_campaign: topCampaign || null,
+      };
+    });
+}
+
 function buildRolloutStatus(input: {
   totalReferrals: number;
   activeCodes: number;
@@ -112,6 +180,7 @@ export async function GET(request: NextRequest) {
       { count: meetingRequested },
       { count: meetingBooked },
       { count: auditLogCount },
+      { data: referralAttributionRows },
       settings,
     ] = await Promise.all([
       supabase.from("referrals").select("*", { count: "exact", head: true }),
@@ -155,6 +224,7 @@ export async function GET(request: NextRequest) {
       supabase
         .from("referral_audit_logs")
         .select("*", { count: "exact", head: true }),
+      supabase.from("referrals").select("source, metadata"),
       getReferralSettings(supabase),
     ]);
 
@@ -257,6 +327,14 @@ export async function GET(request: NextRequest) {
         source: "database",
         analytics_configured: analyticsConfigured,
         steps: funnelSteps,
+      },
+      attribution: {
+        top_sources: summarizeReferralSources(
+          (referralAttributionRows || []) as Array<{
+            source: string | null;
+            metadata: Record<string, unknown> | null;
+          }>
+        ),
       },
       rollout: buildRolloutStatus({
         totalReferrals: totalReferrals || 0,

@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import type { CSSProperties } from "react";
+import { Suspense, type CSSProperties } from "react";
 import "./globals.css";
 import { IdleSessionTimeout } from "@/components/auth/IdleSessionTimeout";
 import { DevWarningFilter } from "@/components/DevWarningFilter";
 import { ToastProvider } from "@/components/ToastProvider";
 import FingerprintProvider from "@/components/FingerprintProvider";
+import MarketingTrackingPixels from "@/components/tracking/MarketingTrackingPixels";
 
 const fallbackFontVars = {
   "--font-geist-sans":
@@ -60,6 +61,9 @@ export default function RootLayout({
         <FingerprintProvider>
           <ToastProvider>
             <IdleSessionTimeout />
+            <Suspense fallback={null}>
+              <MarketingTrackingPixels />
+            </Suspense>
             {children}
           </ToastProvider>
         </FingerprintProvider>

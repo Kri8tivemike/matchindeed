@@ -12,6 +12,14 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+function normalizeTrackingId(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isValidTrackingId(value: string, pattern: RegExp) {
+  return value === "" || pattern.test(value);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const guard = await requireAdminAccess(request, {
@@ -51,6 +59,12 @@ export async function PATCH(request: NextRequest) {
       typeof body.autoApproveLowRiskRewards === "boolean"
         ? body.autoApproveLowRiskRewards
         : undefined;
+    const metaPixelId = normalizeTrackingId(body.metaPixelId);
+    const tiktokPixelId = normalizeTrackingId(body.tiktokPixelId);
+    const googleTagId = normalizeTrackingId(body.googleTagId);
+    const googleTagManagerContainerId = normalizeTrackingId(
+      body.googleTagManagerContainerId
+    );
 
     if (
       !Number.isInteger(profilePreferencesCompletedCredits) ||
@@ -64,10 +78,26 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    if (
+      !isValidTrackingId(metaPixelId, /^[0-9]{5,30}$/) ||
+      !isValidTrackingId(tiktokPixelId, /^[A-Za-z0-9_-]{8,80}$/) ||
+      !isValidTrackingId(googleTagId, /^(G|AW|GT|DC)-[A-Za-z0-9_-]{3,80}$/) ||
+      !isValidTrackingId(googleTagManagerContainerId, /^GTM-[A-Za-z0-9_-]{3,80}$/)
+    ) {
+      return NextResponse.json(
+        { error: "One or more tracking IDs are not in the expected format." },
+        { status: 400 }
+      );
+    }
+
     const settings = await updateReferralSettings(supabase, guard.context.userId, {
       profilePreferencesCompletedCredits,
       firstSubscriptionPurchasedCredits,
       autoApproveLowRiskRewards,
+      metaPixelId,
+      tiktokPixelId,
+      googleTagId,
+      googleTagManagerContainerId,
     });
 
     return NextResponse.json({ settings });
@@ -79,4 +109,3 @@ export async function PATCH(request: NextRequest) {
     );
   }
 }
-

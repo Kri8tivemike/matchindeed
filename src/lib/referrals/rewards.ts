@@ -78,6 +78,21 @@ async function getSettingValue(
   return data?.value ?? fallback;
 }
 
+function parseSettingString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function parseReferralSource(metadata?: Record<string, unknown>) {
+  const source =
+    typeof metadata?.signup_source === "string"
+      ? metadata.signup_source
+      : typeof metadata?.utm_source === "string"
+        ? metadata.utm_source
+        : "signup";
+
+  return source.trim().slice(0, 80) || "signup";
+}
+
 export async function getReferralRewardCredits(
   supabase: SupabaseClient,
   milestone: ReferralMilestone
@@ -98,6 +113,10 @@ export async function getReferralSettings(supabase: SupabaseClient) {
       "profile_preferences_completed_credits",
       "first_subscription_purchased_credits",
       "auto_approve_low_risk_rewards",
+      "meta_pixel_id",
+      "tiktok_pixel_id",
+      "google_tag_id",
+      "google_tag_manager_container_id",
     ]);
 
   if (error) throw error;
@@ -114,6 +133,12 @@ export async function getReferralSettings(supabase: SupabaseClient) {
     ),
     autoApproveLowRiskRewards:
       map.get("auto_approve_low_risk_rewards")?.value !== false,
+    metaPixelId: parseSettingString(map.get("meta_pixel_id")?.value),
+    tiktokPixelId: parseSettingString(map.get("tiktok_pixel_id")?.value),
+    googleTagId: parseSettingString(map.get("google_tag_id")?.value),
+    googleTagManagerContainerId: parseSettingString(
+      map.get("google_tag_manager_container_id")?.value
+    ),
   };
 }
 
@@ -124,6 +149,10 @@ export async function updateReferralSettings(
     profilePreferencesCompletedCredits: number;
     firstSubscriptionPurchasedCredits: number;
     autoApproveLowRiskRewards?: boolean;
+    metaPixelId?: string;
+    tiktokPixelId?: string;
+    googleTagId?: string;
+    googleTagManagerContainerId?: string;
   }
 ) {
   const before = await getReferralSettings(supabase);
@@ -136,6 +165,11 @@ export async function updateReferralSettings(
     DEFAULT_REWARD_CREDITS.first_subscription_purchased
   );
   const autoApprove = input.autoApproveLowRiskRewards ?? before.autoApproveLowRiskRewards;
+  const metaPixelId = input.metaPixelId ?? before.metaPixelId;
+  const tiktokPixelId = input.tiktokPixelId ?? before.tiktokPixelId;
+  const googleTagId = input.googleTagId ?? before.googleTagId;
+  const googleTagManagerContainerId =
+    input.googleTagManagerContainerId ?? before.googleTagManagerContainerId;
 
   const rows = [
     {
@@ -158,6 +192,37 @@ export async function updateReferralSettings(
       key: "auto_approve_low_risk_rewards",
       value: autoApprove,
       description: "Automatically approve low-risk referral rewards.",
+      updated_by: actorId,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      key: "meta_pixel_id",
+      value: metaPixelId,
+      description:
+        "Meta/Facebook Ads Manager Pixel ID used for website tracking setup.",
+      updated_by: actorId,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      key: "tiktok_pixel_id",
+      value: tiktokPixelId,
+      description: "TikTok Ads Manager Pixel ID used for website tracking setup.",
+      updated_by: actorId,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      key: "google_tag_id",
+      value: googleTagId,
+      description:
+        "Google tag ID for Google Ads or GA4 website measurement setup.",
+      updated_by: actorId,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      key: "google_tag_manager_container_id",
+      value: googleTagManagerContainerId,
+      description:
+        "Google Tag Manager container ID used to manage marketing tags.",
       updated_by: actorId,
       updated_at: new Date().toISOString(),
     },
@@ -225,6 +290,7 @@ export async function createReferralFromCode(
       referred_user_id: params.referredUserId,
       referral_code_id: codeRow.id,
       referral_code: codeRow.code,
+      source: parseReferralSource(params.metadata),
       metadata: params.metadata || {},
     })
     .select("id")
@@ -238,7 +304,11 @@ export async function createReferralFromCode(
   await supabase.from("referral_audit_logs").insert({
     referral_id: data?.id || null,
     action: "referral_created",
-    meta: { referral_code: codeRow.code },
+    meta: {
+      referral_code: codeRow.code,
+      source: parseReferralSource(params.metadata),
+      attribution: params.metadata?.attribution || null,
+    },
   });
 
   return { created: true, referralId: data?.id || null };

@@ -15,6 +15,7 @@ import {
   Save,
   Search,
   Shield,
+  SlidersHorizontal,
   Target,
   UserCheck,
   Users,
@@ -35,6 +36,9 @@ type OverviewPayload = {
     analytics_configured: boolean;
     steps: FunnelStep[];
   };
+  attribution?: {
+    top_sources: AttributionSource[];
+  };
   rollout: RolloutStatus;
   settings: ReferralSettings;
   admin: {
@@ -46,6 +50,10 @@ type ReferralSettings = {
   profilePreferencesCompletedCredits: number;
   firstSubscriptionPurchasedCredits: number;
   autoApproveLowRiskRewards: boolean;
+  metaPixelId: string;
+  tiktokPixelId: string;
+  googleTagId: string;
+  googleTagManagerContainerId: string;
 };
 
 type RewardRow = {
@@ -58,6 +66,28 @@ type RewardRow = {
   created_at: string;
   referrer?: { email: string | null; display_name: string | null } | null;
   referred_user?: { email: string | null; display_name: string | null } | null;
+  referral?: {
+    source: string | null;
+    metadata: ReferralAttribution | null;
+  } | null;
+};
+
+type ReferralAttribution = {
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
+  landing_path?: string;
+  signup_source?: string;
+  attribution?: ReferralAttribution;
+};
+
+type AttributionSource = {
+  source: string;
+  label: string;
+  count: number;
+  top_campaign: string | null;
 };
 
 type AuditLogRow = {
@@ -147,6 +177,7 @@ type DashboardSection =
   | "rewards"
   | "ambassadors"
   | "settings"
+  | "tracking"
   | "audit"
   | "rollout";
 
@@ -156,6 +187,7 @@ const VALID_DASHBOARD_SECTIONS: DashboardSection[] = [
   "rewards",
   "ambassadors",
   "settings",
+  "tracking",
   "audit",
   "rollout",
 ];
@@ -239,6 +271,32 @@ function auditSummary(log: AuditLogRow) {
   return "Referral activity recorded.";
 }
 
+function formatSourceName(value?: string | null) {
+  if (!value) return "Direct / unknown";
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getRewardAttribution(reward: RewardRow) {
+  const metadata = reward.referral?.metadata || {};
+  const nested =
+    metadata.attribution && typeof metadata.attribution === "object"
+      ? metadata.attribution
+      : {};
+  return {
+    source:
+      metadata.utm_source ||
+      nested.utm_source ||
+      metadata.signup_source ||
+      nested.signup_source ||
+      reward.referral?.source ||
+      null,
+    campaign: metadata.utm_campaign || nested.utm_campaign || null,
+    medium: metadata.utm_medium || nested.utm_medium || null,
+  };
+}
+
 export default function ReferralOperationsDashboard() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [rewards, setRewards] = useState<RewardRow[]>([]);
@@ -269,6 +327,13 @@ export default function ReferralOperationsDashboard() {
     permissions.has("*") || permissions.has("manage_referral_settings");
   const canManageRewards =
     permissions.has("*") || permissions.has("manage_referral_rewards");
+  const trackingSettings = settings || overview?.settings;
+  const configuredTrackingCount = [
+    trackingSettings?.metaPixelId,
+    trackingSettings?.tiktokPixelId,
+    trackingSettings?.googleTagId,
+    trackingSettings?.googleTagManagerContainerId,
+  ].filter(Boolean).length;
   const funnelSteps = useMemo(
     () => overview?.funnel.steps || [],
     [overview?.funnel.steps]
@@ -653,32 +718,411 @@ export default function ReferralOperationsDashboard() {
       )}
 
       {overview && activeSection === "overview" && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-          {[
-            ["Total referrals", overview.metrics.total_referrals, Users, "Invited users"],
-            ["Active codes", overview.metrics.active_codes, Gift, "Live referral codes"],
-            ["Pending rewards", overview.metrics.pending_rewards, Clock, "Need review"],
-            ["Approved rewards", overview.metrics.approved_rewards, CheckCircle2, "Completed decisions"],
-            ["Credits awarded", overview.metrics.approved_credits, CreditCard, "Booking credits"],
-            ["Risk flags", overview.metrics.risk_flags, Shield, "Fraud signals"],
-          ].map(([label, value, Icon, helper]) => {
-            const TypedIcon = Icon as typeof Gift;
-            return (
-              <div key={label as string} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label as string}</p>
+        <section className="space-y-6">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+            {[
+              ["Total referrals", overview.metrics.total_referrals, Users, "Invited users"],
+              ["Active codes", overview.metrics.active_codes, Gift, "Live referral codes"],
+              ["Pending rewards", overview.metrics.pending_rewards, Clock, "Need review"],
+              ["Approved rewards", overview.metrics.approved_rewards, CheckCircle2, "Completed decisions"],
+              ["Credits awarded", overview.metrics.approved_credits, CreditCard, "Booking credits"],
+              ["Risk flags", overview.metrics.risk_flags, Shield, "Fraud signals"],
+            ].map(([label, value, Icon, helper]) => {
+              const TypedIcon = Icon as typeof Gift;
+              return (
+                <div key={label as string} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label as string}</p>
+                      <p className="mt-2 text-2xl font-bold text-gray-950">{String(value)}</p>
+                      <p className="mt-1 text-xs text-gray-500">{helper as string}</p>
+                    </div>
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#1f419a]">
+                      <TypedIcon className="h-4 w-4" />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+                <div>
+                  <h2 className="font-semibold text-gray-950">Product funnel</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Follow the referral path from signup through subscription.
+                  </p>
+                </div>
+                <a
+                  href="/growth-manager/dashboard?section=funnel"
+                  className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
+                >
+                  View details
+                </a>
+              </div>
+              <div className="space-y-4 p-5">
+                {onboardingSteps.slice(0, 4).map((step) => (
+                  <div key={step.key} className="grid gap-3 sm:grid-cols-[170px_1fr_95px] sm:items-center">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">{step.label}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">{step.helper}</p>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full bg-[#1f419a]"
+                        style={{ width: stepWidth(step, maxFunnelValue) }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2 sm:justify-end">
+                      <span className="text-sm font-bold text-gray-950">{step.value.toLocaleString()}</span>
+                      {step.rate !== null && (
+                        <span className="min-w-12 rounded-full bg-blue-50 px-2 py-0.5 text-center text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+                          {step.rate}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+                <div>
+                  <h2 className="font-semibold text-gray-950">Reward queue</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Recent reward decisions and items needing action.
+                  </p>
+                </div>
+                <a
+                  href="/growth-manager/dashboard?section=rewards"
+                  className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
+                >
+                  Open queue
+                </a>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {rewards.length === 0 ? (
+                  <div className="px-5 py-8 text-sm text-gray-500">
+                    No referral rewards yet. New rewards will appear here when referred users complete eligible milestones.
+                  </div>
+                ) : (
+                  rewards.slice(0, 4).map((reward) => (
+                    <div key={reward.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_90px_80px] sm:items-center">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-950">
+                          {reward.referrer?.display_name || reward.referrer?.email || "Referrer"}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-gray-500">
+                          {milestoneLabel(reward.milestone)} for {reward.referred_user?.display_name || reward.referred_user?.email || "referred user"}
+                        </p>
+                      </div>
+                      <span className={`w-fit rounded-full px-2 py-1 text-xs font-semibold ring-1 ${statusClass(reward.status)}`}>
+                        {reward.status.replace(/_/g, " ")}
+                      </span>
+                      <span className="text-sm font-semibold text-gray-950 sm:text-right">
+                        +{reward.credits_awarded}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+                <div>
+                  <h2 className="font-semibold text-gray-950">Ambassador performance</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Track selected users against referral and subscription targets.
+                  </p>
+                </div>
+                <a
+                  href="/growth-manager/dashboard?section=ambassadors"
+                  className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
+                >
+                  Manage
+                </a>
+              </div>
+              <div className="grid gap-0 sm:grid-cols-4">
+                {[
+                  ["Ambassadors", ambassadorSummary?.total || 0, "Tracked users"],
+                  ["Active", ambassadorSummary?.active || 0, "Under contract"],
+                  ["Referrals", ambassadorSummary?.totalReferrals || 0, "Generated"],
+                  ["Subscriptions", ambassadorSummary?.totalSubscriptionConversions || 0, "Converted"],
+                ].map(([label, value, helper]) => (
+                  <div key={label as string} className="border-b border-gray-100 px-5 py-4 sm:border-b-0 sm:border-r sm:last:border-r-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {label as string}
+                    </p>
                     <p className="mt-2 text-2xl font-bold text-gray-950">{String(value)}</p>
                     <p className="mt-1 text-xs text-gray-500">{helper as string}</p>
                   </div>
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#1f419a]">
-                    <TypedIcon className="h-4 w-4" />
+                ))}
+              </div>
+              {ambassadors.length > 0 ? (
+                <div className="divide-y divide-gray-100 border-t border-gray-100">
+                  {ambassadors.slice(0, 3).map((ambassador) => (
+                    <div key={ambassador.id} className="grid gap-4 px-5 py-4 md:grid-cols-[minmax(0,1fr)_180px_180px_90px] md:items-center">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-gray-950">
+                          {ambassador.account?.display_name || ambassador.account?.email || "Ambassador"}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-gray-500">
+                          {ambassador.referral_code || "No referral code"}
+                        </p>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-gray-500">Referrals</span>
+                          <span className="font-semibold text-gray-950">
+                            {ambassador.performance.referrals} / {ambassador.contract_target_referrals}
+                          </span>
+                        </div>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+                          <div
+                            className="h-full rounded-full bg-[#1f419a]"
+                            style={{ width: `${ambassador.performance.referral_target_progress}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-gray-500">Subscriptions</span>
+                          <span className="font-semibold text-gray-950">
+                            {ambassador.performance.subscription_conversions} / {ambassador.contract_target_subscriptions}
+                          </span>
+                        </div>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+                          <div
+                            className="h-full rounded-full bg-green-500"
+                            style={{ width: `${ambassador.performance.subscription_target_progress}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className={`w-fit rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1 md:justify-self-end ${
+                        ambassador.status === "active"
+                          ? "bg-green-50 text-green-700 ring-green-200"
+                          : ambassador.status === "paused"
+                            ? "bg-amber-50 text-amber-700 ring-amber-200"
+                            : "bg-gray-50 text-gray-600 ring-gray-200"
+                      }`}>
+                        {ambassador.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="border-t border-gray-100 px-5 py-8">
+                  <p className="text-sm text-gray-500">
+                    No Ambassadors are being tracked yet. Add contracted users so Growth Managers can monitor target performance.
+                  </p>
+                  <a
+                    href="/growth-manager/dashboard?section=ambassadors"
+                    className="mt-4 inline-flex items-center justify-center rounded-lg bg-[#1f419a] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17357f]"
+                  >
+                    Add Ambassador
+                  </a>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-6">
+              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-gray-950">Rollout readiness</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {rolloutStatusLabel(overview.rollout.status)}
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${rolloutStatusClass(overview.rollout.status)}`}>
+                    {overview.rollout.readiness_percent}%
                   </span>
                 </div>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-100">
+                  <div
+                    className="h-full rounded-full bg-[#1f419a]"
+                    style={{ width: `${overview.rollout.readiness_percent}%` }}
+                  />
+                </div>
+                <div className="mt-4 space-y-3">
+                  {overview.rollout.checks.slice(0, 3).map((check) => (
+                    <div key={check.key} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-gray-600">{check.label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ring-1 ${rolloutCheckClass(check.status)}`}>
+                        {check.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <a
+                  href="/growth-manager/dashboard?section=rollout"
+                  className="mt-5 inline-flex w-full items-center justify-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Review rollout
+                </a>
               </div>
-            );
-          })}
-        </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-gray-950">Reward settings</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Current milestone credit rules.
+                    </p>
+                  </div>
+                  <SlidersHorizontal className="h-5 w-5 text-[#1f419a]" />
+                </div>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">Profile + preferences</span>
+                    <span className="font-semibold text-gray-950">
+                      {settings?.profilePreferencesCompletedCredits ?? overview.settings.profilePreferencesCompletedCredits} credits
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">First subscription</span>
+                    <span className="font-semibold text-gray-950">
+                      {settings?.firstSubscriptionPurchasedCredits ?? overview.settings.firstSubscriptionPurchasedCredits} credits
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500">Low-risk auto approve</span>
+                    <span className="font-semibold text-gray-950">
+                      {(settings?.autoApproveLowRiskRewards ?? overview.settings.autoApproveLowRiskRewards) ? "On" : "Off"}
+                    </span>
+                  </div>
+                </div>
+                <a
+                  href="/growth-manager/dashboard?section=settings"
+                  className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-[#1f419a] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17357f]"
+                >
+                  Edit settings
+                </a>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-gray-950">Tracking setup</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Ads and analytics IDs requested for Growth tracking.
+                    </p>
+                  </div>
+                  <BarChart3 className="h-5 w-5 text-[#1f419a]" />
+                </div>
+                <div className="mt-4 space-y-3 text-sm">
+                  {[
+                    ["Meta Pixel", trackingSettings?.metaPixelId],
+                    ["TikTok Pixel", trackingSettings?.tiktokPixelId],
+                    ["Google tag", trackingSettings?.googleTagId],
+                    ["GTM container", trackingSettings?.googleTagManagerContainerId],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex items-center justify-between gap-3">
+                      <span className="text-gray-500">{label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${
+                        value
+                          ? "bg-green-50 text-green-700 ring-green-200"
+                          : "bg-amber-50 text-amber-700 ring-amber-200"
+                      }`}>
+                        {value ? "Configured" : "Needed"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <a
+                  href="/growth-manager/dashboard?section=tracking"
+                  className="mt-5 inline-flex w-full items-center justify-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Configure tracking
+                </a>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-gray-950">Referral sources</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Top captured UTM/source channels from referred signups.
+                    </p>
+                  </div>
+                  <Target className="h-5 w-5 text-[#1f419a]" />
+                </div>
+                <div className="mt-4 space-y-3">
+                  {(overview.attribution?.top_sources || []).length === 0 ? (
+                    <p className="text-sm text-gray-500">
+                      No campaign attribution has been captured yet.
+                    </p>
+                  ) : (
+                    overview.attribution?.top_sources.map((source) => (
+                      <div key={source.source} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-semibold text-gray-900">
+                            {source.label}
+                          </span>
+                          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-gray-700 ring-1 ring-gray-200">
+                            {source.count}
+                          </span>
+                        </div>
+                        {source.top_campaign && (
+                          <p className="mt-1 truncate text-xs text-gray-500">
+                            Top campaign: {source.top_campaign}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+              <div>
+                <h2 className="font-semibold text-gray-950">Recent activity</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Latest referral events, settings changes, and reward decisions.
+                </p>
+              </div>
+              <a
+                href="/growth-manager/dashboard?section=audit"
+                className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
+              >
+                Audit trail
+              </a>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {auditLogs.length === 0 ? (
+                <div className="px-5 py-8 text-sm text-gray-500">
+                  No referral audit history yet.
+                </div>
+              ) : (
+                auditLogs.slice(0, 5).map((log) => (
+                  <div key={log.id} className="grid gap-3 px-5 py-4 md:grid-cols-[220px_1fr_170px] md:items-center">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-950">
+                        {auditActionLabel(log.action)}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {log.actor?.display_name || log.actor?.email || "System"}
+                      </p>
+                    </div>
+                    <p className="text-sm text-gray-600">{auditSummary(log)}</p>
+                    <p className="text-xs font-medium text-gray-500 md:text-right">
+                      {formatDateTime(log.created_at)}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
       )}
 
       {overview?.funnel && activeSection === "funnel" && (
@@ -802,6 +1246,7 @@ export default function ReferralOperationsDashboard() {
                   <th className="px-5 py-3">Referrer</th>
                   <th className="px-5 py-3">Referred user</th>
                   <th className="px-5 py-3">Milestone</th>
+                  <th className="px-5 py-3">Source</th>
                   <th className="px-5 py-3">Credits</th>
                   <th className="px-5 py-3">Status</th>
                   <th className="px-5 py-3">Risk</th>
@@ -811,46 +1256,61 @@ export default function ReferralOperationsDashboard() {
               <tbody className="divide-y divide-gray-100">
                 {rewards.length === 0 ? (
                   <tr>
-                    <td className="px-5 py-8 text-center text-gray-500" colSpan={7}>
+                    <td className="px-5 py-8 text-center text-gray-500" colSpan={8}>
                       No referral rewards yet.
                     </td>
                   </tr>
                 ) : (
-                  rewards.map((reward) => (
-                    <tr key={reward.id} className="hover:bg-gray-50/70">
-                      <td className="px-5 py-3 font-medium text-gray-800">
-                        {reward.referrer?.display_name || reward.referrer?.email || "User"}
-                      </td>
-                      <td className="px-5 py-3 text-gray-700">
-                        {reward.referred_user?.display_name || reward.referred_user?.email || "User"}
-                      </td>
-                      <td className="px-5 py-3 font-medium text-gray-900">
-                        {milestoneLabel(reward.milestone)}
-                      </td>
-                      <td className="px-5 py-3 text-gray-700">+{reward.credits_awarded}</td>
-                      <td className="px-5 py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ring-1 ${statusClass(reward.status)}`}>
-                          {reward.status.replace(/_/g, " ")}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1 ${riskClass(reward.risk_level)}`}>
-                          {reward.risk_level || "low"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        {canManageRewards && !["approved", "rejected"].includes(reward.status) ? (
-                          <div className="flex gap-2">
-                            <button onClick={() => runRewardAction(reward.id, "approve")} className="rounded-md border border-green-200 px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50" type="button">Approve</button>
-                            <button onClick={() => runRewardAction(reward.id, "hold")} className="rounded-md border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50" type="button">Hold</button>
-                            <button onClick={() => runRewardAction(reward.id, "reject")} className="rounded-md border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50" type="button">Reject</button>
+                  rewards.map((reward) => {
+                    const attribution = getRewardAttribution(reward);
+                    return (
+                      <tr key={reward.id} className="hover:bg-gray-50/70">
+                        <td className="px-5 py-3 font-medium text-gray-800">
+                          {reward.referrer?.display_name || reward.referrer?.email || "User"}
+                        </td>
+                        <td className="px-5 py-3 text-gray-700">
+                          {reward.referred_user?.display_name || reward.referred_user?.email || "User"}
+                        </td>
+                        <td className="px-5 py-3 font-medium text-gray-900">
+                          {milestoneLabel(reward.milestone)}
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="min-w-32">
+                            <span className="rounded-full bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200">
+                              {formatSourceName(attribution.source)}
+                            </span>
+                            {attribution.campaign && (
+                              <p className="mt-1 max-w-40 truncate text-xs text-gray-500">
+                                {attribution.campaign}
+                              </p>
+                            )}
                           </div>
-                        ) : (
-                          <span className="text-xs text-gray-400">No action</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-5 py-3 text-gray-700">+{reward.credits_awarded}</td>
+                        <td className="px-5 py-3">
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ring-1 ${statusClass(reward.status)}`}>
+                            {reward.status.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1 ${riskClass(reward.risk_level)}`}>
+                            {reward.risk_level || "low"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          {canManageRewards && !["approved", "rejected"].includes(reward.status) ? (
+                            <div className="flex gap-2">
+                              <button onClick={() => runRewardAction(reward.id, "approve")} className="rounded-md border border-green-200 px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-50" type="button">Approve</button>
+                              <button onClick={() => runRewardAction(reward.id, "hold")} className="rounded-md border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50" type="button">Hold</button>
+                              <button onClick={() => runRewardAction(reward.id, "reject")} className="rounded-md border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50" type="button">Reject</button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">No action</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1217,6 +1677,188 @@ export default function ReferralOperationsDashboard() {
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save settings
               </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {activeSection === "tracking" && (
+        <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="font-semibold text-gray-950">Tracking pixels</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Configure the IDs needed for Meta, TikTok, Google Ads, and GA4 tracking.
+                </p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${
+                configuredTrackingCount >= 3
+                  ? "bg-green-50 text-green-700 ring-green-200"
+                  : "bg-amber-50 text-amber-700 ring-amber-200"
+              }`}>
+                {configuredTrackingCount} of 4 configured
+              </span>
+            </div>
+          </div>
+
+          {settings && (
+            <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="space-y-4 p-5">
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700">
+                      Meta / Facebook Pixel ID
+                    </span>
+                    <input
+                      disabled={!canManageSettings}
+                      value={settings.metaPixelId}
+                      onChange={(event) =>
+                        setSettings({ ...settings, metaPixelId: event.target.value })
+                      }
+                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
+                      placeholder="Example: 123456789012345"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      From Meta Events Manager after creating the website pixel/dataset.
+                    </p>
+                    <a
+                      href="https://business.facebook.com/events_manager"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex text-xs font-semibold text-[#1f419a] hover:text-[#17357f]"
+                    >
+                      Open Meta Events Manager
+                    </a>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700">
+                      TikTok Pixel ID
+                    </span>
+                    <input
+                      disabled={!canManageSettings}
+                      value={settings.tiktokPixelId}
+                      onChange={(event) =>
+                        setSettings({ ...settings, tiktokPixelId: event.target.value })
+                      }
+                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
+                      placeholder="Example: C123ABC456DEF"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      From TikTok Ads Manager: Tools &gt; Events &gt; Manage Web Events.
+                    </p>
+                    <a
+                      href="https://ads.tiktok.com/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex text-xs font-semibold text-[#1f419a] hover:text-[#17357f]"
+                    >
+                      Open TikTok Ads Manager
+                    </a>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700">
+                      Google tag ID
+                    </span>
+                    <input
+                      disabled={!canManageSettings}
+                      value={settings.googleTagId}
+                      onChange={(event) =>
+                        setSettings({ ...settings, googleTagId: event.target.value })
+                      }
+                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
+                      placeholder="Example: G-XXXXXXXX or AW-XXXXXXXX"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Use a GA4 Measurement ID or Google Ads tag ID for website measurement.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                      <a
+                        href="https://analytics.google.com/analytics/web/#/admin/datastreams"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-semibold text-[#1f419a] hover:text-[#17357f]"
+                      >
+                        Open GA4 Data Streams
+                      </a>
+                      <a
+                        href="https://ads.google.com/aw/conversions"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-semibold text-[#1f419a] hover:text-[#17357f]"
+                      >
+                        Open Google Ads Conversions
+                      </a>
+                    </div>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-medium text-gray-700">
+                      Google Tag Manager container ID
+                    </span>
+                    <input
+                      disabled={!canManageSettings}
+                      value={settings.googleTagManagerContainerId}
+                      onChange={(event) =>
+                        setSettings({
+                          ...settings,
+                          googleTagManagerContainerId: event.target.value,
+                        })
+                      }
+                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1f419a]"
+                      placeholder="Example: GTM-XXXXXXX"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Optional central container for managing Meta, TikTok, and Google tags.
+                    </p>
+                    <a
+                      href="https://tagmanager.google.com/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex text-xs font-semibold text-[#1f419a] hover:text-[#17357f]"
+                    >
+                      Open Google Tag Manager
+                    </a>
+                  </label>
+
+                  <button
+                    onClick={saveSettings}
+                    disabled={!canManageSettings || saving}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#1f419a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#17357f] disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save tracking setup
+                  </button>
+              </div>
+
+              <aside className="border-t border-gray-100 bg-gray-50 p-5 lg:border-l lg:border-t-0">
+                <h3 className="text-sm font-semibold text-gray-950">Setup checklist</h3>
+                <div className="mt-4 space-y-4 text-sm">
+                  <div>
+                    <p className="font-semibold text-gray-800">Meta Pixel</p>
+                    <p className="mt-1 text-gray-500">
+                      Create a web pixel in Meta Events Manager, copy the Pixel ID, then verify with Meta Pixel Helper.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">TikTok Pixel</p>
+                    <p className="mt-1 text-gray-500">
+                      Create a Web data connection in TikTok Events Manager, install base code or GTM, then test events.
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">Google tag</p>
+                    <p className="mt-1 text-gray-500">
+                      Add one Google tag to every page and configure conversion events separately.
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-amber-200 bg-white p-3 text-xs text-amber-800">
+                    Saving IDs enables base page-view tracking. Custom conversion events still need a separate rollout.
+                  </div>
+                </div>
+              </aside>
             </div>
           )}
         </section>

@@ -59,6 +59,17 @@ type RegistrationPayload = {
   photos: File[];
   initialLookingFor: string;
   referralCode?: string;
+  attribution?: SignupAttribution;
+};
+
+type SignupAttribution = {
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
+  landing_path?: string;
+  signup_source?: string;
 };
 
 const ALLOWED_GENDER = ["male", "female", "other", "prefer_not_to_say"];
@@ -90,6 +101,46 @@ function parseStringArray(raw: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function sanitizeAttributionValue(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, 120);
+}
+
+function parseAttributionJson(raw: string): SignupAttribution | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeAttribution(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeAttribution(input: unknown): SignupAttribution | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const source = input as Record<string, unknown>;
+  const attribution: SignupAttribution = {};
+
+  for (const key of [
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "landing_path",
+    "signup_source",
+  ] as const) {
+    const value = sanitizeAttributionValue(source[key]);
+    if (value) attribution[key] = value;
+  }
+
+  if (!attribution.signup_source && attribution.utm_source) {
+    attribution.signup_source = attribution.utm_source;
+  }
+
+  return Object.keys(attribution).length > 0 ? attribution : undefined;
 }
 
 function normalizeEnum(value: string, allowed: string[]) {
@@ -201,6 +252,7 @@ async function parsePayload(request: NextRequest): Promise<RegistrationPayload> 
       photos,
       initialLookingFor: toStringOrEmpty(formData.get("initialLookingFor")),
       referralCode: toStringOrEmpty(formData.get("referralCode")),
+      attribution: parseAttributionJson(toStringOrEmpty(formData.get("attribution"))),
     };
   }
 
@@ -230,6 +282,7 @@ async function parsePayload(request: NextRequest): Promise<RegistrationPayload> 
     photos: [],
     initialLookingFor: (body.initialLookingFor || "").trim(),
     referralCode: (body.referralCode || "").trim(),
+    attribution: normalizeAttribution(body.attribution),
   };
 }
 
@@ -511,6 +564,8 @@ export async function POST(request: NextRequest) {
         metadata: {
           source: "register_api",
           client_ip: clientIp,
+          attribution: payload.attribution || null,
+          ...payload.attribution,
         },
       }).catch((referralError) => {
         console.warn("[register] referral capture skipped:", referralError);
@@ -533,6 +588,7 @@ export async function POST(request: NextRequest) {
         partner_gender_preference: normalizedPartnerGender || null,
         uploaded_photos: uploadedPhotoUrls.length,
         rejected_photos: uploadResult.rejectedCount,
+        ...payload.attribution,
       }),
       trackProductEventSafely(userId, PRODUCT_ANALYTICS_EVENTS.SIGNUP_COMPLETED, {
         selected_tier: normalizedTier,
@@ -541,6 +597,7 @@ export async function POST(request: NextRequest) {
         uploaded_photos: uploadedPhotoUrls.length,
         rejected_photos: uploadResult.rejectedCount,
         referral_code_used: Boolean(payload.referralCode),
+        ...payload.attribution,
       }),
     ]);
 

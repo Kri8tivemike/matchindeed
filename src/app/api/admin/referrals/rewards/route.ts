@@ -8,6 +8,11 @@ const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+type ReferralAttribution = {
+  source: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
 export async function GET(request: NextRequest) {
   try {
     const guard = await requireAdminAccess(request, {
@@ -52,12 +57,27 @@ export async function GET(request: NextRequest) {
           .in("id", userIds)
       : { data: [] };
     const accountMap = new Map((accounts || []).map((account) => [account.id, account]));
+    const referralIds = [
+      ...new Set((rewards || []).map((reward) => reward.referral_id as string)),
+    ].filter(Boolean);
+    const { data: referrals } = referralIds.length
+      ? await supabase
+          .from("referrals")
+          .select("id, source, metadata")
+          .in("id", referralIds)
+      : { data: [] };
+    const referralMap = new Map(
+      ((referrals || []) as Array<ReferralAttribution & { id: string }>).map(
+        (referral) => [referral.id, referral]
+      )
+    );
 
     return NextResponse.json({
       rewards: (rewards || []).map((reward) => ({
         ...reward,
         referrer: accountMap.get(reward.referrer_id) || null,
         referred_user: accountMap.get(reward.referred_user_id) || null,
+        referral: referralMap.get(reward.referral_id) || null,
       })),
     });
   } catch (error) {
@@ -68,4 +88,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
