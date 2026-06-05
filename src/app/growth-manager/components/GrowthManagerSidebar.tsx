@@ -110,7 +110,7 @@ function GrowthManagerSidebarContent({
   ];
 
   return (
-    <aside className="flex min-h-screen w-64 flex-col border-r border-gray-200 bg-white">
+    <aside className="flex w-full flex-col border-b border-gray-200 bg-white md:min-h-screen md:w-64 md:border-b-0 md:border-r">
       <div className="border-b border-gray-200 p-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1f419a] to-[#2a44a3]">
@@ -141,10 +141,10 @@ function GrowthManagerSidebarContent({
         </div>
       </div>
 
-      <nav className="flex-1 space-y-5 overflow-y-auto p-4">
+      <nav className="flex gap-2 overflow-x-auto p-3 md:block md:flex-1 md:space-y-5 md:overflow-y-auto md:p-4">
         {referralNavGroups.map((group) => (
-          <div key={group.label} className="space-y-1.5">
-            <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+          <div key={group.label} className="contents md:block md:space-y-1.5">
+            <p className="hidden px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 md:block">
               {group.label}
             </p>
             {group.items.map(({ section, label, Icon }) => {
@@ -155,7 +155,7 @@ function GrowthManagerSidebarContent({
                 <Link
                   key={section}
                   href={sectionHref(section)}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                  className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors md:gap-3 ${
                     isActive
                       ? "bg-[#1f419a] text-white"
                       : "text-gray-700 hover:bg-gray-100"
@@ -170,24 +170,24 @@ function GrowthManagerSidebarContent({
         ))}
       </nav>
 
-      <div className="space-y-1 border-t border-gray-200 p-4">
+      <div className="flex gap-2 overflow-x-auto border-t border-gray-200 p-3 md:block md:space-y-1 md:p-4">
         <Link
           href="/dashboard/discover"
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+          className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 md:gap-3"
         >
           <ArrowLeft className="h-5 w-5" />
           <span>Back to App</span>
         </Link>
         <Link
           href="/dashboard/profile/notifications"
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+          className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 md:gap-3"
         >
           <Settings className="h-5 w-5" />
           <span>Settings</span>
         </Link>
         <Link
           href={`${GROWTH_MANAGER_LOGIN_PATH}?logout=true`}
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+          className="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 md:gap-3"
         >
           <LogOut className="h-5 w-5" />
           <span>Sign Out</span>
@@ -199,7 +199,7 @@ function GrowthManagerSidebarContent({
 
 function GrowthManagerSidebarShell({ userName }: GrowthManagerSidebarProps) {
   return (
-    <aside className="flex min-h-screen w-64 flex-col border-r border-gray-200 bg-white">
+    <aside className="flex w-full flex-col border-b border-gray-200 bg-white md:min-h-screen md:w-64 md:border-b-0 md:border-r">
       <div className="border-b border-gray-200 p-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1f419a] to-[#2a44a3]">
@@ -228,7 +228,7 @@ function GrowthManagerSidebarShell({ userName }: GrowthManagerSidebarProps) {
           </div>
         </div>
       </div>
-      <nav className="flex-1 p-4">
+      <nav className="p-3 md:flex-1 md:p-4">
         <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
           Referral System
         </p>

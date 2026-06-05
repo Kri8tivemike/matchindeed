@@ -552,7 +552,7 @@ export default function ReferralOperationsDashboard() {
   }
 
   return (
-    <div className="space-y-6 p-6 lg:p-8">
+    <div className="space-y-5 p-5 lg:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-3">
@@ -718,7 +718,7 @@ export default function ReferralOperationsDashboard() {
       )}
 
       {overview && activeSection === "overview" && (
-        <section className="space-y-6">
+        <section className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             {[
               ["Total referrals", overview.metrics.total_referrals, Users, "Invited users"],
@@ -730,11 +730,11 @@ export default function ReferralOperationsDashboard() {
             ].map(([label, value, Icon, helper]) => {
               const TypedIcon = Icon as typeof Gift;
               return (
-                <div key={label as string} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                <div key={label as string} className="rounded-lg border border-gray-200 bg-white p-3.5 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label as string}</p>
-                      <p className="mt-2 text-2xl font-bold text-gray-950">{String(value)}</p>
+                      <p className="mt-1.5 text-2xl font-bold text-gray-950">{String(value)}</p>
                       <p className="mt-1 text-xs text-gray-500">{helper as string}</p>
                     </div>
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#1f419a]">
@@ -746,9 +746,9 @@ export default function ReferralOperationsDashboard() {
             })}
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+          <div className="grid auto-rows-min items-start gap-4 xl:grid-cols-12">
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm xl:col-span-7">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-4 py-3.5">
                 <div>
                   <h2 className="font-semibold text-gray-950">Product funnel</h2>
                   <p className="mt-1 text-sm text-gray-500">
@@ -762,9 +762,9 @@ export default function ReferralOperationsDashboard() {
                   View details
                 </a>
               </div>
-              <div className="space-y-4 p-5">
+              <div className="space-y-3.5 p-4">
                 {onboardingSteps.slice(0, 4).map((step) => (
-                  <div key={step.key} className="grid gap-3 sm:grid-cols-[170px_1fr_95px] sm:items-center">
+                  <div key={step.key} className="grid gap-3 sm:grid-cols-[155px_1fr_90px] sm:items-center">
                     <div>
                       <p className="text-sm font-semibold text-gray-800">{step.label}</p>
                       <p className="mt-0.5 text-xs text-gray-500">{step.helper}</p>
@@ -788,53 +788,89 @@ export default function ReferralOperationsDashboard() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
-                <div>
-                  <h2 className="font-semibold text-gray-950">Reward queue</h2>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Recent reward decisions and items needing action.
-                  </p>
-                </div>
-                <a
-                  href="/growth-manager/dashboard?section=rewards"
-                  className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
-                >
-                  Open queue
-                </a>
-              </div>
-              <div className="divide-y divide-gray-100">
-                {rewards.length === 0 ? (
-                  <div className="px-5 py-8 text-sm text-gray-500">
-                    No referral rewards yet. New rewards will appear here when referred users complete eligible milestones.
+            <div className="space-y-4 xl:col-span-5">
+              <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+                <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-4 py-3.5">
+                  <div>
+                    <h2 className="font-semibold text-gray-950">Reward queue</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Recent reward decisions and items needing action.
+                    </p>
                   </div>
-                ) : (
-                  rewards.slice(0, 4).map((reward) => (
-                    <div key={reward.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_90px_80px] sm:items-center">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-950">
-                          {reward.referrer?.display_name || reward.referrer?.email || "Referrer"}
-                        </p>
-                        <p className="mt-1 truncate text-xs text-gray-500">
-                          {milestoneLabel(reward.milestone)} for {reward.referred_user?.display_name || reward.referred_user?.email || "referred user"}
-                        </p>
+                  <a
+                    href="/growth-manager/dashboard?section=rewards"
+                    className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
+                  >
+                    Open queue
+                  </a>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {rewards.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-gray-500">
+                      No referral rewards yet. New rewards will appear here when referred users complete eligible milestones.
+                    </div>
+                  ) : (
+                    rewards.slice(0, 3).map((reward) => (
+                      <div key={reward.id} className="grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_90px_70px] sm:items-center">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-gray-950">
+                            {reward.referrer?.display_name || reward.referrer?.email || "Referrer"}
+                          </p>
+                          <p className="mt-1 truncate text-xs text-gray-500">
+                            {milestoneLabel(reward.milestone)} for {reward.referred_user?.display_name || reward.referred_user?.email || "referred user"}
+                          </p>
+                        </div>
+                        <span className={`w-fit rounded-full px-2 py-1 text-xs font-semibold ring-1 ${statusClass(reward.status)}`}>
+                          {reward.status.replace(/_/g, " ")}
+                        </span>
+                        <span className="text-sm font-semibold text-gray-950 sm:text-right">
+                          +{reward.credits_awarded}
+                        </span>
                       </div>
-                      <span className={`w-fit rounded-full px-2 py-1 text-xs font-semibold ring-1 ${statusClass(reward.status)}`}>
-                        {reward.status.replace(/_/g, " ")}
-                      </span>
-                      <span className="text-sm font-semibold text-gray-950 sm:text-right">
-                        +{reward.credits_awarded}
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-gray-950">Rollout readiness</h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {rolloutStatusLabel(overview.rollout.status)}
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${rolloutStatusClass(overview.rollout.status)}`}>
+                    {overview.rollout.readiness_percent}%
+                  </span>
+                </div>
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-100">
+                  <div
+                    className="h-full rounded-full bg-[#1f419a]"
+                    style={{ width: `${overview.rollout.readiness_percent}%` }}
+                  />
+                </div>
+                <div className="mt-4 space-y-3">
+                  {overview.rollout.checks.slice(0, 3).map((check) => (
+                    <div key={check.key} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-gray-600">{check.label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ring-1 ${rolloutCheckClass(check.status)}`}>
+                        {check.status}
                       </span>
                     </div>
-                  ))
-                )}
+                  ))}
+                </div>
+                <a
+                  href="/growth-manager/dashboard?section=rollout"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Review rollout
+                </a>
               </div>
             </div>
-          </div>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm xl:col-span-8">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-4 py-3.5">
                 <div>
                   <h2 className="font-semibold text-gray-950">Ambassador performance</h2>
                   <p className="mt-1 text-sm text-gray-500">
@@ -855,11 +891,11 @@ export default function ReferralOperationsDashboard() {
                   ["Referrals", ambassadorSummary?.totalReferrals || 0, "Generated"],
                   ["Subscriptions", ambassadorSummary?.totalSubscriptionConversions || 0, "Converted"],
                 ].map(([label, value, helper]) => (
-                  <div key={label as string} className="border-b border-gray-100 px-5 py-4 sm:border-b-0 sm:border-r sm:last:border-r-0">
+                  <div key={label as string} className="border-b border-gray-100 px-4 py-3.5 sm:border-b-0 sm:border-r sm:last:border-r-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                       {label as string}
                     </p>
-                    <p className="mt-2 text-2xl font-bold text-gray-950">{String(value)}</p>
+                    <p className="mt-1.5 text-2xl font-bold text-gray-950">{String(value)}</p>
                     <p className="mt-1 text-xs text-gray-500">{helper as string}</p>
                   </div>
                 ))}
@@ -867,7 +903,7 @@ export default function ReferralOperationsDashboard() {
               {ambassadors.length > 0 ? (
                 <div className="divide-y divide-gray-100 border-t border-gray-100">
                   {ambassadors.slice(0, 3).map((ambassador) => (
-                    <div key={ambassador.id} className="grid gap-4 px-5 py-4 md:grid-cols-[minmax(0,1fr)_180px_180px_90px] md:items-center">
+                    <div key={ambassador.id} className="grid gap-4 px-4 py-3.5 md:grid-cols-[minmax(0,1fr)_180px_180px_90px] md:items-center">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-gray-950">
                           {ambassador.account?.display_name || ambassador.account?.email || "Ambassador"}
@@ -917,7 +953,7 @@ export default function ReferralOperationsDashboard() {
                   ))}
                 </div>
               ) : (
-                <div className="border-t border-gray-100 px-5 py-8">
+                <div className="border-t border-gray-100 px-4 py-5">
                   <p className="text-sm text-gray-500">
                     No Ambassadors are being tracked yet. Add contracted users so Growth Managers can monitor target performance.
                   </p>
@@ -931,44 +967,7 @@ export default function ReferralOperationsDashboard() {
               )}
             </div>
 
-            <div className="space-y-6">
-              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-semibold text-gray-950">Rollout readiness</h2>
-                    <p className="mt-1 text-sm text-gray-500">
-                      {rolloutStatusLabel(overview.rollout.status)}
-                    </p>
-                  </div>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${rolloutStatusClass(overview.rollout.status)}`}>
-                    {overview.rollout.readiness_percent}%
-                  </span>
-                </div>
-                <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-100">
-                  <div
-                    className="h-full rounded-full bg-[#1f419a]"
-                    style={{ width: `${overview.rollout.readiness_percent}%` }}
-                  />
-                </div>
-                <div className="mt-4 space-y-3">
-                  {overview.rollout.checks.slice(0, 3).map((check) => (
-                    <div key={check.key} className="flex items-center justify-between gap-3 text-sm">
-                      <span className="text-gray-600">{check.label}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ring-1 ${rolloutCheckClass(check.status)}`}>
-                        {check.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <a
-                  href="/growth-manager/dashboard?section=rollout"
-                  className="mt-5 inline-flex w-full items-center justify-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-                >
-                  Review rollout
-                </a>
-              </div>
-
-              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm xl:col-span-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="font-semibold text-gray-950">Reward settings</h2>
@@ -1000,13 +999,13 @@ export default function ReferralOperationsDashboard() {
                 </div>
                 <a
                   href="/growth-manager/dashboard?section=settings"
-                  className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-[#1f419a] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17357f]"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-[#1f419a] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17357f]"
                 >
                   Edit settings
                 </a>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm xl:col-span-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="font-semibold text-gray-950">Tracking setup</h2>
@@ -1037,13 +1036,13 @@ export default function ReferralOperationsDashboard() {
                 </div>
                 <a
                   href="/growth-manager/dashboard?section=tracking"
-                  className="mt-5 inline-flex w-full items-center justify-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                 >
                   Configure tracking
                 </a>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm xl:col-span-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="font-semibold text-gray-950">Referral sources</h2>
@@ -1079,47 +1078,46 @@ export default function ReferralOperationsDashboard() {
                   )}
                 </div>
               </div>
-            </div>
-          </div>
 
-          <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
-              <div>
-                <h2 className="font-semibold text-gray-950">Recent activity</h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  Latest referral events, settings changes, and reward decisions.
-                </p>
-              </div>
-              <a
-                href="/growth-manager/dashboard?section=audit"
-                className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
-              >
-                Audit trail
-              </a>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {auditLogs.length === 0 ? (
-                <div className="px-5 py-8 text-sm text-gray-500">
-                  No referral audit history yet.
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm xl:col-span-12">
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-4 py-3.5">
+                <div>
+                  <h2 className="font-semibold text-gray-950">Recent activity</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Latest referral events, settings changes, and reward decisions.
+                  </p>
                 </div>
-              ) : (
-                auditLogs.slice(0, 5).map((log) => (
-                  <div key={log.id} className="grid gap-3 px-5 py-4 md:grid-cols-[220px_1fr_170px] md:items-center">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-950">
-                        {auditActionLabel(log.action)}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {log.actor?.display_name || log.actor?.email || "System"}
+                <a
+                  href="/growth-manager/dashboard?section=audit"
+                  className="text-sm font-semibold text-[#1f419a] hover:text-[#17357f]"
+                >
+                  Audit trail
+                </a>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {auditLogs.length === 0 ? (
+                  <div className="px-4 py-6 text-sm text-gray-500">
+                    No referral audit history yet.
+                  </div>
+                ) : (
+                  auditLogs.slice(0, 5).map((log) => (
+                    <div key={log.id} className="grid gap-3 px-4 py-3.5 md:grid-cols-[220px_1fr_170px] md:items-center">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-950">
+                          {auditActionLabel(log.action)}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {log.actor?.display_name || log.actor?.email || "System"}
+                        </p>
+                      </div>
+                      <p className="text-sm text-gray-600">{auditSummary(log)}</p>
+                      <p className="text-xs font-medium text-gray-500 md:text-right">
+                        {formatDateTime(log.created_at)}
                       </p>
                     </div>
-                    <p className="text-sm text-gray-600">{auditSummary(log)}</p>
-                    <p className="text-xs font-medium text-gray-500 md:text-right">
-                      {formatDateTime(log.created_at)}
-                    </p>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </section>
