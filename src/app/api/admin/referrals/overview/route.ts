@@ -89,6 +89,7 @@ function buildRolloutStatus(input: {
   riskFlags: number;
   auditLogCount: number;
   analyticsConfigured: boolean;
+  mixpanelConfigured: boolean;
   settings: Awaited<ReturnType<typeof getReferralSettings>>;
 }) {
   const checks = [
@@ -113,8 +114,10 @@ function buildRolloutStatus(input: {
       label: "Analytics configured",
       status: input.analyticsConfigured ? "ready" : "warning",
       detail: input.analyticsConfigured
-        ? "Product funnel events can be monitored during rollout."
-        : "Mixpanel is not configured, so funnel visibility is limited to database counts.",
+        ? input.mixpanelConfigured
+          ? "Product funnel events can be monitored from database counts and Mixpanel events."
+          : "Product funnel visibility is available from database-backed counts."
+        : "Product funnel visibility is not available.",
     },
     {
       key: "reward_queue",
@@ -240,9 +243,10 @@ export async function GET(request: NextRequest) {
         .filter(Boolean)
     ).size;
     const approvedRewardsCount = approvedRewards || 0;
-    const analyticsConfigured = Boolean(
+    const mixpanelConfigured = Boolean(
       process.env.MIXPANEL_TOKEN || process.env.NEXT_PUBLIC_MIXPANEL_TOKEN
     );
+    const analyticsConfigured = true;
     const funnelSteps = [
       {
         key: "signup_completed",
@@ -326,6 +330,7 @@ export async function GET(request: NextRequest) {
       funnel: {
         source: "database",
         analytics_configured: analyticsConfigured,
+        mixpanel_configured: mixpanelConfigured,
         steps: funnelSteps,
       },
       attribution: {
@@ -343,6 +348,7 @@ export async function GET(request: NextRequest) {
         riskFlags,
         auditLogCount: auditLogCount || 0,
         analyticsConfigured,
+        mixpanelConfigured,
         settings,
       }),
       recent_rewards: recentRewards || [],

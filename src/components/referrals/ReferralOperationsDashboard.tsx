@@ -38,6 +38,7 @@ type OverviewPayload = {
   funnel: {
     source: "database";
     analytics_configured: boolean;
+    mixpanel_configured?: boolean;
     steps: FunnelStep[];
   };
   attribution?: {
@@ -638,6 +639,11 @@ export default function ReferralOperationsDashboard() {
             <h1 className="text-2xl font-bold text-gray-950">Referral System</h1>
             {overview?.funnel && (
               <span
+                title={
+                  overview.funnel.mixpanel_configured
+                    ? "Database funnel and Mixpanel event tracking are available."
+                    : "Database-backed funnel tracking is available. Mixpanel event forwarding can be configured separately."
+                }
                 className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${
                   overview.funnel.analytics_configured
                     ? "bg-green-50 text-green-700 ring-green-200"
