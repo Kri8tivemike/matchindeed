@@ -6,6 +6,21 @@ export const metadata: Metadata = {
   title: "Cookie Policy",
   description:
     "Learn how MatchIndeed uses cookies and similar technologies to support security, performance, and core platform features.",
+  alternates: {
+    canonical: "/cookie-policy",
+  },
+  openGraph: {
+    title: "Cookie Policy | MatchIndeed",
+    description:
+      "Learn how MatchIndeed uses cookies and similar technologies to support security, performance, and core platform features.",
+    url: "/cookie-policy",
+  },
+  twitter: {
+    card: "summary",
+    title: "Cookie Policy | MatchIndeed",
+    description:
+      "Learn how MatchIndeed uses cookies and similar technologies to support security, performance, and core platform features.",
+  },
 };
 
 const lastUpdated = "February 25, 2026";

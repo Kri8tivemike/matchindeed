@@ -14,6 +14,8 @@ const fallbackFontVars = {
     "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
 } as CSSProperties;
 
+const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com";
+
 export const metadata: Metadata = {
   title: {
     default: "MatchIndeed — Discover Singles Near You",
@@ -21,15 +23,23 @@ export const metadata: Metadata = {
   },
   description:
     "MatchIndeed helps you discover and connect with compatible singles near you. Browse profiles, find your match, and request video meetings — all in one place.",
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL || "https://www.matchindeed.com"
-  ),
+  metadataBase: new URL(siteUrl),
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
     title: "MatchIndeed — Discover Singles Near You",
     description:
       "Browse profiles, find your match, and request video meetings.",
+    url: "/",
     siteName: "MatchIndeed",
     type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "MatchIndeed — Discover Singles Near You",
+    description:
+      "Browse profiles, find your match, and request video meetings.",
   },
   robots: {
     index: true,

@@ -6,6 +6,21 @@ export const metadata: Metadata = {
   title: "About Us",
   description:
     "Learn about MatchIndeed's mission, who we serve, and how we create safer, meaningful video-first dating experiences.",
+  alternates: {
+    canonical: "/about-us",
+  },
+  openGraph: {
+    title: "About Us | MatchIndeed",
+    description:
+      "Learn about MatchIndeed's mission, who we serve, and how we create safer, meaningful video-first dating experiences.",
+    url: "/about-us",
+  },
+  twitter: {
+    card: "summary",
+    title: "About Us | MatchIndeed",
+    description:
+      "Learn about MatchIndeed's mission, who we serve, and how we create safer, meaningful video-first dating experiences.",
+  },
 };
 
 const lastUpdated = "February 25, 2026";

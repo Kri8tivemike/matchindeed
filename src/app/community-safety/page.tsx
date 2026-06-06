@@ -6,6 +6,21 @@ export const metadata: Metadata = {
   title: "Community Safety",
   description:
     "Read MatchIndeed's community safety guidelines covering respectful behavior, reporting, and moderation standards.",
+  alternates: {
+    canonical: "/community-safety",
+  },
+  openGraph: {
+    title: "Community Safety | MatchIndeed",
+    description:
+      "Read MatchIndeed's community safety guidelines covering respectful behavior, reporting, and moderation standards.",
+    url: "/community-safety",
+  },
+  twitter: {
+    card: "summary",
+    title: "Community Safety | MatchIndeed",
+    description:
+      "Read MatchIndeed's community safety guidelines covering respectful behavior, reporting, and moderation standards.",
+  },
 };
 
 const lastUpdated = "February 25, 2026";
@@ -95,7 +110,7 @@ export default function CommunitySafetyPage() {
               <li>Scams, fraud, or financial solicitation.</li>
               <li>Impersonation or fake profiles.</li>
               <li>Recording or screenshots without consent.</li>
-              <li>Sharing another member's private information.</li>
+              <li>Sharing another member&apos;s private information.</li>
             </ul>
           </section>
 

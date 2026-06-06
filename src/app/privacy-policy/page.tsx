@@ -6,6 +6,21 @@ export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
     "Read MatchIndeed's privacy policy and data processing terms, including what data we collect, how we use it, and your rights.",
+  alternates: {
+    canonical: "/privacy-policy",
+  },
+  openGraph: {
+    title: "Privacy Policy | MatchIndeed",
+    description:
+      "Read MatchIndeed's privacy policy and data processing terms, including what data we collect, how we use it, and your rights.",
+    url: "/privacy-policy",
+  },
+  twitter: {
+    card: "summary",
+    title: "Privacy Policy | MatchIndeed",
+    description:
+      "Read MatchIndeed's privacy policy and data processing terms, including what data we collect, how we use it, and your rights.",
+  },
 };
 
 const lastUpdated = "February 25, 2026";

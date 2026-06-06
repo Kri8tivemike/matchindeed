@@ -6,6 +6,21 @@ export const metadata: Metadata = {
   title: "Terms of Service",
   description:
     "Read MatchIndeed's terms of service for account eligibility, user conduct, platform rules, and legal terms.",
+  alternates: {
+    canonical: "/terms-of-service",
+  },
+  openGraph: {
+    title: "Terms of Service | MatchIndeed",
+    description:
+      "Read MatchIndeed's terms of service for account eligibility, user conduct, platform rules, and legal terms.",
+    url: "/terms-of-service",
+  },
+  twitter: {
+    card: "summary",
+    title: "Terms of Service | MatchIndeed",
+    description:
+      "Read MatchIndeed's terms of service for account eligibility, user conduct, platform rules, and legal terms.",
+  },
 };
 
 const lastUpdated = "February 25, 2026";

@@ -6,6 +6,21 @@ export const metadata: Metadata = {
   title: "Refund Policy",
   description:
     "Read MatchIndeed's refund and subscription policy, including billing, renewals, cancellations, and refund eligibility.",
+  alternates: {
+    canonical: "/refund-policy",
+  },
+  openGraph: {
+    title: "Refund Policy | MatchIndeed",
+    description:
+      "Read MatchIndeed's refund and subscription policy, including billing, renewals, cancellations, and refund eligibility.",
+    url: "/refund-policy",
+  },
+  twitter: {
+    card: "summary",
+    title: "Refund Policy | MatchIndeed",
+    description:
+      "Read MatchIndeed's refund and subscription policy, including billing, renewals, cancellations, and refund eligibility.",
+  },
 };
 
 const lastUpdated = "February 25, 2026";

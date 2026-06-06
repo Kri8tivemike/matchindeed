@@ -3,6 +3,24 @@ import type { NextRequest } from "next/server";
 
 const MAINTENANCE_MODE_ENABLED = false;
 const MAINTENANCE_PATH = "/maintenance";
+const NOINDEX_EXACT_PATHS = new Set([
+  "/forgot-password",
+  "/login",
+  "/maintenance",
+  "/register",
+  "/reset-password",
+  "/verify-email",
+]);
+const NOINDEX_PREFIXES = [
+  "/admin",
+  "/api",
+  "/auth",
+  "/coordinator",
+  "/dashboard",
+  "/growth-manager",
+  "/host",
+  "/meetops1-console7",
+];
 
 /**
  * Next.js Middleware — Security Headers & Rate Limiting Prep
@@ -68,6 +86,8 @@ export function middleware(request: NextRequest) {
 }
 
 function applySecurityHeaders(request: NextRequest, response: NextResponse) {
+  const pathname = request.nextUrl.pathname;
+
   // Security headers (complement Cloudflare's edge-level protections)
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
@@ -84,6 +104,15 @@ function applySecurityHeaders(request: NextRequest, response: NextResponse) {
       "Strict-Transport-Security",
       "max-age=63072000; includeSubDomains; preload"
     );
+  }
+
+  if (
+    NOINDEX_EXACT_PATHS.has(pathname) ||
+    NOINDEX_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+    )
+  ) {
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
 
   return response;

@@ -7,7 +7,7 @@ import type { MetadataRoute } from "next";
  */
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL || "https://www.matchindeed.com";
+    process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com";
 
   return [
     {
@@ -17,10 +17,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1.0,
     },
     {
-      url: `${baseUrl}/login`,
+      url: `${baseUrl}/contact-us`,
       lastModified: new Date(),
       changeFrequency: "monthly",
-      priority: 0.5,
+      priority: 0.6,
     },
     {
       url: `${baseUrl}/cookie-policy`,
