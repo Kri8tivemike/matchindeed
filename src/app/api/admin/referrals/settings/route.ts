@@ -16,6 +16,16 @@ function normalizeTrackingId(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeMetaPixelId(value: unknown) {
+  const normalized = normalizeTrackingId(value);
+  const matches = [
+    ...normalized.matchAll(/fbq\(\s*['"]init['"]\s*,\s*['"]([0-9]{5,30})['"]/g),
+    ...normalized.matchAll(/[?&]id=([0-9]{5,30})(?:&|$|["'])/g),
+  ];
+
+  return matches.at(-1)?.[1] ?? normalized;
+}
+
 function normalizeTikTokPixelId(value: unknown) {
   const normalized = normalizeTrackingId(value);
   const loadMatch = normalized.match(/ttq\.load\(\s*['"]([A-Za-z0-9_-]{8,80})['"]\s*\)/);
@@ -70,7 +80,7 @@ export async function PATCH(request: NextRequest) {
       typeof body.autoApproveLowRiskRewards === "boolean"
         ? body.autoApproveLowRiskRewards
         : undefined;
-    const metaPixelId = normalizeTrackingId(body.metaPixelId);
+    const metaPixelId = normalizeMetaPixelId(body.metaPixelId);
     const tiktokPixelId = normalizeTikTokPixelId(body.tiktokPixelId);
     const googleTagId = normalizeTrackingId(body.googleTagId);
     const googleTagManagerContainerId = normalizeTrackingId(

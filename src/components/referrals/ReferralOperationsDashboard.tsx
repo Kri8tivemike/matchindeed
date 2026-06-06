@@ -247,6 +247,16 @@ function extractTikTokPixelId(value: string) {
   return trimmed;
 }
 
+function extractMetaPixelId(value: string) {
+  const trimmed = value.trim();
+  const matches = [
+    ...trimmed.matchAll(/fbq\(\s*['"]init['"]\s*,\s*['"]([0-9]{5,30})['"]/g),
+    ...trimmed.matchAll(/[?&]id=([0-9]{5,30})(?:&|$|["'])/g),
+  ];
+
+  return matches.at(-1)?.[1] ?? trimmed;
+}
+
 function hasValidMetaPixelId(value: string) {
   return /^[0-9]{5,30}$/.test(value.trim());
 }
@@ -1742,7 +1752,10 @@ export default function ReferralOperationsDashboard() {
                         disabled={!canManageSettings}
                         value={settings.metaPixelId}
                         onChange={(event) =>
-                          setSettings({ ...settings, metaPixelId: event.target.value })
+                          setSettings({
+                            ...settings,
+                            metaPixelId: extractMetaPixelId(event.target.value),
+                          })
                         }
                         className="h-10 w-full rounded-lg border border-gray-200 px-3 pr-10 text-sm outline-none focus:border-[#1f419a]"
                         placeholder="Example: 123456789012345"
@@ -1755,7 +1768,8 @@ export default function ReferralOperationsDashboard() {
                       )}
                     </div>
                     <p className="mt-1 text-xs text-gray-500">
-                      From Meta Events Manager after creating the website pixel/dataset.
+                      Paste the Pixel ID only. If you paste full Meta base code,
+                      the dashboard will extract the ID from fbq(&quot;init&quot;, ...).
                     </p>
                     <a
                       href="https://business.facebook.com/events_manager"
