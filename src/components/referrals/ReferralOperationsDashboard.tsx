@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import {
   Award,
   BarChart3,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   Clock,
   CreditCard,
@@ -21,6 +23,8 @@ import {
   Users,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+
+const AUDIT_PAGE_SIZE = 8;
 
 type OverviewPayload = {
   metrics: {
@@ -99,6 +103,13 @@ type AuditLogRow = {
   meta: Record<string, unknown> | null;
   created_at: string;
   actor?: { email: string | null; display_name: string | null } | null;
+};
+
+type AuditPagination = {
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
 };
 
 type AmbassadorRow = {
@@ -341,6 +352,13 @@ export default function ReferralOperationsDashboard() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [rewards, setRewards] = useState<RewardRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [auditPagination, setAuditPagination] = useState<AuditPagination>({
+    page: 1,
+    limit: AUDIT_PAGE_SIZE,
+    total: 0,
+    total_pages: 1,
+  });
+  const [auditPage, setAuditPage] = useState(1);
   const [ambassadors, setAmbassadors] = useState<AmbassadorRow[]>([]);
   const [ambassadorSummary, setAmbassadorSummary] =
     useState<AmbassadorSummary | null>(null);
@@ -405,6 +423,14 @@ export default function ReferralOperationsDashboard() {
   const activeSection = sectionParam && VALID_DASHBOARD_SECTIONS.includes(sectionParam)
     ? sectionParam
     : "overview";
+  const auditTotalPages = Math.max(1, auditPagination.total_pages || 1);
+  const auditStart = auditPagination.total === 0
+    ? 0
+    : (auditPagination.page - 1) * auditPagination.limit + 1;
+  const auditEnd = Math.min(
+    auditPagination.total,
+    auditPagination.page * auditPagination.limit
+  );
 
   const authedFetch = useCallback(async (url: string, init?: RequestInit) => {
     const {
@@ -428,7 +454,9 @@ export default function ReferralOperationsDashboard() {
       const [overviewResponse, rewardsResponse, auditResponse, ambassadorResponse] = await Promise.all([
         authedFetch("/api/admin/referrals/overview"),
         authedFetch("/api/admin/referrals/rewards?limit=50"),
-        authedFetch("/api/admin/referrals/audit?limit=50"),
+        authedFetch(
+          `/api/admin/referrals/audit?limit=${AUDIT_PAGE_SIZE}&page=${auditPage}`
+        ),
         authedFetch("/api/admin/referrals/ambassadors"),
       ]);
 
@@ -439,7 +467,10 @@ export default function ReferralOperationsDashboard() {
 
       const overviewPayload = (await overviewResponse.json()) as OverviewPayload;
       const rewardsPayload = (await rewardsResponse.json()) as { rewards: RewardRow[] };
-      const auditPayload = (await auditResponse.json()) as { audit_logs: AuditLogRow[] };
+      const auditPayload = (await auditResponse.json()) as {
+        audit_logs: AuditLogRow[];
+        pagination?: AuditPagination;
+      };
       const ambassadorPayload = (await ambassadorResponse.json()) as {
         ambassadors: AmbassadorRow[];
         summary: AmbassadorSummary;
@@ -448,6 +479,14 @@ export default function ReferralOperationsDashboard() {
       setSettings(overviewPayload.settings);
       setRewards(rewardsPayload.rewards || []);
       setAuditLogs(auditPayload.audit_logs || []);
+      setAuditPagination(
+        auditPayload.pagination || {
+          page: auditPage,
+          limit: AUDIT_PAGE_SIZE,
+          total: auditPayload.audit_logs?.length || 0,
+          total_pages: 1,
+        }
+      );
       setAmbassadors(ambassadorPayload.ambassadors || []);
       setAmbassadorSummary(ambassadorPayload.summary || null);
     } catch (error) {
@@ -455,7 +494,7 @@ export default function ReferralOperationsDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [authedFetch]);
+  }, [auditPage, authedFetch]);
 
   useEffect(() => {
     loadData();
@@ -1945,13 +1984,18 @@ export default function ReferralOperationsDashboard() {
 
       {activeSection === "audit" && (
         <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="border-b border-gray-100 px-5 py-4">
-            <h2 className="font-semibold text-gray-950">Audit trail</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Recent referral setting changes, reward approvals, holds, rejections, and system events.
-            </p>
+          <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-950">Audit trail</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Recent referral setting changes, reward approvals, holds, rejections, and system events.
+              </p>
+            </div>
+            <div className="rounded-full bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-200">
+              {auditPagination.total} event{auditPagination.total === 1 ? "" : "s"}
+            </div>
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="max-h-[calc(100vh-280px)] min-h-[320px] overflow-y-auto divide-y divide-gray-100">
             {auditLogs.length === 0 ? (
               <div className="px-5 py-10 text-center text-sm text-gray-500">
                 No referral audit history yet.
@@ -1974,6 +2018,38 @@ export default function ReferralOperationsDashboard() {
                 </div>
               ))
             )}
+          </div>
+          <div className="flex flex-col gap-3 border-t border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-gray-500">
+              {auditPagination.total === 0
+                ? "Showing 0 audit events"
+                : `Showing ${auditStart} to ${auditEnd} of ${auditPagination.total}`}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAuditPage((page) => Math.max(1, page - 1))}
+                disabled={auditPage <= 1 || loading}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Previous audit page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="min-w-24 text-center text-sm font-medium text-gray-700">
+                Page {auditPagination.page} of {auditTotalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setAuditPage((page) => Math.min(auditTotalPages, page + 1))
+                }
+                disabled={auditPage >= auditTotalPages || loading}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Next audit page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </section>
       )}
