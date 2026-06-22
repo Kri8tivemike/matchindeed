@@ -1433,7 +1433,11 @@ export default function Home() {
           </div>
 
           <div className="mt-10 border-t border-gray-100 pt-6 text-center text-xs text-gray-400">
-            &copy; {new Date().getFullYear()} MatchIndeed. All rights reserved.
+            <p>&copy; {new Date().getFullYear()} MatchIndeed. All rights reserved.</p>
+            <p className="mx-auto mt-2 max-w-2xl">
+              MatchIndeed is a platform affiliated with DI‑YIELDCOM GLOBAL SERVICES,
+              the registered business entity responsible for its operations.
+            </p>
           </div>
         </div>
       </footer>
