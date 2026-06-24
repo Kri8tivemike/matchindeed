@@ -84,6 +84,28 @@ type PhotoUploadResponse = {
   approved_urls?: string[];
 };
 
+type GenderChangeStatusPayload = {
+  canChange: boolean;
+  latestChangedAt: string | null;
+  nextEligibleAt: string | null;
+  pauseUntil: string | null;
+};
+
+type ProfileUpdateResponse = {
+  success?: boolean;
+  error?: string;
+  code?: string;
+  nextEligibleAt?: string | null;
+  genderChange?: {
+    changed?: boolean;
+    pauseUntil?: string | null;
+    nextEligibleAt?: string | null;
+    emailSent?: boolean;
+    emailSkipped?: boolean;
+    emailError?: string | null;
+  };
+};
+
 const PHOTO_UPLOAD_DEACTIVATED_MESSAGE =
   "Your MatchIndeed account is currently deactivated. Reactivate your account to upload photos and continue your profile.";
 
@@ -272,6 +294,17 @@ async function getAccessTokenOrThrow() {
   return accessToken;
 }
 
+function formatReadableDate(value: string | null | undefined) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 function handlePhotoUploadAccountBlock(
   status: number,
   result: PhotoUploadResponse | null,
@@ -341,6 +374,8 @@ export default function EditProfilePage() {
   const [wasProfileCompleted, setWasProfileCompleted] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saving" | "saved" | null>(null);
   const [photoUploadProgress, setPhotoUploadProgress] = useState<number | null>(null);
+  const [genderChangeStatus, setGenderChangeStatus] =
+    useState<GenderChangeStatusPayload | null>(null);
   const [savedPersonalityPrompts, setSavedPersonalityPrompts] = useState(
     createEmptyPersonalityPromptMap
   );
@@ -572,6 +607,27 @@ export default function EditProfilePage() {
           console.log("No authenticated user found, redirecting to login...");
           router.push("/login?next=/dashboard/profile/edit");
           return;
+        }
+
+        try {
+          const accessToken = await getAccessTokenOrThrow();
+          const statusResponse = await fetch("/api/profile/gender-change-status", {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+
+          if (statusResponse.ok) {
+            const statusPayload = (await statusResponse
+              .json()
+              .catch(() => null)) as { status?: GenderChangeStatusPayload } | null;
+            setGenderChangeStatus(statusPayload?.status || null);
+          }
+        } catch (statusError) {
+          console.warn(
+            "[profile/edit] failed to load gender change status:",
+            statusError
+          );
         }
 
         const { data: profile } = await supabase
@@ -1291,13 +1347,49 @@ export default function EditProfilePage() {
         profile_completed: true,
       };
 
-      // Save profile
-      const { error: profileError } = await supabase
-        .from("user_profiles")
-        .upsert(profileUpdate, { onConflict: "user_id" });
+      const profileSaveAccessToken = await getAccessTokenOrThrow();
+      const profileResponse = await fetch("/api/profile/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${profileSaveAccessToken}`,
+        },
+        body: JSON.stringify({ profile: profileUpdate }),
+      });
+      const profileResult = (await profileResponse
+        .json()
+        .catch(() => null)) as ProfileUpdateResponse | null;
 
-      if (profileError) {
-        throw profileError;
+      if (
+        profileResponse.status === 429 &&
+        profileResult?.code === "GENDER_CHANGE_COOLDOWN"
+      ) {
+        const nextDate = formatReadableDate(profileResult.nextEligibleAt);
+        toast.error(
+          `Gender can only be changed once every 90 days.${
+            nextDate ? ` You can change it again on ${nextDate}.` : ""
+          }`
+        );
+        setCurrentStep(3);
+        setLoading(false);
+        return;
+      }
+
+      if (!profileResponse.ok || profileResult?.success === false) {
+        throw new Error(profileResult?.error || "Failed to save profile.");
+      }
+
+      const genderChanged = Boolean(profileResult?.genderChange?.changed);
+      if (genderChanged) {
+        setGenderChangeStatus({
+          canChange: false,
+          latestChangedAt: new Date().toISOString(),
+          nextEligibleAt: profileResult?.genderChange?.nextEligibleAt || null,
+          pauseUntil: profileResult?.genderChange?.pauseUntil || null,
+        });
+        toast.warning(
+          "Your profile is hidden for 24 hours while your matches and preferences refresh."
+        );
       }
 
         // Update user progress
@@ -1349,6 +1441,10 @@ export default function EditProfilePage() {
       // Clear draft since form was successfully submitted
       clearFormDraft(FORM_DRAFT_KEY);
       setSaveStatus(null);
+
+      if (genderChanged) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
 
       // Always redirect to preferences after successful profile submission
       // Check if preferences are completed
@@ -1736,6 +1832,13 @@ export default function EditProfilePage() {
     <h2 className="text-3xl sm:text-4xl font-semibold text-white">{text}</h2>
   );
 
+  const genderChangeLocked = Boolean(
+    genderChangeStatus && !genderChangeStatus.canChange
+  );
+  const genderChangeNextDate = formatReadableDate(
+    genderChangeStatus?.nextEligibleAt
+  );
+
   const renderStep = () => {
     switch (currentStep) {
       case 1:
@@ -1816,22 +1919,51 @@ export default function EditProfilePage() {
       case 3:
         return stepContainer(
           <>
-            <div>{stepHeading("What's your gender?")}</div>
+            <div className="space-y-3">
+              {stepHeading("What's your gender?")}
+              {genderChangeLocked && (
+                <p className="mx-auto max-w-lg text-sm text-blue-100/90">
+                  Gender can only be changed once every 90 days.
+                  {genderChangeNextDate
+                    ? ` You can change it again on ${genderChangeNextDate}.`
+                    : ""}
+                </p>
+              )}
+            </div>
             <div className="space-y-3 sm:space-y-4">
-              {["Male", "Female", "Other", "Prefer not to say"].map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, gender: option })}
-                  className={`w-full rounded-xl border-2 p-3 sm:p-4 md:p-5 text-sm sm:text-base md:text-lg lg:text-xl transition-all duration-200 font-medium ${
-                    formData.gender === option 
-                      ? "border-[#1f419a] bg-[#1f419a] text-white shadow-lg shadow-[#1f419a]/30" 
-                      : "border-gray-200/60 bg-white/90 text-gray-700 hover:border-gray-300 hover:bg-white hover:shadow-sm"
-                  }`}
-                >
-                  {option}
-                </button>
-              ))}
+              {["Male", "Female", "Other", "Prefer not to say"].map((option) => {
+                const disabledByCooldown =
+                  genderChangeLocked && option !== formData.gender;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    disabled={disabledByCooldown}
+                    onClick={() => {
+                      if (disabledByCooldown) {
+                        toast.warning(
+                          `Gender can only be changed once every 90 days.${
+                            genderChangeNextDate
+                              ? ` You can change it again on ${genderChangeNextDate}.`
+                              : ""
+                          }`
+                        );
+                        return;
+                      }
+                      setFormData({ ...formData, gender: option });
+                    }}
+                    className={`w-full rounded-xl border-2 p-3 sm:p-4 md:p-5 text-sm sm:text-base md:text-lg lg:text-xl transition-all duration-200 font-medium ${
+                      formData.gender === option
+                        ? "border-[#1f419a] bg-[#1f419a] text-white shadow-lg shadow-[#1f419a]/30"
+                        : disabledByCooldown
+                          ? "cursor-not-allowed border-gray-200/40 bg-white/50 text-gray-400"
+                          : "border-gray-200/60 bg-white/90 text-gray-700 hover:border-gray-300 hover:bg-white hover:shadow-sm"
+                    }`}
+                  >
+                    {option}
+                  </button>
+                );
+              })}
             </div>
           </>
         );

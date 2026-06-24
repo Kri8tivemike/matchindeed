@@ -144,7 +144,8 @@ export type EmailTemplate =
   | "welcome"
   | "account_warning"
   | "account_deactivated"
-  | "account_deletion_requested";
+  | "account_deletion_requested"
+  | "gender_setting_updated";
 
 export type EmailData = {
   recipientName: string;
@@ -231,6 +232,8 @@ export function generateEmail(
       return accountDeactivatedEmail(data);
     case "account_deletion_requested":
       return accountDeletionRequestedEmail(data);
+    case "gender_setting_updated":
+      return genderSettingUpdatedEmail(data);
     default:
       throw new Error(`Unknown email template: ${template}`);
   }
@@ -670,6 +673,20 @@ function accountDeletionRequestedEmail(data: EmailData) {
       <a href="${data.dashboardUrl || "#"}" class="btn">Contact Support</a>
     </div>
     <p class="meta" style="text-align:center;">If you did not submit this request, please contact MatchIndeed support immediately.</p>
+    `
+  );
+  return { subject, html };
+}
+
+function genderSettingUpdatedEmail(data: EmailData) {
+  const subject = "Your Gender Setting Has Been Updated";
+  const html = baseLayout(
+    subject,
+    `
+    <h1>Your Gender Setting Has Been Updated</h1>
+    <p>Hi ${data.recipientName || "there"},</p>
+    <p>Your gender setting has been updated.</p>
+    <p>For your safety, your account has been re-verified and your match preferences have been refreshed.</p>
     `
   );
   return { subject, html };

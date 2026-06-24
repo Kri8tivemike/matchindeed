@@ -112,6 +112,7 @@ const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
   account_warning: "account_warning", // Always sent (system)
   account_deactivated: "account_warning", // System lifecycle email
   account_deletion_requested: "account_warning", // System lifecycle email
+  gender_setting_updated: "account_warning", // System safety email
 };
 
 export async function sendEmail(
@@ -752,6 +753,21 @@ export async function sendWelcomeEmail(
     template: "welcome",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/profile/edit` },
     // No recipientUserId — welcome emails always send
+  });
+}
+
+/** Send a system safety email after a gender setting update. */
+export async function sendGenderSettingUpdatedEmail(
+  recipientEmail: string,
+  data: {
+    recipientName: string;
+  }
+) {
+  return sendEmail({
+    to: recipientEmail,
+    template: "gender_setting_updated",
+    data,
+    // No recipientUserId — safety emails always send.
   });
 }
 

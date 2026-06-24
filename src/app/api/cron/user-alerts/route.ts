@@ -4,6 +4,7 @@ import { validateCronAuth } from "@/lib/cron-auth";
 import { processDailyEngagementDigests } from "@/lib/alerts/daily-digests";
 import { processReengagementSequenceSchedules } from "@/lib/alerts/reengagement-sequences";
 import { processDueScheduledAlerts } from "@/lib/alerts/scheduled-alerts";
+import { processGenderVisibilityRestores } from "@/lib/profile/gender-change";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,12 +27,14 @@ export async function GET(request: NextRequest) {
       processDueScheduledAlerts(supabase, { limit: 100 }),
       processDailyEngagementDigests(supabase),
     ]);
+    const genderVisibilityRestores = await processGenderVisibilityRestores(supabase);
 
     return NextResponse.json({
       success: true,
       reengagementSchedules,
       scheduledAlerts,
       dailyDigests,
+      genderVisibilityRestores,
     });
   } catch (error) {
     console.error("Error in GET /api/cron/user-alerts:", error);
