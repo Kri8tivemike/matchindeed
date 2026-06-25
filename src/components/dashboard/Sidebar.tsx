@@ -29,7 +29,7 @@ function Link({ prefetch, ...props }: NextLinkProps) {
 }
 
 type SidebarProps = {
-  active?: "home" | "profile" | "my-account" | "preference" | "calendar" | "appointments" | "history" | "notifications" | "subscription" | "wallet" | "referrals" | "about" | "signout" | "edit" | "discover" | "likes" | "matches" | "search" | "messages";
+  active?: "home" | "profile" | "my-account" | "gender-preferences" | "preference" | "calendar" | "appointments" | "history" | "notifications" | "subscription" | "wallet" | "referrals" | "about" | "signout" | "edit" | "discover" | "likes" | "matches" | "search" | "messages";
 };
 
 type UserInfo = {
@@ -65,6 +65,7 @@ export default function Sidebar({ active }: SidebarProps) {
     if (active) return active;
     
     if (pathname?.includes("/profile/edit")) return "edit";
+    if (pathname?.includes("/profile/gender-preferences")) return "gender-preferences";
     if (pathname?.includes("/profile/my-account")) return "my-account";
     if (pathname?.includes("/profile/preferences")) return "preference";
     if (pathname?.includes("/profile/preferences/view")) return "preference";
@@ -89,7 +90,7 @@ export default function Sidebar({ active }: SidebarProps) {
 
   // Auto-expand profile section if user is on a profile-related page
   useEffect(() => {
-    if (currentActive === "profile" || currentActive === "my-account" || currentActive === "preference" || currentActive === "edit") {
+    if (currentActive === "profile" || currentActive === "my-account" || currentActive === "gender-preferences" || currentActive === "preference" || currentActive === "edit") {
       setIsProfileExpanded(true);
     }
   }, [currentActive]);
@@ -523,7 +524,7 @@ export default function Sidebar({ active }: SidebarProps) {
               isProfileExpanded
                 ? "rounded-lg bg-[#1f419a] text-white" 
                 : `rounded-xl ${
-                    currentActive === "profile" || currentActive === "my-account" || currentActive === "preference" || currentActive === "edit"
+                    currentActive === "profile" || currentActive === "my-account" || currentActive === "gender-preferences" || currentActive === "preference" || currentActive === "edit"
                       ? "bg-[#eef2ff] text-[#1f419a]" 
                       : "text-gray-700 hover:bg-gray-50"
                   }`
@@ -537,7 +538,7 @@ export default function Sidebar({ active }: SidebarProps) {
             <ChevronDown 
               className={`h-4 w-4 transition-all duration-300 ${
                 isProfileExpanded ? "rotate-180 text-white" : "rotate-0"
-              } ${!isProfileExpanded && (currentActive === "profile" || currentActive === "my-account" || currentActive === "preference" || currentActive === "edit") ? "text-[#1f419a]" : !isProfileExpanded ? "text-gray-400" : ""}`}
+              } ${!isProfileExpanded && (currentActive === "profile" || currentActive === "my-account" || currentActive === "gender-preferences" || currentActive === "preference" || currentActive === "edit") ? "text-[#1f419a]" : !isProfileExpanded ? "text-gray-400" : ""}`}
             />
           </button>
           
@@ -584,6 +585,25 @@ export default function Sidebar({ active }: SidebarProps) {
                   My account
                 </span>
                 <ChevronRight className={`h-3 w-3 ${currentActive === "my-account" && !isProfileExpanded ? "text-[#1f419a]" : isProfileExpanded ? "text-white/80" : "text-gray-400"}`}/>
+              </Link>
+
+              <Link
+                href="/dashboard/profile/gender-preferences"
+                className={`flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors ${
+                  currentActive === "gender-preferences"
+                    ? isProfileExpanded
+                      ? "bg-white/10 text-white hover:bg-white/20"
+                      : "bg-[#eef2ff] text-[#1f419a]"
+                    : isProfileExpanded
+                    ? "text-white/90 hover:bg-white/10"
+                    : "text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Users className="h-3.5 w-3.5" />
+                  Gender & Preferences
+                </span>
+                <ChevronRight className={`h-3 w-3 ${currentActive === "gender-preferences" && !isProfileExpanded ? "text-[#1f419a]" : isProfileExpanded ? "text-white/80" : "text-gray-400"}`}/>
               </Link>
               
               <Link 

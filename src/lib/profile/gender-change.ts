@@ -13,16 +13,32 @@ export type GenderChangeEventRow = {
   changed_at: string;
   pause_until: string;
   previous_profile_visible: boolean | null;
+  status?: GenderChangeReviewStatus | null;
+  verification_completed_at?: string | null;
+  approval_reviewed_at?: string | null;
+  approval_reviewed_by?: string | null;
+  approval_notes?: string | null;
   email_sent_at?: string | null;
   email_error?: string | null;
   restored_at?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
+
+export type GenderChangeReviewStatus =
+  | "pending_verification"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "restored";
 
 export type GenderChangeStatus = {
   canChange: boolean;
   latestChangedAt: string | null;
   nextEligibleAt: string | null;
   pauseUntil: string | null;
+  status: GenderChangeReviewStatus | null;
+  approvalNotes: string | null;
+  restoredAt: string | null;
 };
 
 export type GenderRestoreResult = {
@@ -77,6 +93,15 @@ export function isGenderChangeInCooldown(
   return Boolean(nextEligibleAt && nextEligibleAt.getTime() > now.getTime());
 }
 
+export function normalizePartnerGenderPreference(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "male" || normalized === "female") {
+    return normalized;
+  }
+  return null;
+}
+
 export async function getGenderChangeStatus(
   supabase: SupabaseClient,
   userId: string,
@@ -84,7 +109,7 @@ export async function getGenderChangeStatus(
 ): Promise<GenderChangeStatus> {
   const { data, error } = await supabase
     .from("gender_change_events")
-    .select("changed_at, pause_until")
+    .select("changed_at, pause_until, status, approval_notes, restored_at")
     .eq("user_id", userId)
     .order("changed_at", { ascending: false })
     .limit(1)
@@ -103,6 +128,20 @@ export async function getGenderChangeStatus(
     latestChangedAt,
     nextEligibleAt: nextEligibleAt?.toISOString() || null,
     pauseUntil: typeof data?.pause_until === "string" ? data.pause_until : null,
+    status:
+      typeof data?.status === "string" &&
+      [
+        "pending_verification",
+        "pending_approval",
+        "approved",
+        "rejected",
+        "restored",
+      ].includes(data.status)
+        ? (data.status as GenderChangeReviewStatus)
+        : null,
+    approvalNotes:
+      typeof data?.approval_notes === "string" ? data.approval_notes : null,
+    restoredAt: typeof data?.restored_at === "string" ? data.restored_at : null,
   };
 }
 
@@ -121,8 +160,9 @@ export async function processGenderVisibilityRestores(
 
   const { data: events, error } = await supabase
     .from("gender_change_events")
-    .select("id, user_id, pause_until, previous_profile_visible, restored_at")
+    .select("id, user_id, pause_until, previous_profile_visible, status, restored_at")
     .is("restored_at", null)
+    .eq("status", "approved")
     .lte("pause_until", now.toISOString())
     .order("pause_until", { ascending: true })
     .limit(limit);
@@ -180,7 +220,10 @@ export async function processGenderVisibilityRestores(
 
       const { error: eventError } = await supabase
         .from("gender_change_events")
-        .update({ restored_at: now.toISOString() })
+        .update({
+          status: shouldRestore ? "restored" : event.status || "approved",
+          restored_at: now.toISOString(),
+        })
         .eq("id", event.id);
 
       if (eventError) {

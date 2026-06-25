@@ -5,6 +5,7 @@ import {
   getGenderChangeNextEligibleAt,
   getGenderChangeStatus,
   isGenderChangeInCooldown,
+  normalizePartnerGenderPreference,
   normalizeProfileGender,
   resolvePartnerGenderAfterGenderChange,
 } from "../../src/lib/profile/gender-change.ts";
@@ -15,6 +16,13 @@ test("gender normalization accepts only profile gender values", () => {
   assert.equal(normalizeProfileGender("prefer_not_to_say"), "prefer_not_to_say");
   assert.equal(normalizeProfileGender("non-binary"), null);
   assert.equal(normalizeProfileGender(null), null);
+});
+
+test("show me normalization accepts only binary partner gender preferences", () => {
+  assert.equal(normalizePartnerGenderPreference("male"), "male");
+  assert.equal(normalizePartnerGenderPreference(" Female "), "female");
+  assert.equal(normalizePartnerGenderPreference("other"), null);
+  assert.equal(normalizePartnerGenderPreference(null), null);
 });
 
 test("gender changes reset partner preference to the opposite binary gender", () => {
@@ -49,6 +57,9 @@ test("gender change status reports locked and eligible states from latest event"
   const latestEvent = {
     changed_at: "2026-06-01T10:00:00.000Z",
     pause_until: "2026-06-02T10:00:00.000Z",
+    status: "pending_approval",
+    approval_notes: null,
+    restored_at: null,
   };
   const supabase = {
     from() {
@@ -80,6 +91,7 @@ test("gender change status reports locked and eligible states from latest event"
   assert.equal(locked.canChange, false);
   assert.equal(locked.nextEligibleAt, "2026-08-30T10:00:00.000Z");
   assert.equal(locked.pauseUntil, latestEvent.pause_until);
+  assert.equal(locked.status, "pending_approval");
 
   const eligible = await getGenderChangeStatus(
     supabase,
@@ -122,5 +134,8 @@ test("gender change status allows change when no prior event exists", async () =
     latestChangedAt: null,
     nextEligibleAt: null,
     pauseUntil: null,
+    status: null,
+    approvalNotes: null,
+    restoredAt: null,
   });
 });

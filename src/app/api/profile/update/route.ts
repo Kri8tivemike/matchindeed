@@ -95,6 +95,12 @@ export async function POST(req: NextRequest) {
       ...(profileInput as Record<string, unknown>),
       user_id: user.id,
     };
+    const verificationStatement =
+      body &&
+      typeof body === "object" &&
+      typeof (body as { verificationStatement?: unknown }).verificationStatement === "string"
+        ? (body as { verificationStatement: string }).verificationStatement.trim()
+        : "";
 
     const requestedGender = normalizeProfileGender(profileUpdate.gender);
     if (!requestedGender) {
@@ -117,6 +123,17 @@ export async function POST(req: NextRequest) {
     const genderChanged = Boolean(previousGender && previousGender !== requestedGender);
 
     if (genderChanged) {
+      if (verificationStatement.length < 20) {
+        return NextResponse.json(
+          {
+            error:
+              "Gender changes must be submitted from Gender & Preferences with a verification statement.",
+            code: "GENDER_CHANGE_VERIFICATION_REQUIRED",
+          },
+          { status: 400 }
+        );
+      }
+
       const status = await getGenderChangeStatus(supabaseAdmin, user.id);
       if (!status.canChange) {
         return NextResponse.json(
@@ -156,6 +173,7 @@ export async function POST(req: NextRequest) {
           changed: boolean;
           pauseUntil: string | null;
           nextEligibleAt: string | null;
+          status?: string | null;
           emailSent: boolean;
           emailSkipped?: boolean;
           emailError?: string | null;
@@ -166,7 +184,7 @@ export async function POST(req: NextRequest) {
       const status = await getGenderChangeStatus(supabaseAdmin, user.id);
       const { data: event } = await supabaseAdmin
         .from("gender_change_events")
-        .select("id")
+        .select("id, metadata")
         .eq("user_id", user.id)
         .order("changed_at", { ascending: false })
         .limit(1)
@@ -193,11 +211,24 @@ export async function POST(req: NextRequest) {
         emailError = emailResult.error || null;
 
         if (event?.id) {
+          const previousMetadata =
+            event.metadata &&
+            typeof event.metadata === "object" &&
+            !Array.isArray(event.metadata)
+              ? (event.metadata as Record<string, unknown>)
+              : {};
           await supabaseAdmin
             .from("gender_change_events")
             .update({
+              status: "pending_approval",
+              verification_completed_at: new Date().toISOString(),
               email_sent_at: emailSent ? new Date().toISOString() : null,
               email_error: emailError,
+              metadata: {
+                ...previousMetadata,
+                verification_statement: verificationStatement,
+                submitted_from: "profile_update_endpoint",
+              },
             })
             .eq("id", event.id);
         }
@@ -207,6 +238,7 @@ export async function POST(req: NextRequest) {
         changed: true,
         pauseUntil: status.pauseUntil,
         nextEligibleAt: status.nextEligibleAt,
+        status: status.status,
         emailSent,
         emailSkipped,
         emailError,

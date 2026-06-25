@@ -127,6 +127,14 @@ export default function AdminSidebar({
       section: "safety",
     },
     {
+      href: adminPath("/gender-changes"),
+      label: "Gender Changes",
+      icon: <UserCog className="h-5 w-5" />,
+      roles: ["admin", "superadmin"],
+      anyPermissions: ["moderate_photos", "edit_users"],
+      section: "safety",
+    },
+    {
       href: adminPath("/calendar"),
       label: "Calendar Management",
       icon: <Calendar className="h-5 w-5" />,

@@ -866,6 +866,17 @@ export default function MyAccountPage() {
 
                     {/* Links to other settings */}
                     <Link
+                      href="/dashboard/profile/gender-preferences"
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-all hover:border-[#1f419a]/30 hover:bg-white"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <BadgeCheck className="h-4 w-4 text-gray-500" />
+                        <span className="text-xs sm:text-sm font-medium text-gray-900">Gender & Preferences</span>
+                      </div>
+                      <ChevronIcon open={false} />
+                    </Link>
+
+                    <Link
                       href="/dashboard/profile/preferences"
                       className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-all hover:border-[#1f419a]/30 hover:bg-white"
                     >

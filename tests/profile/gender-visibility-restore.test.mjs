@@ -14,6 +14,7 @@ function createRestoreSupabase({ events, accounts }) {
       const state = {
         table,
         filters: {},
+        lteFilters: {},
         updatePayload: null,
       };
       const chain = {
@@ -23,14 +24,27 @@ function createRestoreSupabase({ events, accounts }) {
         is() {
           return this;
         },
-        lte() {
+        lte(column, value) {
+          state.lteFilters[column] = value;
           return this;
         },
         order() {
           return this;
         },
         limit() {
-          return { data: events, error: null };
+          let rows = events;
+          if (state.table === "gender_change_events") {
+            rows = rows.filter((event) => {
+              for (const [column, value] of Object.entries(state.filters)) {
+                if (event[column] !== value) return false;
+              }
+              for (const [column, value] of Object.entries(state.lteFilters)) {
+                if (String(event[column]) > String(value)) return false;
+              }
+              return true;
+            });
+          }
+          return { data: rows, error: null };
         },
         update(payload) {
           state.updatePayload = payload;
@@ -75,6 +89,7 @@ test("due gender pause restores visible profile only when account is active and 
         user_id: "user-1",
         pause_until: "2026-06-02T10:00:00.000Z",
         previous_profile_visible: true,
+        status: "approved",
         restored_at: null,
       },
     ],
@@ -127,6 +142,7 @@ test("gender pause restore does not make previously hidden or deactivated accoun
         user_id: "hidden-user",
         pause_until: "2026-06-02T10:00:00.000Z",
         previous_profile_visible: false,
+        status: "approved",
         restored_at: null,
       },
       {
@@ -134,6 +150,7 @@ test("gender pause restore does not make previously hidden or deactivated accoun
         user_id: "deactivated-user",
         pause_until: "2026-06-02T10:00:00.000Z",
         previous_profile_visible: true,
+        status: "approved",
         restored_at: null,
       },
     ],
@@ -163,4 +180,52 @@ test("gender pause restore does not make previously hidden or deactivated accoun
   });
   assert.deepEqual(supabase.accountUpdates, []);
   assert.equal(supabase.eventUpdates.length, 2);
+});
+
+test("gender pause restore ignores pending approval and approved not-yet-due events", async () => {
+  const supabase = createRestoreSupabase({
+    events: [
+      {
+        id: "event-pending",
+        user_id: "pending-user",
+        pause_until: "2026-06-02T10:00:00.000Z",
+        previous_profile_visible: true,
+        status: "pending_approval",
+        restored_at: null,
+      },
+      {
+        id: "event-future",
+        user_id: "future-user",
+        pause_until: "2026-06-03T10:00:00.000Z",
+        previous_profile_visible: true,
+        status: "approved",
+        restored_at: null,
+      },
+    ],
+    accounts: {
+      "pending-user": {
+        account_status: "active",
+        profile_visible: false,
+        profile_status: "hidden",
+      },
+      "future-user": {
+        account_status: "active",
+        profile_visible: false,
+        profile_status: "hidden",
+      },
+    },
+  });
+
+  const result = await processGenderVisibilityRestores(supabase, {
+    now: new Date("2026-06-02T10:00:01.000Z"),
+  });
+
+  assert.deepEqual(result, {
+    checked: 0,
+    restored: 0,
+    skipped: 0,
+    errors: 0,
+  });
+  assert.deepEqual(supabase.accountUpdates, []);
+  assert.deepEqual(supabase.eventUpdates, []);
 });

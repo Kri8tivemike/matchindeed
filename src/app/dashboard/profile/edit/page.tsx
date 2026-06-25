@@ -1375,6 +1375,15 @@ export default function EditProfilePage() {
         return;
       }
 
+      if (profileResult?.code === "GENDER_CHANGE_VERIFICATION_REQUIRED") {
+        toast.warning(
+          "Gender changes must be submitted from Gender & Preferences for verification."
+        );
+        router.push("/dashboard/profile/gender-preferences");
+        setLoading(false);
+        return;
+      }
+
       if (!profileResponse.ok || profileResult?.success === false) {
         throw new Error(profileResult?.error || "Failed to save profile.");
       }
