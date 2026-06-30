@@ -34,7 +34,7 @@ import {
   LogOut,
   UserCircle2,
 } from "lucide-react";
-import { useState, useEffect, useCallback, FormEvent, useRef, type ComponentProps } from "react";
+import { useState, useEffect, useCallback, FormEvent, useRef, type ComponentProps, type SVGProps } from "react";
 import { useRouter } from "next/navigation";
 import AgeSelect from "@/components/AgeSelect";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
@@ -56,6 +56,79 @@ type FaqItem = {
 };
 
 const SHOW_HOME_PRICING_SECTION = false;
+
+type SocialIconProps = SVGProps<SVGSVGElement>;
+
+const FacebookIcon = (props: SocialIconProps) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" {...props}>
+    <path d="M14.1 8.2V6.6c0-.8.3-1.2 1.2-1.2h1.6V2.6c-.8-.1-1.7-.2-2.5-.2-2.6 0-4.3 1.6-4.3 4.5v1.3H7.3v3.2h2.8v8.2h3.5v-8.2h2.8l.4-3.2h-3Z" />
+  </svg>
+);
+
+const XIcon = (props: SocialIconProps) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" {...props}>
+    <path d="M14.3 10.3 22.1 1h-1.9l-6.8 8.1L8 1H1.8l8.2 12.1L1.8 23h1.9l7.2-8.6 5.8 8.6h6.2l-8.6-12.7Zm-2.5 3-1-.1L3.3 2.4h3.8l14.1 19.2h-3.8l-5.6-8.3Z" />
+  </svg>
+);
+
+const TikTokIcon = (props: SocialIconProps) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" {...props}>
+    <path d="M16.6 2.4c.4 2.5 1.8 4 4.2 4.2v3.2c-1.4.1-2.7-.3-4.1-1.1v6.1c0 3.1-1.9 6.2-6.2 6.2-3.2 0-5.8-2.2-5.8-5.5 0-3.7 3.2-6.2 7.1-5.5v3.4c-1.8-.6-3.8.3-3.8 2.1 0 1.4 1.1 2.2 2.4 2.2 1.5 0 2.5-.9 2.5-2.9V2.4h3.7Z" />
+  </svg>
+);
+
+const InstagramIcon = (props: SocialIconProps) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+    <rect x="3" y="3" width="18" height="18" rx="5" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const LinkedInIcon = (props: SocialIconProps) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" {...props}>
+    <path d="M5.3 8.9H2.1v12.2h3.2V8.9ZM3.7 3C2.6 3 1.8 3.8 1.8 4.8s.8 1.8 1.9 1.8 1.9-.8 1.9-1.8S4.8 3 3.7 3Zm17 11.2c0-3.3-1.8-5.5-4.6-5.5-1.6 0-2.7.9-3.2 1.8V8.9H9.8v12.2H13v-6.7c0-1.8 1-2.7 2.3-2.7s2.1.9 2.1 2.7v6.7h3.3v-6.9Z" />
+  </svg>
+);
+
+const YouTubeIcon = (props: SocialIconProps) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" {...props}>
+    <path d="M22 7.5c-.2-1.5-1.2-2.6-2.7-2.8C17.2 4.4 12 4.4 12 4.4s-5.2 0-7.3.3C3.2 4.9 2.2 6 2 7.5 1.7 9.1 1.7 12 1.7 12s0 2.9.3 4.5c.2 1.5 1.2 2.6 2.7 2.8 2.1.3 7.3.3 7.3.3s5.2 0 7.3-.3c1.5-.2 2.5-1.3 2.7-2.8.3-1.6.3-4.5.3-4.5s0-2.9-.3-4.5ZM10 15.4V8.6l5.7 3.4-5.7 3.4Z" />
+  </svg>
+);
+
+const socialLinks = [
+  {
+    label: "Facebook",
+    href: "https://www.facebook.com/share/1BB97ojT7q/",
+    Icon: FacebookIcon,
+  },
+  {
+    label: "X",
+    href: "https://x.com/matchindeed",
+    Icon: XIcon,
+  },
+  {
+    label: "TikTok",
+    href: "https://www.tiktok.com/@matchindeed",
+    Icon: TikTokIcon,
+  },
+  {
+    label: "Instagram",
+    href: "https://www.instagram.com/matchindeed?igsh=MWRwaHBscWFmcHJldg==",
+    Icon: InstagramIcon,
+  },
+  {
+    label: "LinkedIn",
+    href: "https://www.linkedin.com/company/115991553/admin/dashboard/",
+    Icon: LinkedInIcon,
+  },
+  {
+    label: "YouTube",
+    href: "https://www.youtube.com/@Matchindeeddating",
+    Icon: YouTubeIcon,
+  },
+];
 
 const faqs = [
   {
@@ -1345,6 +1418,20 @@ export default function Home() {
                 Connecting hearts through meaningful video dates. Find genuine
                 connections, not just swipes.
               </p>
+              <div className="mt-5 flex items-center gap-3">
+                {socialLinks.map(({ label, href, Icon }) => (
+                  <a
+                    key={label}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Visit MatchIndeed on ${label}`}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition-colors hover:border-[#1f419a] hover:bg-[#1f419a] hover:text-white"
+                  >
+                    <Icon className="h-4 w-4" />
+                  </a>
+                ))}
+              </div>
             </div>
 
             {/* Quick Links */}
