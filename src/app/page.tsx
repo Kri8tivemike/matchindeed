@@ -1514,6 +1514,7 @@ export default function Home() {
                     support@matchindeed.com
                   </a>
                 </li>
+                <li>London, United Kingdom</li>
                 <li>
                   <span className="font-medium text-gray-600">Nigeria Office:</span>
                   <address className="mt-1 not-italic leading-6">
