@@ -13,25 +13,36 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+function safeCompare(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    timingSafeEqual(leftBuffer, rightBuffer)
+  );
+}
+
 function verifySignature(rawBody: string, request: NextRequest) {
   const secretHash = process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH?.trim();
   if (!secretHash) {
-    return true;
+    return process.env.NODE_ENV !== "production";
   }
 
-  const signature = request.headers.get("flutterwave-signature");
+  const signature = request.headers.get("flutterwave-signature")?.trim();
   if (signature) {
-    const expected = createHmac("sha256", secretHash).update(rawBody).digest("hex");
-    const expectedBuffer = Buffer.from(expected, "hex");
-    const signatureBuffer = Buffer.from(signature, "hex");
-    return (
-      expectedBuffer.length === signatureBuffer.length &&
-      timingSafeEqual(expectedBuffer, signatureBuffer)
-    );
+    const expectedBase64 = createHmac("sha256", secretHash)
+      .update(rawBody)
+      .digest("base64");
+    const expectedHex = createHmac("sha256", secretHash)
+      .update(rawBody)
+      .digest("hex");
+
+    return safeCompare(signature, expectedBase64) || safeCompare(signature, expectedHex);
   }
 
-  const legacyHash = request.headers.get("verif-hash");
-  return legacyHash === secretHash;
+  const legacyHash = request.headers.get("verif-hash")?.trim();
+  return Boolean(legacyHash && safeCompare(legacyHash, secretHash));
 }
 
 function parsePositiveInteger(value: unknown): number | null {
