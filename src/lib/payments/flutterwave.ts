@@ -53,6 +53,18 @@ function getSecretKey() {
   return key;
 }
 
+function getPaymentOptions(currency: string) {
+  switch (currency.toLowerCase()) {
+    case "ngn":
+      return "card, banktransfer, ussd, account, internetbanking, opay";
+    case "gbp":
+    case "usd":
+      return "card, account";
+    default:
+      return "card";
+  }
+}
+
 async function requestFlutterwave<T>(
   path: string,
   init: RequestInit = {}
@@ -88,6 +100,7 @@ export async function createFlutterwavePaymentLink(
         amount: params.amount,
         currency: params.currency.toUpperCase(),
         redirect_url: params.redirectUrl,
+        payment_options: getPaymentOptions(params.currency),
         customer: {
           email: params.customer.email,
           name: params.customer.name || undefined,
