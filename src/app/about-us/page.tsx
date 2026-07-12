@@ -5,21 +5,21 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "About Us",
   description:
-    "Learn about MatchIndeed's mission, who we serve, and how we create safer, meaningful video-first dating experiences.",
+    "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by Firstoutlook Ltd (UK).",
   alternates: {
     canonical: "/about-us",
   },
   openGraph: {
     title: "About Us | MatchIndeed",
     description:
-      "Learn about MatchIndeed's mission, who we serve, and how we create safer, meaningful video-first dating experiences.",
+      "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by Firstoutlook Ltd (UK).",
     url: "/about-us",
   },
   twitter: {
     card: "summary",
     title: "About Us | MatchIndeed",
     description:
-      "Learn about MatchIndeed's mission, who we serve, and how we create safer, meaningful video-first dating experiences.",
+      "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by Firstoutlook Ltd (UK).",
   },
 };
 
@@ -46,6 +46,21 @@ export default function AboutUsPage() {
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-black/5 sm:p-8">
           <h1 className="text-3xl font-bold text-gray-900">About Us</h1>
           <p className="mt-2 text-sm text-gray-500">Last Updated: {lastUpdated}</p>
+
+          <section className="mt-8">
+            <h2 className="text-xl font-semibold text-gray-900">
+              Ownership and Operations
+            </h2>
+            <p className="mt-3 text-sm leading-7 text-gray-700">
+              MatchIndeed is a digital booking and video‑meeting platform owned and
+              operated by Firstoutlook Ltd (UK).
+            </p>
+            <p className="mt-3 text-sm leading-7 text-gray-700">
+              MatchIndeed is owned and operated by Firstoutlook Ltd, a
+              UK‑registered business. DI‑YIELDCOM GLOBAL SERVICES provides additional
+              technology development and operational support for the platform.
+            </p>
+          </section>
 
           <section className="mt-8">
             <h2 className="text-xl font-semibold text-gray-900">Our Mission</h2>
