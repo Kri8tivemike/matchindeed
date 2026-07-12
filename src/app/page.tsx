@@ -1515,21 +1515,6 @@ export default function Home() {
                   </a>
                 </li>
                 <li>London, United Kingdom</li>
-                <li>
-                  <span className="font-medium text-gray-600">Nigeria Office:</span>
-                  <address className="mt-1 not-italic leading-6">
-                    16 Adeshina Street, Animashaun,
-                    <br />
-                    Lagos 101241, Nigeria.
-                  </address>
-                </li>
-                <li>
-                  Phone:{" "}
-                  <a href="tel:+2348060886390" className="hover:text-[#1f419a] hover:underline">
-                    0806 088 6390
-                  </a>
-                  .
-                </li>
               </ul>
             </div>
           </div>
