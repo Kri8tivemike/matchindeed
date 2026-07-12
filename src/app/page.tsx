@@ -1535,11 +1535,10 @@ export default function Home() {
           </div>
 
           <div className="mt-10 border-t border-gray-100 pt-6 text-center text-xs text-gray-400">
-            <p>&copy; {new Date().getFullYear()} MatchIndeed. All rights reserved.</p>
+            <p>&copy; 2026 MatchIndeed. Operated by Firstoutlook Ltd (UK).</p>
             <p className="mx-auto mt-2 max-w-2xl">
-              MatchIndeed is owned and operated by Firstoutlook Ltd, a UK‑registered
-              business. DI‑YIELDCOM GLOBAL SERVICES provides additional technology
-              development and operational support for the platform.
+              DI‑YIELDCOM GLOBAL SERVICES provides additional technology development and
+              operational support for the platform.
             </p>
           </div>
         </div>

@@ -54,6 +54,9 @@ export default function PrivacyPolicyPage() {
               &ldquo;us,&rdquo; &ldquo;our&rdquo;) collects, uses, and protects
               your personal information.
             </p>
+            <p className="mt-3 text-sm leading-7 text-gray-700">
+              Firstoutlook Ltd is the data controller for MatchIndeed.
+            </p>
           </section>
 
           <section className="mt-8">
@@ -237,9 +240,10 @@ export default function PrivacyPolicyPage() {
               2. Roles of the Parties
             </h3>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              The Controller determines the purpose and means of processing.
-              matchindeed.com, acting as Processor where applicable, processes
-              Personal Data only to provide the services under the Agreement.
+              Firstoutlook Ltd is the Controller for MatchIndeed and determines the
+              purpose and means of processing. matchindeed.com, acting as Processor
+              where applicable, processes Personal Data only to provide the services
+              under the Agreement.
             </p>
           </section>
 

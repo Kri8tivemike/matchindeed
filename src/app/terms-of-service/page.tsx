@@ -55,6 +55,9 @@ export default function TermsOfServicePage() {
               By creating an account or using matchindeed.com, you agree to these
               Terms of Service. If you do not agree, do not use the platform.
             </p>
+            <p className="mt-3 text-sm leading-7 text-gray-700">
+              MatchIndeed is operated by Firstoutlook Ltd (UK).
+            </p>
           </section>
 
           <section className="mt-8">
