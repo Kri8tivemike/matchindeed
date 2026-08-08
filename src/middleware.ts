@@ -37,6 +37,13 @@ const NOINDEX_PREFIXES = [
  */
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const normalizedPathname = pathname.replace(/\/{2,}/g, "/");
+
+  if (normalizedPathname !== pathname) {
+    const normalizedUrl = request.nextUrl.clone();
+    normalizedUrl.pathname = normalizedPathname;
+    return NextResponse.redirect(normalizedUrl, 308);
+  }
 
   // Defensive: if a Supabase password-recovery PKCE redirect lands on the
   // site root (which happens when /reset-password is not in the auth
