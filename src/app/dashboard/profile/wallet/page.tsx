@@ -46,6 +46,7 @@ import {
 // Types
 // ---------------------------------------------------------------
 type Currency = "NGN" | "USD" | "GBP";
+type PaymentProvider = "flutterwave" | "paymentwall";
 
 type WalletData = {
   balance_cents: number;
@@ -296,6 +297,7 @@ function WalletContent() {
   const [creditPurchaseAmount, setCreditPurchaseAmount] = useState<number>(0);
   const [processing, setProcessing] = useState(false);
   const [txFilter, setTxFilter] = useState<TxFilter>("all");
+  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>("flutterwave");
   const creditPurchaseAvailability = getCreditPurchaseAvailability(
     subscriptionInfo?.tier,
     currency
@@ -322,18 +324,28 @@ function WalletContent() {
   const transactionIdParam = searchParams.get("transaction_id");
   const txRefParam = searchParams.get("tx_ref");
   const openParam = searchParams.get("open");
+  const paymentwallParam = searchParams.get("paymentwall");
 
   useEffect(() => {
-    if (successParam === "true" && transactionIdParam) {
-      if (handledSuccessRef.current.has(transactionIdParam)) {
+    const paymentwallSuccess = paymentwallParam === "success" && txRefParam;
+    const flutterwaveSuccess = successParam === "true" && transactionIdParam;
+    const sessionKey = paymentwallSuccess ? txRefParam : transactionIdParam;
+
+    if ((flutterwaveSuccess || paymentwallSuccess) && sessionKey) {
+      if (handledSuccessRef.current.has(sessionKey)) {
         return;
       }
-      handledSuccessRef.current.add(transactionIdParam);
+      handledSuccessRef.current.add(sessionKey);
 
       toast.success("Payment successful! Updating your wallet...");
       fetchWalletDataRef
         .current()
-        .then(() => verifyAndProcessPaymentRef.current(transactionIdParam, txRefParam));
+        .then(() => {
+          if (paymentwallSuccess) {
+            return verifyPaymentwallCheckout(sessionKey);
+          }
+          return verifyAndProcessPaymentRef.current(transactionIdParam!, txRefParam);
+        });
 
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
@@ -341,6 +353,7 @@ function WalletContent() {
         url.searchParams.delete("transaction_id");
         url.searchParams.delete("tx_ref");
         url.searchParams.delete("status");
+        url.searchParams.delete("paymentwall");
         window.history.replaceState({}, "", `${url.pathname}${url.search}`);
       }
     }
@@ -348,7 +361,7 @@ function WalletContent() {
       handledCancelRef.current = true;
       toast.warning("Payment was canceled.");
     }
-  }, [successParam, canceledParam, transactionIdParam, txRefParam, toast]);
+  }, [successParam, canceledParam, transactionIdParam, txRefParam, paymentwallParam, toast]);
 
   useEffect(() => {
     if (!openParam || loading) return;
@@ -458,6 +471,58 @@ function WalletContent() {
       processedSessionsRef.current.delete(transactionId);
     }
   };
+
+  async function verifyPaymentwallCheckout(txRef: string) {
+    try {
+      if (processedSessionsRef.current.has(txRef)) {
+        return;
+      }
+
+      processedSessionsRef.current.add(txRef);
+      const maxAttempts = 8;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+
+        const response = await fetch(
+          `/api/verify-paymentwall?txRef=${encodeURIComponent(txRef)}`,
+          { cache: "no-store" }
+        );
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          if (attempt === maxAttempts - 1) {
+            toast.error(data.error || "Failed to verify Paymentwall checkout. Please refresh.");
+          }
+          continue;
+        }
+
+        if (data.success) {
+          if (data.type === "wallet_topup") {
+            toast.success("Wallet topped up successfully!");
+          }
+          if (data.type === "credit_purchase") {
+            toast.success(`${data.creditsAdded || data.credits || 0} credits added!`);
+          }
+          await fetchWalletData();
+          return;
+        }
+
+        if (data.retryable && attempt < maxAttempts - 1) {
+          continue;
+        }
+
+        toast.error(data.message || "Paymentwall has not confirmed this payment yet.");
+        return;
+      }
+    } catch {
+      toast.error("Failed to verify Paymentwall checkout. Please refresh.");
+    } finally {
+      processedSessionsRef.current.delete(txRef);
+    }
+  }
 
   // ---------------------------------------------------------------
   // Fetch wallet data
@@ -705,6 +770,7 @@ function WalletContent() {
           amountCents,
           type: "credit_purchase",
           credits: creditPurchaseAmount,
+          provider: paymentProvider,
         }),
       });
       if (!res.ok) {
@@ -766,7 +832,14 @@ function WalletContent() {
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, currency, amount: topUpAmount, amountCents, type: "wallet_topup" }),
+        body: JSON.stringify({
+          userId: user.id,
+          currency,
+          amount: topUpAmount,
+          amountCents,
+          type: "wallet_topup",
+          provider: paymentProvider,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
@@ -1267,6 +1340,28 @@ function WalletContent() {
                   </p>
                 </div>
               )}
+
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-gray-700 sm:text-sm">
+                  Payment Method
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["flutterwave", "paymentwall"] as PaymentProvider[]).map((provider) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      onClick={() => setPaymentProvider(provider)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors sm:text-sm ${
+                        paymentProvider === provider
+                          ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                      }`}
+                    >
+                      {provider === "flutterwave" ? "Flutterwave" : "Paymentwall"}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-2 border-t border-gray-100 p-3 sm:gap-3 sm:p-4">
@@ -1422,6 +1517,28 @@ function WalletContent() {
                   </div>
                 );
               })()}
+
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-gray-700 sm:text-sm">
+                  Card Checkout Method
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["flutterwave", "paymentwall"] as PaymentProvider[]).map((provider) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      onClick={() => setPaymentProvider(provider)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors sm:text-sm ${
+                        paymentProvider === provider
+                          ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                      }`}
+                    >
+                      {provider === "flutterwave" ? "Flutterwave" : "Paymentwall"}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-2 border-t border-gray-100 p-3 sm:gap-3 sm:p-4">

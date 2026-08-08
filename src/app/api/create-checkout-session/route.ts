@@ -8,6 +8,11 @@ import {
   createFlutterwavePaymentLink,
   createTxRef,
 } from "@/lib/payments/flutterwave";
+import {
+  createPaymentwallCheckoutUrl,
+  createPaymentwallTxRef,
+  type PaymentwallPaymentType,
+} from "@/lib/payments/paymentwall";
 
 const baseTierPricing: Record<
   string,
@@ -36,6 +41,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
 
 const SUPPORTED_CURRENCIES = new Set(["ngn", "usd", "gbp"]);
+const SUPPORTED_PAYMENT_PROVIDERS = new Set(["flutterwave", "paymentwall"]);
 
 const PAYMENT_MINIMUM_AMOUNT_CENTS: Record<string, number> = {
   usd: 50,
@@ -124,6 +130,110 @@ function getUserDisplayName(user: NonNullable<Awaited<ReturnType<typeof getAuthe
   return fullName || user.email || "MatchIndeed User";
 }
 
+function normalizePaymentProvider(value: unknown): "flutterwave" | "paymentwall" | null {
+  if (typeof value !== "string" || !value.trim()) return "flutterwave";
+  const normalized = value.trim().toLowerCase();
+  if (!SUPPORTED_PAYMENT_PROVIDERS.has(normalized)) return null;
+  return normalized === "paymentwall" ? "paymentwall" : "flutterwave";
+}
+
+async function createHostedCheckout(params: {
+  provider: "flutterwave" | "paymentwall";
+  prefix: "wallet" | "credits" | "subscription";
+  userId: string;
+  amountCents: number;
+  currency: string;
+  redirectPath: string;
+  customer: {
+    email: string;
+    name?: string | null;
+  };
+  title: string;
+  description: string;
+  paymentType: PaymentwallPaymentType;
+  tier?: string | null;
+  credits?: number | null;
+}) {
+  if (params.provider === "paymentwall") {
+    const txRef = createPaymentwallTxRef(
+      params.paymentType === "subscription"
+        ? {
+            paymentType: "subscription",
+            userId: params.userId,
+            currency: params.currency,
+            amountCents: params.amountCents,
+            tier: params.tier || "",
+          }
+        : params.paymentType === "credit_purchase"
+          ? {
+              paymentType: "credit_purchase",
+              userId: params.userId,
+              currency: params.currency,
+              amountCents: params.amountCents,
+              credits: params.credits || 0,
+            }
+          : {
+              paymentType: "wallet_topup",
+              userId: params.userId,
+              currency: params.currency,
+              amountCents: params.amountCents,
+            }
+    );
+    const successUrl = `${appUrl}${params.redirectPath}?paymentwall=success&tx_ref=${encodeURIComponent(txRef)}`;
+
+    const payment = createPaymentwallCheckoutUrl({
+      txRef,
+      userId: params.userId,
+      amount: amountToMajorUnit(params.amountCents),
+      amountCents: params.amountCents,
+      currency: params.currency,
+      successUrl,
+      customer: params.customer,
+      title: params.title,
+      paymentType: params.paymentType,
+    });
+
+    return {
+      provider: "paymentwall" as const,
+      sessionId: txRef,
+      txRef,
+      url: payment.url,
+    };
+  }
+
+  const txRef = createTxRef(params.prefix, params.userId);
+  const meta: Record<string, string | number | boolean | null> = {
+    userId: params.userId,
+    type: params.paymentType,
+    amountCents: params.amountCents,
+    currency: params.currency,
+  };
+  if (params.tier) {
+    meta.tier = params.tier;
+  }
+  if (params.credits) {
+    meta.credits = params.credits;
+  }
+
+  const payment = await createFlutterwavePaymentLink({
+    txRef,
+    amount: amountToMajorUnit(params.amountCents),
+    currency: params.currency,
+    redirectUrl: `${appUrl}${params.redirectPath}?success=true`,
+    customer: params.customer,
+    title: params.title,
+    description: params.description,
+    meta,
+  });
+
+  return {
+    provider: "flutterwave" as const,
+    sessionId: txRef,
+    txRef,
+    url: payment.link,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const authenticatedUser = await getAuthenticatedUser();
@@ -132,7 +242,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { tier, userId, currency = "usd", amount, amountCents, type, credits } = body;
+    const {
+      tier,
+      userId,
+      currency = "usd",
+      amount,
+      amountCents,
+      type,
+      credits,
+      provider: requestedProvider,
+    } = body;
 
     if (userId && userId !== authenticatedUser.id) {
       return NextResponse.json(
@@ -146,6 +265,14 @@ export async function POST(request: NextRequest) {
     if (!SUPPORTED_CURRENCIES.has(normalizedCurrency)) {
       return NextResponse.json(
         { error: "Invalid currency. Supported: NGN, USD, GBP" },
+        { status: 400 }
+      );
+    }
+
+    const provider = normalizePaymentProvider(requestedProvider);
+    if (!provider) {
+      return NextResponse.json(
+        { error: "Invalid payment provider. Supported: Flutterwave, Paymentwall" },
         { status: 400 }
       );
     }
@@ -181,31 +308,22 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: minTopUpError }, { status: 400 });
       }
 
-      const txRef = createTxRef("wallet", sessionUserId);
-      const payment = await createFlutterwavePaymentLink({
-        txRef,
-        amount: amountToMajorUnit(parsedAmountCents),
+      const payment = await createHostedCheckout({
+        provider,
+        prefix: "wallet",
+        userId: sessionUserId,
+        amountCents: parsedAmountCents,
         currency: normalizedCurrency,
-        redirectUrl: `${appUrl}/dashboard/wallet?success=true`,
         customer,
         title: "MatchIndeed Wallet Top-up",
         description: `Add ${normalizedCurrency.toUpperCase()} ${(
           parsedAmountCents / 100
         ).toFixed(2)} to your wallet`,
-        meta: {
-          userId: sessionUserId,
-          type: "wallet_topup",
-          amountCents: parsedAmountCents,
-          currency: normalizedCurrency,
-        },
+        paymentType: "wallet_topup",
+        redirectPath: "/dashboard/wallet",
       });
 
-      return NextResponse.json({
-        provider: "flutterwave",
-        sessionId: txRef,
-        txRef,
-        url: payment.link,
-      });
+      return NextResponse.json(payment);
     }
 
     if (type === "credit_purchase") {
@@ -242,32 +360,23 @@ export async function POST(request: NextRequest) {
         }, { status: 400 });
       }
 
-      const txRef = createTxRef("credits", sessionUserId);
-      const payment = await createFlutterwavePaymentLink({
-        txRef,
-        amount: amountToMajorUnit(parsedAmountCents),
+      const payment = await createHostedCheckout({
+        provider,
+        prefix: "credits",
+        userId: sessionUserId,
+        amountCents: parsedAmountCents,
         currency: normalizedCurrency,
-        redirectUrl: `${appUrl}/dashboard/wallet?success=true`,
         customer,
         title: "MatchIndeed Credits Purchase",
         description: `Purchase ${parsedCredits} MatchIndeed credit${
           parsedCredits !== 1 ? "s" : ""
         }`,
-        meta: {
-          userId: sessionUserId,
-          type: "credit_purchase",
-          amountCents: parsedAmountCents,
-          currency: normalizedCurrency,
-          credits: parsedCredits,
-        },
+        paymentType: "credit_purchase",
+        redirectPath: "/dashboard/wallet",
+        credits: parsedCredits,
       });
 
-      return NextResponse.json({
-        provider: "flutterwave",
-        sessionId: txRef,
-        txRef,
-        url: payment.link,
-      });
+      return NextResponse.json(payment);
     }
 
     if (!tier) {
@@ -293,32 +402,23 @@ export async function POST(request: NextRequest) {
       finalAmount = Math.round(amount * 100);
     }
 
-    const txRef = createTxRef("subscription", sessionUserId);
-    const payment = await createFlutterwavePaymentLink({
-      txRef,
-      amount: amountToMajorUnit(finalAmount),
+    const payment = await createHostedCheckout({
+      provider,
+      prefix: "subscription",
+      userId: sessionUserId,
+      amountCents: finalAmount,
       currency: normalizedCurrency,
-      redirectUrl: `${appUrl}/dashboard/profile/subscription?success=true`,
       customer,
       title: `MatchIndeed ${tierPricing.name}`,
       description: `Subscribe to MatchIndeed ${tierPricing.name}`,
-      meta: {
-        userId: sessionUserId,
-        type: "subscription",
-        tier: String(tier).toLowerCase(),
-        amountCents: finalAmount,
-        currency: normalizedCurrency,
-      },
+      paymentType: "subscription",
+      redirectPath: "/dashboard/profile/subscription",
+      tier: String(tier).toLowerCase(),
     });
 
-    return NextResponse.json({
-      provider: "flutterwave",
-      sessionId: txRef,
-      txRef,
-      url: payment.link,
-    });
+    return NextResponse.json(payment);
   } catch (error: unknown) {
-    console.error("Error creating Flutterwave checkout:", error);
+    console.error("Error creating checkout:", error);
     const msg = getCheckoutErrorMessage(error);
     return NextResponse.json({ error: msg }, { status: 500 });
   }

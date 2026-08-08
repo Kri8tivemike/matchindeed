@@ -55,6 +55,7 @@ export type FlutterwaveOneTimePayment = OneTimeCheckoutPayload & {
   transactionId: string;
   txRef: string;
   status: string;
+  provider?: "flutterwave" | "paymentwall";
 };
 
 function parsePositiveInteger(value: unknown): number | null {
@@ -294,9 +295,11 @@ export async function processOneTimeFlutterwavePayment(
   }
 
   const reference = payment.txRef || `flw-${payment.transactionId}`;
+  const provider = payment.provider || "flutterwave";
+  const providerLabel = provider === "paymentwall" ? "Paymentwall" : "Flutterwave";
 
   if (payment.paymentType === "wallet_topup") {
-    const description = `Wallet top-up via Flutterwave - ${payment.currency.toUpperCase()} ${(
+    const description = `Wallet top-up via ${providerLabel} - ${payment.currency.toUpperCase()} ${(
       payment.amountCents / 100
     ).toFixed(2)} [tx_ref:${reference}]`;
 
@@ -321,8 +324,9 @@ export async function processOneTimeFlutterwavePayment(
       await trackCustomerEventSafely(payment.userId, CIO_EVENTS.WALLET_FUNDED, {
         amount_cents: payment.amountCents,
         currency: payment.currency,
-        flutterwave_transaction_id: payment.transactionId,
-        flutterwave_tx_ref: reference,
+        payment_provider: provider,
+        payment_transaction_id: payment.transactionId,
+        payment_tx_ref: reference,
         payment_type: payment.paymentType,
       });
     }
@@ -344,7 +348,7 @@ export async function processOneTimeFlutterwavePayment(
 
   const description = `Purchased ${payment.credits} credit${
     payment.credits !== 1 ? "s" : ""
-  } via Flutterwave checkout [tx_ref:${reference}]`;
+  } via ${providerLabel} checkout [tx_ref:${reference}]`;
 
   const { data, error } = await supabase
     .rpc("apply_stripe_credit_purchase", {
@@ -377,7 +381,10 @@ export async function processOneTimeFlutterwavePayment(
     await recordCreditTransaction(supabase, {
       userId: payment.userId,
       amount: payment.credits,
-      actionType: "credit_purchase_flutterwave_checkout",
+      actionType:
+        provider === "paymentwall"
+          ? "credit_purchase_paymentwall_checkout"
+          : "credit_purchase_flutterwave_checkout",
       description,
     });
 
@@ -385,8 +392,9 @@ export async function processOneTimeFlutterwavePayment(
       credits: payment.credits,
       amount_cents: payment.amountCents,
       currency: payment.currency,
-      flutterwave_transaction_id: payment.transactionId,
-      flutterwave_tx_ref: reference,
+      payment_provider: provider,
+      payment_transaction_id: payment.transactionId,
+      payment_tx_ref: reference,
       payment_type: payment.paymentType,
     });
   }

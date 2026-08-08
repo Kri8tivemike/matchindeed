@@ -36,6 +36,7 @@ export type FlutterwaveSubscriptionPayment = {
   amountCents: number;
   currency: string;
   status: string;
+  provider?: "flutterwave" | "paymentwall";
 };
 
 const PROCESSING_STALE_MS = 60_000;
@@ -436,9 +437,11 @@ export async function processSubscriptionFlutterwavePayment(
 ): Promise<ProcessResult> {
   const tier = payment.tier?.toLowerCase();
   const sessionId = payment.txRef || `flw-${payment.transactionId}`;
+  const provider = payment.provider || "flutterwave";
+  const providerLabel = provider === "paymentwall" ? "Paymentwall" : "Flutterwave";
 
   if (!payment.userId || !tier) {
-    throw new Error("Missing Flutterwave subscription metadata.");
+    throw new Error(`Missing ${providerLabel} subscription metadata.`);
   }
 
   if (payment.status !== "successful") {
@@ -460,7 +463,7 @@ export async function processSubscriptionFlutterwavePayment(
     tier,
     String(payment.transactionId),
     payment.amountCents,
-    "flutterwave_checkout"
+    provider === "paymentwall" ? "paymentwall_checkout" : "flutterwave_checkout"
   );
 
   if (claim.state === "completed") {
@@ -568,7 +571,7 @@ export async function processSubscriptionFlutterwavePayment(
           amount_cents: payment.amountCents,
           balance_before_cents: walletBalance,
           balance_after_cents: walletBalance,
-          description: `Subscription payment for ${tier} plan via Flutterwave`,
+          description: `Subscription payment for ${tier} plan via ${providerLabel}`,
           reference_id: sessionId,
         });
 
@@ -620,8 +623,9 @@ export async function processSubscriptionFlutterwavePayment(
       tier,
       amount_cents: payment.amountCents,
       currency: payment.currency,
-      flutterwave_transaction_id: payment.transactionId,
-      flutterwave_tx_ref: sessionId,
+      payment_provider: provider,
+      payment_transaction_id: payment.transactionId,
+      payment_tx_ref: sessionId,
       starts_at: startsAt.toISOString(),
       expires_at: expiresAt.toISOString(),
     });
@@ -633,9 +637,9 @@ export async function processSubscriptionFlutterwavePayment(
         tier,
         amount_cents: payment.amountCents,
         currency: payment.currency,
-        payment_provider: "flutterwave",
-        flutterwave_transaction_id: payment.transactionId,
-        flutterwave_tx_ref: sessionId,
+        payment_provider: provider,
+        payment_transaction_id: payment.transactionId,
+        payment_tx_ref: sessionId,
         starts_at: startsAt.toISOString(),
         expires_at: expiresAt.toISOString(),
       }
@@ -644,8 +648,9 @@ export async function processSubscriptionFlutterwavePayment(
     await evaluateFirstSubscriptionReferralReward(supabase, payment.userId, {
       tier,
       amount_cents: payment.amountCents,
-      flutterwave_transaction_id: payment.transactionId,
-      flutterwave_tx_ref: sessionId,
+      payment_provider: provider,
+      payment_transaction_id: payment.transactionId,
+      payment_tx_ref: sessionId,
     }).catch((referralError) => {
       console.warn(
         "[checkout-processing] referral subscription reward skipped:",

@@ -49,6 +49,7 @@ function shouldCenterCheckoutError(message: string): boolean {
 // Types
 // ---------------------------------------------------------------
 type Currency = "NGN" | "USD" | "GBP";
+type PaymentProvider = "flutterwave" | "paymentwall";
 type Pricing = { ngn: number; usd: number; gbp: number };
 
 type SubscriptionTier = {
@@ -259,6 +260,7 @@ function SubscriptionContent() {
     "idle" | "processing" | "success" | "error"
   >("idle");
   const [subscriptionActivationMessage, setSubscriptionActivationMessage] = useState("");
+  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>("flutterwave");
 
   // Wallet-pay confirmation modal
   const [walletPayModal, setWalletPayModal] = useState<{
@@ -351,6 +353,53 @@ function SubscriptionContent() {
     fetchSubscriptionState();
   }, [fetchSubscriptionState]);
 
+  const verifyPaymentwallCheckout = useCallback(async (
+    txRef: string
+  ): Promise<VerifySubscriptionResult> => {
+    try {
+      const response = await fetch(
+        `/api/verify-paymentwall?txRef=${encodeURIComponent(txRef)}`,
+        { cache: "no-store" }
+      );
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message:
+            data.error ||
+            data.message ||
+            "We couldn't verify your Paymentwall checkout right now.",
+        };
+      }
+
+      const activationSnapshot = await fetchSubscriptionState();
+      const resolvedResult = resolveSubscriptionActivationResult(
+        {
+          success: Boolean(data.success),
+          retryable: Boolean(data.retryable),
+          message: data.message || "Paymentwall is still confirming this subscription.",
+          tier: typeof data.tier === "string" ? data.tier : undefined,
+        },
+        activationSnapshot
+      );
+
+      return {
+        success: resolvedResult.success,
+        retryable: resolvedResult.retryable,
+        message: resolvedResult.message,
+        tier: typeof data.tier === "string" ? data.tier : undefined,
+      };
+    } catch {
+      return {
+        success: false,
+        retryable: true,
+        message:
+          "We're still waiting for Paymentwall to confirm your subscription. Please hold on for a moment.",
+      };
+    }
+  }, [fetchSubscriptionState]);
+
   const verifyAndProcessSubscription = useCallback(async (
     transactionId: string,
     txRef: string | null
@@ -411,6 +460,7 @@ function SubscriptionContent() {
   const canceledParam = searchParams.get("canceled");
   const transactionIdParam = searchParams.get("transaction_id");
   const txRefParam = searchParams.get("tx_ref");
+  const paymentwallParam = searchParams.get("paymentwall");
 
   useEffect(() => {
     const clearCheckoutParams = () => {
@@ -421,14 +471,19 @@ function SubscriptionContent() {
       url.searchParams.delete("tx_ref");
       url.searchParams.delete("status");
       url.searchParams.delete("canceled");
+      url.searchParams.delete("paymentwall");
       window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     };
 
-    if (successParam === "true" && transactionIdParam) {
-      if (processedSubscriptionSessionsRef.current.has(transactionIdParam)) {
+    const paymentwallSuccess = paymentwallParam === "success" && txRefParam;
+    const flutterwaveSuccess = successParam === "true" && transactionIdParam;
+    const sessionKey = paymentwallSuccess ? txRefParam : transactionIdParam;
+
+    if ((flutterwaveSuccess || paymentwallSuccess) && sessionKey) {
+      if (processedSubscriptionSessionsRef.current.has(sessionKey)) {
         return;
       }
-      processedSubscriptionSessionsRef.current.add(transactionIdParam);
+      processedSubscriptionSessionsRef.current.add(sessionKey);
       let cancelled = false;
       let redirectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -441,7 +496,9 @@ function SubscriptionContent() {
 
       const runVerification = async () => {
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          const result = await verifyAndProcessSubscription(transactionIdParam, txRefParam);
+          const result = paymentwallSuccess
+            ? await verifyPaymentwallCheckout(txRefParam)
+            : await verifyAndProcessSubscription(transactionIdParam!, txRefParam);
 
           if (cancelled) return;
 
@@ -521,9 +578,11 @@ function SubscriptionContent() {
     canceledParam,
     transactionIdParam,
     txRefParam,
+    paymentwallParam,
     toast,
     dismissAll,
     verifyAndProcessSubscription,
+    verifyPaymentwallCheckout,
     fetchSubscriptionState,
   ]);
 
@@ -597,6 +656,7 @@ function SubscriptionContent() {
           userId: user.id,
           currency,
           amount: price,
+          provider: paymentProvider,
         }),
       });
       if (!res.ok) {
@@ -679,6 +739,31 @@ function SubscriptionContent() {
               <span className="rounded-full bg-gray-100 px-3 py-1 text-[10px] font-medium text-gray-500">
                 {currency === "NGN" ? "₦ NGN" : currency === "GBP" ? "£ GBP" : "$ USD"}
               </span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Payment Method</p>
+              <p className="text-xs text-gray-500">
+                Choose your preferred hosted checkout provider.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:w-auto">
+              {(["flutterwave", "paymentwall"] as PaymentProvider[]).map((provider) => (
+                <button
+                  key={provider}
+                  type="button"
+                  onClick={() => setPaymentProvider(provider)}
+                  className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${
+                    paymentProvider === provider
+                      ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {provider === "flutterwave" ? "Flutterwave" : "Paymentwall"}
+                </button>
+              ))}
             </div>
           </div>
 
