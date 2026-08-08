@@ -15,6 +15,14 @@ const fallbackFontVars = {
 } as CSSProperties;
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com";
+const normalizeRepeatedSlashesScript = `
+  (function () {
+    var normalizedPath = window.location.pathname.replace(/\\/{2,}/g, "/");
+    if (normalizedPath !== window.location.pathname) {
+      window.location.replace(normalizedPath + window.location.search + window.location.hash);
+    }
+  })();
+`;
 
 export const metadata: Metadata = {
   title: {
@@ -65,6 +73,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{ __html: normalizeRepeatedSlashesScript }}
+        />
+      </head>
       <body className="antialiased" style={fallbackFontVars}>
         {/* Filters out known Next.js 16 dev warnings (params enumeration) */}
         <DevWarningFilter />
