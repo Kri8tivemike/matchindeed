@@ -34,6 +34,7 @@ import {
   resolveSubscriptionActivationResult,
   type SubscriptionActivationSnapshot,
 } from "@/lib/subscription/checkout-verification";
+import { buildCheckoutUrl, type CheckoutTier } from "@/lib/payments/checkout-intent";
 
 function shouldCenterCheckoutError(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -49,11 +50,10 @@ function shouldCenterCheckoutError(message: string): boolean {
 // Types
 // ---------------------------------------------------------------
 type Currency = "NGN" | "USD" | "GBP";
-type PaymentProvider = "flutterwave" | "paymentwall";
 type Pricing = { ngn: number; usd: number; gbp: number };
 
 type SubscriptionTier = {
-  id: string;
+  id: CheckoutTier;
   name: string;
   pricing: Pricing;
   priceId: string;
@@ -207,39 +207,6 @@ function getPrice(tier: SubscriptionTier, currency: Currency): number {
   return tier.pricing.usd;
 }
 
-async function redirectToPaymentCheckout(
-  url: string | null | undefined
-) {
-  if (!url) {
-    throw new Error("Unable to start payment checkout right now. Please try again.");
-  }
-
-  const isFramed = (() => {
-    try {
-      return window.self !== window.top;
-    } catch {
-      return true;
-    }
-  })();
-
-  if (isFramed) {
-    // Hosted payment checkout must be opened as a top-level page, not inside an iframe.
-    try {
-      if (window.top) {
-        window.top.location.href = url;
-        return;
-      }
-    } catch {
-      // Ignore and fallback below.
-    }
-
-    const popup = window.open(url, "_blank", "noopener,noreferrer");
-    if (popup) return;
-  }
-
-  window.location.assign(url);
-}
-
 // ---------------------------------------------------------------
 // Inner component (uses useSearchParams)
 // ---------------------------------------------------------------
@@ -260,7 +227,6 @@ function SubscriptionContent() {
     "idle" | "processing" | "success" | "error"
   >("idle");
   const [subscriptionActivationMessage, setSubscriptionActivationMessage] = useState("");
-  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>("flutterwave");
 
   // Wallet-pay confirmation modal
   const [walletPayModal, setWalletPayModal] = useState<{
@@ -589,11 +555,7 @@ function SubscriptionContent() {
   // ---------------------------------------------------------------
   // Subscribe
   // ---------------------------------------------------------------
-  const handleSubscribe = async (
-    tier: SubscriptionTier,
-    useWallet = false,
-    providerOverride: PaymentProvider = paymentProvider
-  ) => {
+  const handleSubscribe = async (tier: SubscriptionTier, useWallet = false) => {
     try {
       setProcessing(tier.id);
       const user = await getCurrentUserSafe();
@@ -651,24 +613,11 @@ function SubscriptionContent() {
         }
       }
 
-      // Hosted checkout
-      const res = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tier: tier.id,
-          userId: user.id,
-          currency,
-          amount: price,
-          provider: providerOverride,
-        }),
+      window.location.href = buildCheckoutUrl({
+        type: "subscription",
+        tier: tier.id,
+        currency,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(err.error || "Checkout failed");
-      }
-      const { url } = await res.json();
-      await redirectToPaymentCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
       if (shouldCenterCheckoutError(msg)) {
@@ -743,31 +692,6 @@ function SubscriptionContent() {
               <span className="rounded-full bg-gray-100 px-3 py-1 text-[10px] font-medium text-gray-500">
                 {currency === "NGN" ? "₦ NGN" : currency === "GBP" ? "£ GBP" : "$ USD"}
               </span>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Payment Method</p>
-              <p className="text-xs text-gray-500">
-                Choose your preferred hosted checkout provider.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:w-auto">
-              {(["flutterwave", "paymentwall"] as PaymentProvider[]).map((provider) => (
-                <button
-                  key={provider}
-                  type="button"
-                  onClick={() => setPaymentProvider(provider)}
-                  className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${
-                    paymentProvider === provider
-                      ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
-                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  {provider === "flutterwave" ? "Flutterwave" : "Paymentwall"}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -880,57 +804,30 @@ function SubscriptionContent() {
                       </div>
                     )}
 
-                    <div className="mt-4 space-y-2">
-                      <button
-                        onClick={() => {
-                          setPaymentProvider("flutterwave");
-                          handleSubscribe(tier, false, "flutterwave");
-                        }}
-                        disabled={isCurrent || !!isProc}
-                        className={`flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
-                          isCurrent
-                            ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                            : tier.popular
-                              ? "bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white shadow-md hover:shadow-lg"
-                              : "bg-gray-900 text-white hover:bg-gray-800"
-                        }`}
-                      >
-                        {isProc ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Processing...
-                          </>
-                        ) : isCurrent ? (
-                          "Current Plan"
-                        ) : (
-                          <>
-                            Pay with Flutterwave <ArrowRight className="h-3.5 w-3.5" />
-                          </>
-                        )}
-                      </button>
-
-                      {!isCurrent && (
-                        <button
-                          onClick={() => {
-                            setPaymentProvider("paymentwall");
-                            handleSubscribe(tier, false, "paymentwall");
-                          }}
-                          disabled={!!isProc}
-                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#1f419a]/30 bg-white py-2.5 text-sm font-semibold text-[#1f419a] transition-colors hover:bg-[#eef2ff] disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
-                        >
-                          {isProc ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Processing...
-                            </>
-                          ) : (
-                            <>
-                              Pay with Paymentwall <ArrowRight className="h-3.5 w-3.5" />
-                            </>
-                          )}
-                        </button>
+                    <button
+                      onClick={() => handleSubscribe(tier)}
+                      disabled={isCurrent || !!isProc}
+                      className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
+                        isCurrent
+                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          : tier.popular
+                            ? "bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white shadow-md hover:shadow-lg"
+                            : "bg-gray-900 text-white hover:bg-gray-800"
+                      }`}
+                    >
+                      {isProc ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Processing...
+                        </>
+                      ) : isCurrent ? (
+                        "Current Plan"
+                      ) : (
+                        <>
+                          Choose Plan <ArrowRight className="h-3.5 w-3.5" />
+                        </>
                       )}
-                    </div>
+                    </button>
                   </div>
                 </div>
               );

@@ -41,12 +41,12 @@ import {
   MONTHLY_CREDITS_BY_TIER,
   PRICE_PER_CREDIT_BY_TIER,
 } from "@/lib/credits/config";
+import { buildCheckoutUrl } from "@/lib/payments/checkout-intent";
 
 // ---------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------
 type Currency = "NGN" | "USD" | "GBP";
-type PaymentProvider = "flutterwave" | "paymentwall";
 
 type WalletData = {
   balance_cents: number;
@@ -241,39 +241,6 @@ function getCreditPurchaseAvailability(
   return { canPurchase: true, pricePerCredit, reason: "" };
 }
 
-async function redirectToPaymentCheckout(
-  url: string | null | undefined
-) {
-  if (!url) {
-    throw new Error("Unable to start payment checkout right now. Please try again.");
-  }
-
-  const isFramed = (() => {
-    try {
-      return window.self !== window.top;
-    } catch {
-      return true;
-    }
-  })();
-
-  if (isFramed) {
-    // Hosted payment checkout must be opened as a top-level page, not inside an iframe.
-    try {
-      if (window.top) {
-        window.top.location.href = url;
-        return;
-      }
-    } catch {
-      // Ignore and fallback below.
-    }
-
-    const popup = window.open(url, "_blank", "noopener,noreferrer");
-    if (popup) return;
-  }
-
-  window.location.assign(url);
-}
-
 // ---------------------------------------------------------------
 // Inner component (uses useSearchParams)
 // ---------------------------------------------------------------
@@ -297,7 +264,6 @@ function WalletContent() {
   const [creditPurchaseAmount, setCreditPurchaseAmount] = useState<number>(0);
   const [processing, setProcessing] = useState(false);
   const [txFilter, setTxFilter] = useState<TxFilter>("all");
-  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>("flutterwave");
   const creditPurchaseAvailability = getCreditPurchaseAvailability(
     subscriptionInfo?.tier,
     currency
@@ -759,26 +725,12 @@ function WalletContent() {
         }
       }
 
-      // Card checkout fallback
-      const res = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          currency,
-          amount: totalAmount,
-          amountCents,
-          type: "credit_purchase",
-          credits: creditPurchaseAmount,
-          provider: paymentProvider,
-        }),
+      window.location.href = buildCheckoutUrl({
+        type: "credit_purchase",
+        amountCents,
+        credits: creditPurchaseAmount,
+        currency,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(err.error || "Checkout failed");
-      }
-      const { url } = await res.json();
-      await redirectToPaymentCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
       if (shouldCenterCheckoutError(msg)) {
@@ -829,24 +781,11 @@ function WalletContent() {
         return;
       }
       const amountCents = Math.round(topUpAmount * 100);
-      const res = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          currency,
-          amount: topUpAmount,
-          amountCents,
-          type: "wallet_topup",
-          provider: paymentProvider,
-        }),
+      window.location.href = buildCheckoutUrl({
+        type: "wallet_topup",
+        amountCents,
+        currency,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(err.error || "Checkout failed");
-      }
-      const { url } = await res.json();
-      await redirectToPaymentCheckout(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start checkout.";
       if (shouldCenterCheckoutError(msg)) {
@@ -1341,26 +1280,8 @@ function WalletContent() {
                 </div>
               )}
 
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-gray-700 sm:text-sm">
-                  Payment Method
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["flutterwave", "paymentwall"] as PaymentProvider[]).map((provider) => (
-                    <button
-                      key={provider}
-                      type="button"
-                      onClick={() => setPaymentProvider(provider)}
-                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors sm:text-sm ${
-                        paymentProvider === provider
-                          ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
-                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                      }`}
-                    >
-                      {provider === "flutterwave" ? "Flutterwave" : "Paymentwall"}
-                    </button>
-                  ))}
-                </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 sm:text-sm">
+                You will choose Flutterwave or Paymentwall on the next checkout page.
               </div>
             </div>
 
@@ -1518,26 +1439,8 @@ function WalletContent() {
                 );
               })()}
 
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-gray-700 sm:text-sm">
-                  Card Checkout Method
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["flutterwave", "paymentwall"] as PaymentProvider[]).map((provider) => (
-                    <button
-                      key={provider}
-                      type="button"
-                      onClick={() => setPaymentProvider(provider)}
-                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors sm:text-sm ${
-                        paymentProvider === provider
-                          ? "border-[#1f419a] bg-[#eef2ff] text-[#1f419a]"
-                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                      }`}
-                    >
-                      {provider === "flutterwave" ? "Flutterwave" : "Paymentwall"}
-                    </button>
-                  ))}
-                </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 sm:text-sm">
+                If your wallet balance is not enough, you will choose Flutterwave or Paymentwall on the next checkout page.
               </div>
             </div>
 
@@ -1586,7 +1489,7 @@ function WalletContent() {
                             100
                         )
                         ? "Pay from Wallet"
-                        : "Use Wallet or Card"}
+                        : "Continue to Checkout"}
                     </span>
                   </>
                 )}
