@@ -589,7 +589,11 @@ function SubscriptionContent() {
   // ---------------------------------------------------------------
   // Subscribe
   // ---------------------------------------------------------------
-  const handleSubscribe = async (tier: SubscriptionTier, useWallet = false) => {
+  const handleSubscribe = async (
+    tier: SubscriptionTier,
+    useWallet = false,
+    providerOverride: PaymentProvider = paymentProvider
+  ) => {
     try {
       setProcessing(tier.id);
       const user = await getCurrentUserSafe();
@@ -647,7 +651,7 @@ function SubscriptionContent() {
         }
       }
 
-      // Flutterwave checkout
+      // Hosted checkout
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -656,7 +660,7 @@ function SubscriptionContent() {
           userId: user.id,
           currency,
           amount: price,
-          provider: paymentProvider,
+          provider: providerOverride,
         }),
       });
       if (!res.ok) {
@@ -876,31 +880,57 @@ function SubscriptionContent() {
                       </div>
                     )}
 
-                    {/* Subscribe button */}
-                    <button
-                      onClick={() => handleSubscribe(tier)}
-                      disabled={isCurrent || !!isProc}
-                      className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
-                        isCurrent
-                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                          : tier.popular
-                            ? "bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white shadow-md hover:shadow-lg"
-                            : "bg-gray-900 text-white hover:bg-gray-800"
-                      }`}
-                    >
-                      {isProc ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Processing...
-                        </>
-                      ) : isCurrent ? (
-                        "Current Plan"
-                      ) : (
-                        <>
-                          Subscribe <ArrowRight className="h-3.5 w-3.5" />
-                        </>
+                    <div className="mt-4 space-y-2">
+                      <button
+                        onClick={() => {
+                          setPaymentProvider("flutterwave");
+                          handleSubscribe(tier, false, "flutterwave");
+                        }}
+                        disabled={isCurrent || !!isProc}
+                        className={`flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all ${
+                          isCurrent
+                            ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                            : tier.popular
+                              ? "bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white shadow-md hover:shadow-lg"
+                              : "bg-gray-900 text-white hover:bg-gray-800"
+                        }`}
+                      >
+                        {isProc ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Processing...
+                          </>
+                        ) : isCurrent ? (
+                          "Current Plan"
+                        ) : (
+                          <>
+                            Pay with Flutterwave <ArrowRight className="h-3.5 w-3.5" />
+                          </>
+                        )}
+                      </button>
+
+                      {!isCurrent && (
+                        <button
+                          onClick={() => {
+                            setPaymentProvider("paymentwall");
+                            handleSubscribe(tier, false, "paymentwall");
+                          }}
+                          disabled={!!isProc}
+                          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#1f419a]/30 bg-white py-2.5 text-sm font-semibold text-[#1f419a] transition-colors hover:bg-[#eef2ff] disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+                        >
+                          {isProc ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              Pay with Paymentwall <ArrowRight className="h-3.5 w-3.5" />
+                            </>
+                          )}
+                        </button>
                       )}
-                    </button>
+                    </div>
                   </div>
                 </div>
               );
