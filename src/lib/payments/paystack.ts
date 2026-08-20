@@ -59,8 +59,10 @@ async function paystackRequest<T>(path: string, init: RequestInit = {}) {
   const response = await fetch(`https://api.paystack.co${path}`, {
     ...init,
     headers: {
+      Accept: "application/json",
       Authorization: `Bearer ${getPaystackSecretKey()}`,
       "Content-Type": "application/json",
+      "User-Agent": "MatchIndeed/1.0 (+https://matchindeed.com)",
       ...(init.headers || {}),
     },
   });
