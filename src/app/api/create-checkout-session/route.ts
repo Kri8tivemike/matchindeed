@@ -9,10 +9,10 @@ import {
   createTxRef,
 } from "@/lib/payments/flutterwave";
 import {
-  createPaymentwallCheckoutUrl,
-  createPaymentwallTxRef,
-  type PaymentwallPaymentType,
-} from "@/lib/payments/paymentwall";
+  createPaystackCheckoutUrl,
+  createPaystackTxRef,
+  type PaystackPaymentType,
+} from "@/lib/payments/paystack";
 
 const baseTierPricing: Record<
   string,
@@ -41,7 +41,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
 
 const SUPPORTED_CURRENCIES = new Set(["ngn", "usd", "gbp"]);
-const SUPPORTED_PAYMENT_PROVIDERS = new Set(["flutterwave", "paymentwall"]);
+const SUPPORTED_PAYMENT_PROVIDERS = new Set(["flutterwave", "paystack"]);
 
 const PAYMENT_MINIMUM_AMOUNT_CENTS: Record<string, number> = {
   usd: 50,
@@ -130,15 +130,15 @@ function getUserDisplayName(user: NonNullable<Awaited<ReturnType<typeof getAuthe
   return fullName || user.email || "MatchIndeed User";
 }
 
-function normalizePaymentProvider(value: unknown): "flutterwave" | "paymentwall" | null {
+function normalizePaymentProvider(value: unknown): "flutterwave" | "paystack" | null {
   if (typeof value !== "string" || !value.trim()) return "flutterwave";
   const normalized = value.trim().toLowerCase();
   if (!SUPPORTED_PAYMENT_PROVIDERS.has(normalized)) return null;
-  return normalized === "paymentwall" ? "paymentwall" : "flutterwave";
+  return normalized === "paystack" ? "paystack" : "flutterwave";
 }
 
 async function createHostedCheckout(params: {
-  provider: "flutterwave" | "paymentwall";
+  provider: "flutterwave" | "paystack";
   prefix: "wallet" | "credits" | "subscription";
   userId: string;
   amountCents: number;
@@ -150,12 +150,12 @@ async function createHostedCheckout(params: {
   };
   title: string;
   description: string;
-  paymentType: PaymentwallPaymentType;
+  paymentType: PaystackPaymentType;
   tier?: string | null;
   credits?: number | null;
 }) {
-  if (params.provider === "paymentwall") {
-    const txRef = createPaymentwallTxRef(
+  if (params.provider === "paystack") {
+    const txRef = createPaystackTxRef(
       params.paymentType === "subscription"
         ? {
             paymentType: "subscription",
@@ -179,22 +179,28 @@ async function createHostedCheckout(params: {
               amountCents: params.amountCents,
             }
     );
-    const successUrl = `${appUrl}${params.redirectPath}?paymentwall=success&tx_ref=${encodeURIComponent(txRef)}`;
+    const successUrl = `${appUrl}${params.redirectPath}?paystack=success`;
 
-    const payment = createPaymentwallCheckoutUrl({
-      txRef,
-      userId: params.userId,
-      amount: amountToMajorUnit(params.amountCents),
+    const payment = await createPaystackCheckoutUrl({
+      reference: txRef,
       amountCents: params.amountCents,
       currency: params.currency,
-      successUrl,
+      callbackUrl: successUrl,
       customer: params.customer,
       title: params.title,
       paymentType: params.paymentType,
+      metadata: {
+        userId: params.userId,
+        type: params.paymentType,
+        amountCents: params.amountCents,
+        currency: params.currency,
+        tier: params.tier || null,
+        credits: params.credits || null,
+      },
     });
 
     return {
-      provider: "paymentwall" as const,
+      provider: "paystack" as const,
       sessionId: txRef,
       txRef,
       url: payment.url,
@@ -272,7 +278,7 @@ export async function POST(request: NextRequest) {
     const provider = normalizePaymentProvider(requestedProvider);
     if (!provider) {
       return NextResponse.json(
-        { error: "Invalid payment provider. Supported: Flutterwave, Paymentwall" },
+        { error: "Invalid payment provider. Supported: Flutterwave, Paystack" },
         { status: 400 }
       );
     }

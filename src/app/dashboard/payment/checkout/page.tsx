@@ -51,9 +51,9 @@ const providerCards: Array<{
     badge: "Recommended",
   },
   {
-    id: "paymentwall",
-    title: "Paymentwall",
-    description: "Alternative hosted checkout for supported international payment methods.",
+    id: "paystack",
+    title: "Paystack",
+    description: "Cards, bank transfer, USSD, and Nigerian payment options in hosted checkout.",
   },
 ];
 

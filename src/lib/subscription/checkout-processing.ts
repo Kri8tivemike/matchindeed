@@ -36,7 +36,7 @@ export type FlutterwaveSubscriptionPayment = {
   amountCents: number;
   currency: string;
   status: string;
-  provider?: "flutterwave" | "paymentwall";
+  provider?: "flutterwave" | "paystack";
 };
 
 const PROCESSING_STALE_MS = 60_000;
@@ -438,7 +438,7 @@ export async function processSubscriptionFlutterwavePayment(
   const tier = payment.tier?.toLowerCase();
   const sessionId = payment.txRef || `flw-${payment.transactionId}`;
   const provider = payment.provider || "flutterwave";
-  const providerLabel = provider === "paymentwall" ? "Paymentwall" : "Flutterwave";
+  const providerLabel = provider === "paystack" ? "Paystack" : "Flutterwave";
 
   if (!payment.userId || !tier) {
     throw new Error(`Missing ${providerLabel} subscription metadata.`);
@@ -463,7 +463,7 @@ export async function processSubscriptionFlutterwavePayment(
     tier,
     String(payment.transactionId),
     payment.amountCents,
-    provider === "paymentwall" ? "paymentwall_checkout" : "flutterwave_checkout"
+    provider === "paystack" ? "paystack_checkout" : "flutterwave_checkout"
   );
 
   if (claim.state === "completed") {

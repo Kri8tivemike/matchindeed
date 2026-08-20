@@ -1,5 +1,5 @@
 export type CheckoutCurrency = "NGN" | "USD" | "GBP";
-export type CheckoutPaymentProvider = "flutterwave" | "paymentwall";
+export type CheckoutPaymentProvider = "flutterwave" | "paystack";
 export type CheckoutIntentType = "subscription" | "wallet_topup" | "credit_purchase";
 export type CheckoutTier = "basic" | "standard" | "premium" | "vip";
 

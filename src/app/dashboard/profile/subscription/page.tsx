@@ -319,12 +319,12 @@ function SubscriptionContent() {
     fetchSubscriptionState();
   }, [fetchSubscriptionState]);
 
-  const verifyPaymentwallCheckout = useCallback(async (
-    txRef: string
+  const verifyPaystackCheckout = useCallback(async (
+    reference: string
   ): Promise<VerifySubscriptionResult> => {
     try {
       const response = await fetch(
-        `/api/verify-paymentwall?txRef=${encodeURIComponent(txRef)}`,
+        `/api/verify-paystack?reference=${encodeURIComponent(reference)}`,
         { cache: "no-store" }
       );
       const data = await response.json().catch(() => ({}));
@@ -335,7 +335,7 @@ function SubscriptionContent() {
           message:
             data.error ||
             data.message ||
-            "We couldn't verify your Paymentwall checkout right now.",
+            "We couldn't verify your Paystack checkout right now.",
         };
       }
 
@@ -344,7 +344,7 @@ function SubscriptionContent() {
         {
           success: Boolean(data.success),
           retryable: Boolean(data.retryable),
-          message: data.message || "Paymentwall is still confirming this subscription.",
+          message: data.message || "Paystack is still confirming this subscription.",
           tier: typeof data.tier === "string" ? data.tier : undefined,
         },
         activationSnapshot
@@ -361,7 +361,7 @@ function SubscriptionContent() {
         success: false,
         retryable: true,
         message:
-          "We're still waiting for Paymentwall to confirm your subscription. Please hold on for a moment.",
+          "We're still waiting for Paystack to confirm your subscription. Please hold on for a moment.",
       };
     }
   }, [fetchSubscriptionState]);
@@ -426,7 +426,9 @@ function SubscriptionContent() {
   const canceledParam = searchParams.get("canceled");
   const transactionIdParam = searchParams.get("transaction_id");
   const txRefParam = searchParams.get("tx_ref");
-  const paymentwallParam = searchParams.get("paymentwall");
+  const paystackParam = searchParams.get("paystack");
+  const paystackReferenceParam =
+    searchParams.get("reference") || searchParams.get("trxref") || txRefParam;
 
   useEffect(() => {
     const clearCheckoutParams = () => {
@@ -437,15 +439,17 @@ function SubscriptionContent() {
       url.searchParams.delete("tx_ref");
       url.searchParams.delete("status");
       url.searchParams.delete("canceled");
-      url.searchParams.delete("paymentwall");
+      url.searchParams.delete("paystack");
+      url.searchParams.delete("reference");
+      url.searchParams.delete("trxref");
       window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     };
 
-    const paymentwallSuccess = paymentwallParam === "success" && txRefParam;
+    const paystackSuccess = paystackParam === "success" && paystackReferenceParam;
     const flutterwaveSuccess = successParam === "true" && transactionIdParam;
-    const sessionKey = paymentwallSuccess ? txRefParam : transactionIdParam;
+    const sessionKey = paystackSuccess ? paystackReferenceParam : transactionIdParam;
 
-    if ((flutterwaveSuccess || paymentwallSuccess) && sessionKey) {
+    if ((flutterwaveSuccess || paystackSuccess) && sessionKey) {
       if (processedSubscriptionSessionsRef.current.has(sessionKey)) {
         return;
       }
@@ -462,8 +466,8 @@ function SubscriptionContent() {
 
       const runVerification = async () => {
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          const result = paymentwallSuccess
-            ? await verifyPaymentwallCheckout(txRefParam)
+          const result = paystackSuccess
+            ? await verifyPaystackCheckout(paystackReferenceParam)
             : await verifyAndProcessSubscription(transactionIdParam!, txRefParam);
 
           if (cancelled) return;
@@ -544,11 +548,12 @@ function SubscriptionContent() {
     canceledParam,
     transactionIdParam,
     txRefParam,
-    paymentwallParam,
+    paystackParam,
+    paystackReferenceParam,
     toast,
     dismissAll,
     verifyAndProcessSubscription,
-    verifyPaymentwallCheckout,
+    verifyPaystackCheckout,
     fetchSubscriptionState,
   ]);
 

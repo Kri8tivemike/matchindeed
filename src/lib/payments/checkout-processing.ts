@@ -55,7 +55,7 @@ export type FlutterwaveOneTimePayment = OneTimeCheckoutPayload & {
   transactionId: string;
   txRef: string;
   status: string;
-  provider?: "flutterwave" | "paymentwall";
+  provider?: "flutterwave" | "paystack";
 };
 
 function parsePositiveInteger(value: unknown): number | null {
@@ -296,7 +296,7 @@ export async function processOneTimeFlutterwavePayment(
 
   const reference = payment.txRef || `flw-${payment.transactionId}`;
   const provider = payment.provider || "flutterwave";
-  const providerLabel = provider === "paymentwall" ? "Paymentwall" : "Flutterwave";
+  const providerLabel = provider === "paystack" ? "Paystack" : "Flutterwave";
 
   if (payment.paymentType === "wallet_topup") {
     const description = `Wallet top-up via ${providerLabel} - ${payment.currency.toUpperCase()} ${(
@@ -382,8 +382,8 @@ export async function processOneTimeFlutterwavePayment(
       userId: payment.userId,
       amount: payment.credits,
       actionType:
-        provider === "paymentwall"
-          ? "credit_purchase_paymentwall_checkout"
+        provider === "paystack"
+          ? "credit_purchase_paystack_checkout"
           : "credit_purchase_flutterwave_checkout",
       description,
     });

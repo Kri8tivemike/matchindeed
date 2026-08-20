@@ -290,14 +290,16 @@ function WalletContent() {
   const transactionIdParam = searchParams.get("transaction_id");
   const txRefParam = searchParams.get("tx_ref");
   const openParam = searchParams.get("open");
-  const paymentwallParam = searchParams.get("paymentwall");
+  const paystackParam = searchParams.get("paystack");
+  const paystackReferenceParam =
+    searchParams.get("reference") || searchParams.get("trxref") || txRefParam;
 
   useEffect(() => {
-    const paymentwallSuccess = paymentwallParam === "success" && txRefParam;
+    const paystackSuccess = paystackParam === "success" && paystackReferenceParam;
     const flutterwaveSuccess = successParam === "true" && transactionIdParam;
-    const sessionKey = paymentwallSuccess ? txRefParam : transactionIdParam;
+    const sessionKey = paystackSuccess ? paystackReferenceParam : transactionIdParam;
 
-    if ((flutterwaveSuccess || paymentwallSuccess) && sessionKey) {
+    if ((flutterwaveSuccess || paystackSuccess) && sessionKey) {
       if (handledSuccessRef.current.has(sessionKey)) {
         return;
       }
@@ -307,8 +309,8 @@ function WalletContent() {
       fetchWalletDataRef
         .current()
         .then(() => {
-          if (paymentwallSuccess) {
-            return verifyPaymentwallCheckout(sessionKey);
+          if (paystackSuccess) {
+            return verifyPaystackCheckout(sessionKey);
           }
           return verifyAndProcessPaymentRef.current(transactionIdParam!, txRefParam);
         });
@@ -319,7 +321,9 @@ function WalletContent() {
         url.searchParams.delete("transaction_id");
         url.searchParams.delete("tx_ref");
         url.searchParams.delete("status");
-        url.searchParams.delete("paymentwall");
+        url.searchParams.delete("paystack");
+        url.searchParams.delete("reference");
+        url.searchParams.delete("trxref");
         window.history.replaceState({}, "", `${url.pathname}${url.search}`);
       }
     }
@@ -327,7 +331,7 @@ function WalletContent() {
       handledCancelRef.current = true;
       toast.warning("Payment was canceled.");
     }
-  }, [successParam, canceledParam, transactionIdParam, txRefParam, paymentwallParam, toast]);
+  }, [successParam, canceledParam, transactionIdParam, txRefParam, paystackParam, paystackReferenceParam, toast]);
 
   useEffect(() => {
     if (!openParam || loading) return;
@@ -438,13 +442,13 @@ function WalletContent() {
     }
   };
 
-  async function verifyPaymentwallCheckout(txRef: string) {
+  async function verifyPaystackCheckout(reference: string) {
     try {
-      if (processedSessionsRef.current.has(txRef)) {
+      if (processedSessionsRef.current.has(reference)) {
         return;
       }
 
-      processedSessionsRef.current.add(txRef);
+      processedSessionsRef.current.add(reference);
       const maxAttempts = 8;
 
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -453,14 +457,14 @@ function WalletContent() {
         }
 
         const response = await fetch(
-          `/api/verify-paymentwall?txRef=${encodeURIComponent(txRef)}`,
+          `/api/verify-paystack?reference=${encodeURIComponent(reference)}`,
           { cache: "no-store" }
         );
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
           if (attempt === maxAttempts - 1) {
-            toast.error(data.error || "Failed to verify Paymentwall checkout. Please refresh.");
+            toast.error(data.error || "Failed to verify Paystack checkout. Please refresh.");
           }
           continue;
         }
@@ -480,13 +484,13 @@ function WalletContent() {
           continue;
         }
 
-        toast.error(data.message || "Paymentwall has not confirmed this payment yet.");
+        toast.error(data.message || "Paystack has not confirmed this payment yet.");
         return;
       }
     } catch {
-      toast.error("Failed to verify Paymentwall checkout. Please refresh.");
+      toast.error("Failed to verify Paystack checkout. Please refresh.");
     } finally {
-      processedSessionsRef.current.delete(txRef);
+      processedSessionsRef.current.delete(reference);
     }
   }
 
@@ -1281,7 +1285,7 @@ function WalletContent() {
               )}
 
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 sm:text-sm">
-                You will choose Flutterwave or Paymentwall on the next checkout page.
+                You will choose Flutterwave or Paystack on the next checkout page.
               </div>
             </div>
 
@@ -1440,7 +1444,7 @@ function WalletContent() {
               })()}
 
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 sm:text-sm">
-                If your wallet balance is not enough, you will choose Flutterwave or Paymentwall on the next checkout page.
+                If your wallet balance is not enough, you will choose Flutterwave or Paystack on the next checkout page.
               </div>
             </div>
 
