@@ -44,4 +44,8 @@ test("USD can explicitly enable Paystack", () => {
     isPaymentProviderSupported("paystack", "USD", { paystackUsdEnabled: true }),
     true
   );
+  assert.equal(
+    getRecommendedPaymentProvider("USD", { paystackUsdEnabled: true }),
+    "flutterwave"
+  );
 });

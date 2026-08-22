@@ -196,16 +196,14 @@ function CheckoutContent() {
   const selectedProvider =
     checkoutCurrency && supportedProviders.includes(provider)
       ? provider
-      : supportedProviders[0];
+      : checkoutCurrency
+        ? getRecommendedPaymentProvider(checkoutCurrency)
+        : undefined;
 
   useEffect(() => {
     if (!checkoutCurrency) return;
-    setProvider((current) =>
-      supportedProviders.includes(current)
-        ? current
-        : getRecommendedPaymentProvider(checkoutCurrency)
-    );
-  }, [checkoutCurrency, supportedProviders]);
+    setProvider(getRecommendedPaymentProvider(checkoutCurrency));
+  }, [checkoutCurrency]);
 
   useEffect(() => {
     fetch("/api/subscription-pricing")
@@ -366,7 +364,9 @@ function CheckoutContent() {
                         ? "Paystack is recommended for Nigerian Naira payments. Flutterwave is also available."
                         : checkoutCurrency === "GBP"
                           ? "Flutterwave supports GBP checkout for UK and international customers."
-                          : "Flutterwave is currently used for USD and international checkout."}
+                          : supportedProviders.includes("paystack")
+                            ? "Flutterwave and Paystack are available for USD checkout."
+                            : "Flutterwave is currently used for USD and international checkout."}
                     </p>
                   )}
                 </div>

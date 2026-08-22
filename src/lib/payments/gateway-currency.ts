@@ -45,7 +45,7 @@ export function getRecommendedPaymentProvider(
   const supportedProviders = getSupportedPaymentProviders(currency, options);
   return currency === "NGN" && supportedProviders.includes("paystack")
     ? "paystack"
-    : supportedProviders[0];
+    : "flutterwave";
 }
 
 export function getUnsupportedProviderMessage(
