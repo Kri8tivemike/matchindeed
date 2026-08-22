@@ -13,6 +13,14 @@ import {
   createPaystackTxRef,
   type PaystackPaymentType,
 } from "@/lib/payments/paystack";
+import type {
+  CheckoutCurrency,
+  CheckoutPaymentProvider,
+} from "@/lib/payments/checkout-intent";
+import {
+  getUnsupportedProviderMessage,
+  isPaymentProviderSupported,
+} from "@/lib/payments/gateway-currency";
 
 const baseTierPricing: Record<
   string,
@@ -130,7 +138,7 @@ function getUserDisplayName(user: NonNullable<Awaited<ReturnType<typeof getAuthe
   return fullName || user.email || "MatchIndeed User";
 }
 
-function normalizePaymentProvider(value: unknown): "flutterwave" | "paystack" | null {
+function normalizePaymentProvider(value: unknown): CheckoutPaymentProvider | null {
   if (typeof value !== "string" || !value.trim()) return "flutterwave";
   const normalized = value.trim().toLowerCase();
   if (!SUPPORTED_PAYMENT_PROVIDERS.has(normalized)) return null;
@@ -279,6 +287,14 @@ export async function POST(request: NextRequest) {
     if (!provider) {
       return NextResponse.json(
         { error: "Invalid payment provider. Supported: Flutterwave, Paystack" },
+        { status: 400 }
+      );
+    }
+
+    const checkoutCurrency = normalizedCurrency.toUpperCase() as CheckoutCurrency;
+    if (!isPaymentProviderSupported(provider, checkoutCurrency)) {
+      return NextResponse.json(
+        { error: getUnsupportedProviderMessage(provider, checkoutCurrency) },
         { status: 400 }
       );
     }

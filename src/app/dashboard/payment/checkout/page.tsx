@@ -29,6 +29,10 @@ import {
   buildCheckoutUrl,
   parseCheckoutIntent,
 } from "@/lib/payments/checkout-intent";
+import {
+  getRecommendedPaymentProvider,
+  getSupportedPaymentProviders,
+} from "@/lib/payments/gateway-currency";
 
 type CheckoutDisplay = {
   title: string;
@@ -38,24 +42,23 @@ type CheckoutDisplay = {
   payload: Record<string, string | number>;
 };
 
-const providerCards: Array<{
+const providerCards: Record<CheckoutPaymentProvider, {
   id: CheckoutPaymentProvider;
   title: string;
   description: string;
-  badge?: string;
-}> = [
-  {
+}> = {
+  flutterwave: {
     id: "flutterwave",
     title: "Flutterwave",
-    description: "Cards, bank transfer, USSD, and local payment options where available.",
-    badge: "Recommended",
+    description:
+      "Supports NGN, GBP, USD, and international card/account checkout where available.",
   },
-  {
+  paystack: {
     id: "paystack",
     title: "Paystack",
-    description: "Cards, bank transfer, USSD, and Nigerian payment options in hosted checkout.",
+    description: "Best for Nigerian Naira payments.",
   },
-];
+};
 
 function formatMoney(amountCents: number, currency: CheckoutCurrency) {
   const amount = amountCents / 100;
@@ -172,7 +175,7 @@ function redirectToHostedCheckout(url: string | null | undefined) {
 function CheckoutContent() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const [provider, setProvider] = useState<CheckoutPaymentProvider>("flutterwave");
+  const [provider, setProvider] = useState<CheckoutPaymentProvider>("paystack");
   const [processing, setProcessing] = useState(false);
   const [subscriptionPricing, setSubscriptionPricing] = useState(DEFAULT_SUBSCRIPTION_PRICING);
 
@@ -184,6 +187,25 @@ function CheckoutContent() {
   const display = parsedIntent.ok
     ? getCheckoutDisplay(parsedIntent.intent, subscriptionPricing)
     : null;
+  const checkoutCurrency = parsedIntent.ok ? parsedIntent.intent.currency : null;
+  const supportedProviders = useMemo(
+    () =>
+      checkoutCurrency ? getSupportedPaymentProviders(checkoutCurrency) : [],
+    [checkoutCurrency]
+  );
+  const selectedProvider =
+    checkoutCurrency && supportedProviders.includes(provider)
+      ? provider
+      : supportedProviders[0];
+
+  useEffect(() => {
+    if (!checkoutCurrency) return;
+    setProvider((current) =>
+      supportedProviders.includes(current)
+        ? current
+        : getRecommendedPaymentProvider(checkoutCurrency)
+    );
+  }, [checkoutCurrency, supportedProviders]);
 
   useEffect(() => {
     fetch("/api/subscription-pricing")
@@ -227,7 +249,7 @@ function CheckoutContent() {
         body: JSON.stringify({
           ...display.payload,
           userId: user.id,
-          provider,
+          provider: selectedProvider,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -303,8 +325,9 @@ function CheckoutContent() {
                   </p>
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {providerCards.map((card) => {
-                      const selected = provider === card.id;
+                    {supportedProviders.map((providerId) => {
+                      const card = providerCards[providerId];
+                      const selected = selectedProvider === card.id;
                       return (
                         <button
                           key={card.id}
@@ -324,9 +347,9 @@ function CheckoutContent() {
                           </div>
                           <div className="mt-4 flex items-center gap-2">
                             <h3 className="text-base font-bold text-gray-900">{card.title}</h3>
-                            {card.badge && (
+                            {checkoutCurrency === "NGN" && card.id === "paystack" && (
                               <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
-                                {card.badge}
+                                Recommended
                               </span>
                             )}
                           </div>
@@ -337,6 +360,15 @@ function CheckoutContent() {
                       );
                     })}
                   </div>
+                  {checkoutCurrency && (
+                    <p className="mt-3 text-xs leading-5 text-gray-500">
+                      {checkoutCurrency === "NGN"
+                        ? "Paystack is recommended for Nigerian Naira payments. Flutterwave is also available."
+                        : checkoutCurrency === "GBP"
+                          ? "Flutterwave supports GBP checkout for UK and international customers."
+                          : "Flutterwave is currently used for USD and international checkout."}
+                    </p>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
