@@ -208,7 +208,7 @@ export default function ForgotPasswordPage() {
 
                 {/* Bot Protection */}
                 <CloudflareTurnstile
-                  key={turnstileAttempt}
+                  resetKey={turnstileAttempt}
                   onVerify={handleTurnstileVerify}
                   onExpire={() => setTurnstileToken(null)}
                   onError={() => setTurnstileToken(null)}
