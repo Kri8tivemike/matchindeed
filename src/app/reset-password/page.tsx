@@ -146,8 +146,7 @@ function ResetPasswordContent() {
 
         window.history.replaceState({}, document.title, "/reset-password");
         if (active) setRecoveryReady(true);
-      } catch (sessionError) {
-        console.error("Password recovery session error:", sessionError);
+      } catch {
         if (active) {
           setError("Invalid or expired reset link. Please request a new one.");
         }
