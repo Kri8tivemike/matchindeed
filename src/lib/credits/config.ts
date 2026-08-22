@@ -9,17 +9,17 @@ export const MONTHLY_CREDITS_BY_TIER: Record<TierId, number> = {
   vip: UNLIMITED_CREDITS,
 };
 
-// ₦100/credit for all tiers. Minimum purchase = 10 credits (₦1,000 / $0.70 / £0.54).
+// ₦100/credit for all tiers. Minimum purchase = 10 credits (₦1,000 / $0.70).
 // Provider-specific payment floors are enforced by the shared checkout gateway rules.
 export const MIN_CREDIT_PURCHASE = 10;
 
 export const PRICE_PER_CREDIT_BY_TIER: Record<
   Exclude<TierId, "vip">,
-  { ngn: number; usd: number; gbp: number }
+  { ngn: number; usd: number }
 > = {
-  basic: { ngn: 100, usd: 0.07, gbp: 0.05 },
-  standard: { ngn: 100, usd: 0.07, gbp: 0.05 },
-  premium: { ngn: 100, usd: 0.07, gbp: 0.05 },
+  basic: { ngn: 100, usd: 0.07 },
+  standard: { ngn: 100, usd: 0.07 },
+  premium: { ngn: 100, usd: 0.07 },
 };
 
 export function normalizeTier(rawTier?: string | null): TierId {

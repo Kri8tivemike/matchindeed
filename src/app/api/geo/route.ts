@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-/** Derive currency from 2-letter country code */
-function countryToCurrency(cc: string): "ngn" | "usd" | "gbp" {
-  const upper = (cc || "").toUpperCase();
-  if (upper === "NG") return "ngn";
-  if (upper === "GB" || upper === "UK") return "gbp";
-  return "usd";
-}
+import { getApiCurrencyForCountryCode } from "@/lib/payments/region-currency";
 
 /** Extract client IP from request headers (set by proxies: Vercel, Cloudflare, Tailscale, etc.) */
 function getClientIp(request: NextRequest): string | null {
@@ -35,8 +28,7 @@ function isLocalhost(ip: string): boolean {
  *
  * Returns: { country_code, currency }
  * - Nigeria (NG) → currency: "ngn"
- * - UK (GB) → currency: "gbp"
- * - Else → currency: "usd"
+ * - Every other country → currency: "usd"
  */
 export async function GET(request: NextRequest) {
   try {
@@ -45,7 +37,7 @@ export async function GET(request: NextRequest) {
     const cfCountry = request.headers.get("cf-ipcountry");
     const ccHeader = vercelCountry || cfCountry;
     if (ccHeader && ccHeader !== "XX" && ccHeader.length === 2) {
-      const currency = countryToCurrency(ccHeader);
+      const currency = getApiCurrencyForCountryCode(ccHeader);
       return NextResponse.json({ country_code: ccHeader.toUpperCase(), currency });
     }
 
@@ -62,7 +54,7 @@ export async function GET(request: NextRequest) {
     }
 
     const cc = (data.country_code || "").toUpperCase();
-    const currency = countryToCurrency(cc || "");
+    const currency = getApiCurrencyForCountryCode(cc);
     return NextResponse.json({ country_code: cc || null, currency });
   } catch (err) {
     console.error("Geo API error:", err);

@@ -8,13 +8,11 @@ const BASE_GATEWAY_CURRENCY_SUPPORT: Record<
   readonly CheckoutPaymentProvider[]
 > = {
   NGN: ["paystack", "flutterwave"],
-  GBP: ["flutterwave"],
   USD: ["flutterwave"],
 };
 
 const BASE_MINIMUM_AMOUNT_CENTS: Record<CheckoutCurrency, number> = {
   NGN: 5000,
-  GBP: 30,
   USD: 50,
 };
 

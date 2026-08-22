@@ -40,6 +40,7 @@ import AgeSelect from "@/components/AgeSelect";
 import GooglePlacesAutocomplete from "@/components/GooglePlacesAutocomplete";
 import { isLikelyGoogleSuggestedLocation, normalizeLocation } from "@/lib/location";
 import { supabase } from "@/lib/supabase";
+import { getApiCurrencyForCountryCode } from "@/lib/payments/region-currency";
 
 type NextLinkProps = ComponentProps<typeof NextLink>;
 
@@ -276,14 +277,14 @@ export default function Home() {
 
   // Pricing state — fetched from API, currency from IP (user can override via dropdown)
   const [pricing, setPricing] = useState<{
-    basic: { ngn: number; usd: number; gbp: number };
-    standard: { ngn: number; usd: number; gbp: number };
-    premium: { ngn: number; usd: number; gbp: number };
-    vip: { ngn: number; usd: number; gbp: number };
+    basic: { ngn: number; usd: number };
+    standard: { ngn: number; usd: number };
+    premium: { ngn: number; usd: number };
+    vip: { ngn: number; usd: number };
   } | null>(null);
   const [pricingLoading, setPricingLoading] = useState(true);
   const [geoLoaded, setGeoLoaded] = useState(false);
-  const [currency, setCurrency] = useState<"ngn" | "usd" | "gbp">("usd");
+  const [currency, setCurrency] = useState<"ngn" | "usd">("usd");
   const [currencySelectorOpen, setCurrencySelectorOpen] = useState(false);
 
   // Defensive: when Supabase's password-recovery email redirects users to the
@@ -399,18 +400,11 @@ export default function Home() {
     router.push("/");
   }, [router]);
 
-  // Fetch pricing and detect currency from IP (client spec: Nigeria→NGN, UK→GBP, else USD)
+  // Fetch pricing and detect currency from IP (Nigeria → NGN, everywhere else → USD)
   useEffect(() => {
     if (!SHOW_HOME_PRICING_SECTION) {
       return;
     }
-
-    const deriveCurrency = (cc: string): "ngn" | "usd" | "gbp" => {
-      const upper = (cc || "").toUpperCase();
-      if (upper === "NG") return "ngn";
-      if (upper === "GB" || upper === "UK") return "gbp";
-      return "usd";
-    };
 
     const load = async () => {
       try {
@@ -429,30 +423,30 @@ export default function Home() {
             if (fallback.ok) {
               const data = await fallback.json();
               const cc = data.country_code || data.countryCode;
-              if (cc) c = deriveCurrency(cc);
+              if (cc) c = getApiCurrencyForCountryCode(cc);
             }
           } catch {
             // Ignore; keep USD
           }
         }
 
-        setCurrency(c === "ngn" || c === "gbp" ? c : "usd");
+        setCurrency(c === "ngn" ? c : "usd");
         setGeoLoaded(true);
         if (pricingData.tiers) {
-          const map: Record<string, { ngn: number; usd: number; gbp: number }> = {};
+          const map: Record<string, { ngn: number; usd: number }> = {};
           for (const t of pricingData.tiers) {
             map[t.id] = t.pricing;
           }
-          setPricing(map as { basic: { ngn: number; usd: number; gbp: number }; standard: { ngn: number; usd: number; gbp: number }; premium: { ngn: number; usd: number; gbp: number }; vip: { ngn: number; usd: number; gbp: number } });
+          setPricing(map as { basic: { ngn: number; usd: number }; standard: { ngn: number; usd: number }; premium: { ngn: number; usd: number }; vip: { ngn: number; usd: number } });
         }
       } catch {
         // Fallback to client-spec defaults; keep USD if geo fails
         setGeoLoaded(true);
         setPricing({
-          basic: { ngn: 7500, usd: 9.99, gbp: 7.99 },
-          standard: { ngn: 15000, usd: 19.99, gbp: 16.99 },
-          premium: { ngn: 27000, usd: 34.99, gbp: 29.99 },
-          vip: { ngn: 1500000, usd: 1000, gbp: 800 },
+          basic: { ngn: 7500, usd: 9.99 },
+          standard: { ngn: 15000, usd: 19.99 },
+          premium: { ngn: 27000, usd: 34.99 },
+          vip: { ngn: 1500000, usd: 1000 },
         });
       } finally {
         setPricingLoading(false);
@@ -465,7 +459,6 @@ export default function Home() {
   const currencyOptions = [
     { value: "ngn" as const, label: "₦ NGN", full: "Nigerian Naira" },
     { value: "usd" as const, label: "$ USD", full: "US Dollars" },
-    { value: "gbp" as const, label: "£ GBP", full: "British Pounds" },
   ];
 
   /** Handle search form submission */
@@ -1242,17 +1235,15 @@ export default function Home() {
               const p =
                 pricing?.[plan.id] ??
                 {
-                  basic: { ngn: 7500, usd: 9.99, gbp: 7.99 },
-                  standard: { ngn: 15000, usd: 19.99, gbp: 16.99 },
-                  premium: { ngn: 27000, usd: 34.99, gbp: 29.99 },
-                  vip: { ngn: 1500000, usd: 1000, gbp: 800 },
+                  basic: { ngn: 7500, usd: 9.99 },
+                  standard: { ngn: 15000, usd: 19.99 },
+                  premium: { ngn: 27000, usd: 34.99 },
+                  vip: { ngn: 1500000, usd: 1000 },
                 }[plan.id];
               const fmt =
                 currency === "ngn"
                   ? (n: number) => `₦${n.toLocaleString()}`
-                  : currency === "gbp"
-                    ? (n: number) => `£${n.toLocaleString()}`
-                    : (n: number) => `$${n.toLocaleString()}`;
+                  : (n: number) => `$${n.toLocaleString()}`;
               const priceStr = fmt(p[currency]);
               const period = "/month";
               return (

@@ -7,14 +7,19 @@ type SubscriptionPricingRow = {
   tier_id: string;
   price_ngn: number;
   price_usd: number;
-  price_gbp: number;
 };
 
 type UpdatePricingBody = {
   tier_id: string;
   price_ngn: number;
   price_usd: number;
-  price_gbp: number;
+};
+
+const LEGACY_GBP_DEFAULTS: Record<string, number> = {
+  basic: 7.99,
+  standard: 16.99,
+  premium: 29.99,
+  vip: 800,
 };
 
 /**
@@ -31,7 +36,6 @@ export async function GET() {
     // - tier_id (string)
     // - price_ngn (number)
     // - price_usd (number)
-    // - price_gbp (number)
     // - updated_at (timestamp)
     // - updated_by (uuid, references admin users)
     
@@ -52,7 +56,6 @@ export async function GET() {
         pricing: {
           ngn: p.price_ngn,
           usd: p.price_usd,
-          gbp: p.price_gbp,
         },
       }));
 
@@ -94,7 +97,7 @@ export async function GET() {
  * Allows administrators to update subscription pricing
  * 
  * Requires admin authentication
- * Body: { tier_id: string, price_ngn: number, price_usd: number, price_gbp: number }
+ * Body: { tier_id: string, price_ngn: number, price_usd: number }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -109,11 +112,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = (await request.json()) as Partial<UpdatePricingBody>;
-    const { tier_id, price_ngn, price_usd, price_gbp } = body;
+    const { tier_id, price_ngn, price_usd } = body;
 
-    if (!tier_id || price_ngn === undefined || price_usd === undefined || price_gbp === undefined) {
+    if (!tier_id || price_ngn === undefined || price_usd === undefined) {
       return NextResponse.json(
-        { error: "Missing required fields: tier_id, price_ngn, price_usd, price_gbp" },
+        { error: "Missing required fields: tier_id, price_ngn, price_usd" },
         { status: 400 }
       );
     }
@@ -127,14 +130,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate prices are positive numbers
-    if (price_ngn < 0 || price_usd < 0 || price_gbp < 0) {
+    if (price_ngn < 0 || price_usd < 0) {
       return NextResponse.json(
         { error: "Prices must be positive numbers" },
         { status: 400 }
       );
     }
 
-    // Upsert pricing (create or update)
+    // Preserve the retired GBP column for schema compatibility and legacy records.
+    const { data: existingPricing } = await supabase
+      .from("subscription_pricing")
+      .select("price_gbp")
+      .eq("tier_id", tier_id)
+      .maybeSingle();
+    const legacyGbpPrice =
+      Number(existingPricing?.price_gbp) || LEGACY_GBP_DEFAULTS[tier_id];
+
+    // Upsert the two active currencies.
     const { data, error } = await supabase
       .from("subscription_pricing")
       .upsert(
@@ -142,7 +154,7 @@ export async function POST(request: NextRequest) {
           tier_id,
           price_ngn,
           price_usd,
-          price_gbp,
+          price_gbp: legacyGbpPrice,
           updated_at: new Date().toISOString(),
           updated_by: user.id,
         },
@@ -162,7 +174,7 @@ export async function POST(request: NextRequest) {
               - tier_id (text, primary key)
               - price_ngn (numeric)
               - price_usd (numeric)
-              - price_gbp (numeric)
+              - price_gbp (numeric, retained for legacy transaction compatibility)
               - updated_at (timestamp)
               - updated_by (uuid, optional)
             `,

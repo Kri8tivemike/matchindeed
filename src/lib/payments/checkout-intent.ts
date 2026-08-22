@@ -1,4 +1,4 @@
-export type CheckoutCurrency = "NGN" | "USD" | "GBP";
+export type CheckoutCurrency = "NGN" | "USD";
 export type CheckoutPaymentProvider = "flutterwave" | "paystack";
 export type CheckoutIntentType = "subscription" | "wallet_topup" | "credit_purchase";
 export type CheckoutTier = "basic" | "standard" | "premium" | "vip";
@@ -22,7 +22,7 @@ export type CheckoutIntent =
     };
 
 const CHECKOUT_PATH = "/dashboard/payment/checkout";
-const VALID_CURRENCIES = new Set(["NGN", "USD", "GBP"]);
+const VALID_CURRENCIES = new Set(["NGN", "USD"]);
 const VALID_TIERS = new Set(["basic", "standard", "premium", "vip"]);
 
 function normalizeCurrency(value: string | null): CheckoutCurrency | null {

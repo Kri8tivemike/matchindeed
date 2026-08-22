@@ -35,6 +35,7 @@ import {
   type SubscriptionActivationSnapshot,
 } from "@/lib/subscription/checkout-verification";
 import { buildCheckoutUrl, type CheckoutTier } from "@/lib/payments/checkout-intent";
+import { getCheckoutCurrencyForCountryCode } from "@/lib/payments/region-currency";
 
 function shouldCenterCheckoutError(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -49,8 +50,8 @@ function shouldCenterCheckoutError(message: string): boolean {
 // ---------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------
-type Currency = "NGN" | "USD" | "GBP";
-type Pricing = { ngn: number; usd: number; gbp: number };
+type Currency = "NGN" | "USD";
+type Pricing = { ngn: number; usd: number };
 
 type SubscriptionTier = {
   id: CheckoutTier;
@@ -83,7 +84,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
   {
     id: "basic",
     name: "Basic",
-    pricing: { ngn: 7500, usd: 9.99, gbp: 7.99 },
+    pricing: { ngn: 7500, usd: 9.99 },
     priceId: "",
     credits: 5,
     calendarDays: 5,
@@ -102,7 +103,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
   {
     id: "standard",
     name: "Standard",
-    pricing: { ngn: 15000, usd: 19.99, gbp: 16.99 },
+    pricing: { ngn: 15000, usd: 19.99 },
     priceId: "",
     credits: 10,
     calendarDays: 15,
@@ -123,7 +124,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
   {
     id: "premium",
     name: "Premium",
-    pricing: { ngn: 27000, usd: 34.99, gbp: 29.99 },
+    pricing: { ngn: 27000, usd: 34.99 },
     priceId: "",
     credits: 30,
     calendarDays: 30,
@@ -143,7 +144,7 @@ const baseSubscriptionTiers: SubscriptionTier[] = [
   {
     id: "vip",
     name: "VIP",
-    pricing: { ngn: 1500000, usd: 1000, gbp: 800 },
+    pricing: { ngn: 1500000, usd: 1000 },
     priceId: "",
     credits: 0,
     calendarDays: 0,
@@ -178,15 +179,13 @@ async function detectCurrency(): Promise<Currency> {
         if (fb.ok) {
           const d = await fb.json();
           const cc = d.country_code || d.countryCode;
-          if (cc === "NG") return "NGN";
-          if (cc === "GB" || cc === "UK") return "GBP";
+          return getCheckoutCurrencyForCountryCode(cc);
         }
       } catch {
         /* ignore */
       }
     }
     if (c === "ngn") return "NGN";
-    if (c === "gbp") return "GBP";
     return "USD";
   } catch {
     return "USD";
@@ -196,14 +195,11 @@ async function detectCurrency(): Promise<Currency> {
 function formatPrice(price: number, currency: Currency): string {
   if (currency === "NGN")
     return `₦${price.toLocaleString("en-NG")}`;
-  if (currency === "GBP")
-    return `£${price.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getPrice(tier: SubscriptionTier, currency: Currency): number {
   if (currency === "NGN") return tier.pricing.ngn;
-  if (currency === "GBP") return tier.pricing.gbp;
   return tier.pricing.usd;
 }
 
@@ -695,7 +691,7 @@ function SubscriptionContent() {
                 </span>
               )}
               <span className="rounded-full bg-gray-100 px-3 py-1 text-[10px] font-medium text-gray-500">
-                {currency === "NGN" ? "₦ NGN" : currency === "GBP" ? "£ GBP" : "$ USD"}
+                {currency === "NGN" ? "₦ NGN" : "$ USD"}
               </span>
             </div>
           </div>

@@ -44,7 +44,7 @@ type CheckoutDisplay = {
   payload: Record<string, string | number>;
 };
 
-const SUBSCRIPTION_CURRENCIES: CheckoutCurrency[] = ["NGN", "USD", "GBP"];
+const SUBSCRIPTION_CURRENCIES: CheckoutCurrency[] = ["NGN", "USD"];
 
 function getProviderCard(
   provider: CheckoutPaymentProvider,
@@ -57,9 +57,7 @@ function getProviderCard(
       description:
         currency === "NGN"
           ? "Naira checkout with cards, bank transfer, USSD, and other Nigerian payment methods."
-          : currency === "GBP"
-            ? "Paystack does not process GBP. Select USD above to use Paystack for an eligible international card."
-            : "USD checkout for eligible international cards, including cards issued in the US, UK, and Canada.",
+          : "USD checkout for eligible international cards, including cards issued in the US, UK, and Canada.",
     };
   }
 
@@ -69,9 +67,7 @@ function getProviderCard(
     description:
       currency === "NGN"
         ? "Naira checkout with cards, bank transfer, USSD, and other local payment methods."
-        : currency === "GBP"
-          ? "GBP checkout for UK and international cards, with supported account payment options."
-          : "USD checkout for eligible international cards and supported account payment options.",
+        : "USD checkout for eligible international cards and supported account payment options.",
   };
 }
 
@@ -79,12 +75,6 @@ function formatMoney(amountCents: number, currency: CheckoutCurrency) {
   const amount = amountCents / 100;
   if (currency === "NGN") {
     return `₦${amount.toLocaleString("en-NG", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  }
-  if (currency === "GBP") {
-    return `£${amount.toLocaleString("en-GB", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
@@ -215,15 +205,6 @@ function CheckoutContent() {
           )
         : [],
     [checkoutCurrency, currencyProviders, display]
-  );
-  const visibleProviders = useMemo<CheckoutPaymentProvider[]>(
-    () =>
-      parsedIntent.ok &&
-      parsedIntent.intent.type === "subscription" &&
-      checkoutCurrency === "GBP"
-        ? ["flutterwave", "paystack"]
-        : supportedProviders,
-    [checkoutCurrency, parsedIntent, supportedProviders]
   );
   const selectedProvider =
     checkoutCurrency && supportedProviders.includes(provider)
@@ -367,7 +348,7 @@ function CheckoutContent() {
                       Choose the currency that will be shown at the hosted checkout.
                     </p>
                     <div
-                      className="mt-4 grid max-w-sm grid-cols-3 rounded-lg border border-gray-200 bg-gray-50 p-1"
+                      className="mt-4 grid max-w-xs grid-cols-2 rounded-lg border border-gray-200 bg-gray-50 p-1"
                       role="radiogroup"
                       aria-label="Payment currency"
                     >
@@ -392,8 +373,8 @@ function CheckoutContent() {
                       })}
                     </div>
                     <p className="mt-3 text-xs leading-5 text-gray-500">
-                      Select USD to use either Paystack or Flutterwave. GBP payments are
-                      securely processed by Flutterwave.
+                      Nigerian customers pay in NGN. Customers everywhere else pay in
+                      USD with either Paystack or Flutterwave.
                     </p>
                   </div>
                 )}
@@ -405,26 +386,21 @@ function CheckoutContent() {
                   </p>
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {visibleProviders.map((providerId) => {
+                    {supportedProviders.map((providerId) => {
                       const card = getProviderCard(
                         providerId,
                         parsedIntent.intent.currency
                       );
-                      const available = supportedProviders.includes(providerId);
-                      const selected = available && selectedProvider === card.id;
+                      const selected = selectedProvider === card.id;
                       return (
                         <button
                           key={card.id}
                           type="button"
                           onClick={() => setProvider(card.id)}
-                          disabled={!available}
-                          aria-disabled={!available}
                           className={`min-h-[140px] rounded-xl border p-4 text-left transition-colors ${
                             selected
                               ? "border-[#1f419a] bg-[#eef2ff] shadow-sm"
-                              : !available
-                                ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-70"
-                                : "border-gray-200 bg-white hover:border-[#1f419a]/40"
+                              : "border-gray-200 bg-white hover:border-[#1f419a]/40"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -440,11 +416,6 @@ function CheckoutContent() {
                                 Recommended
                               </span>
                             )}
-                            {!available && card.id === "paystack" && (
-                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                                USD only
-                              </span>
-                            )}
                           </div>
                           <p className="mt-2 text-sm leading-5 text-gray-500">
                             {card.description}
@@ -457,9 +428,7 @@ function CheckoutContent() {
                     <p className="mt-3 text-xs leading-5 text-gray-500">
                       {checkoutCurrency === "NGN"
                         ? "Paystack is recommended for Nigerian Naira payments. Flutterwave is also available."
-                        : checkoutCurrency === "GBP"
-                          ? "Flutterwave processes GBP checkout. Switch to USD above to pay with either Paystack or Flutterwave."
-                          : supportedProviders.includes("paystack")
+                        : supportedProviders.includes("paystack")
                             ? "Customers in the US, Canada, the UK, and other supported countries can pay in USD with an eligible international card. Their bank may convert the charge from their card currency."
                             : "Flutterwave is currently used for USD and international checkout."}
                     </p>

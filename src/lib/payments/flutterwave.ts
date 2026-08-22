@@ -57,7 +57,6 @@ function getPaymentOptions(currency: string) {
   switch (currency.toLowerCase()) {
     case "ngn":
       return "card, banktransfer, ussd, account, internetbanking, opay";
-    case "gbp":
     case "usd":
       return "card, account";
     default:

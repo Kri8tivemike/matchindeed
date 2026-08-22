@@ -26,7 +26,7 @@ import {
 
 const baseTierPricing: Record<
   string,
-  { name: string; amounts: { ngn: number; usd: number; gbp: number } }
+  { name: string; amounts: { ngn: number; usd: number } }
 > = {
   basic: {
     name: "Basic Plan",
@@ -51,25 +51,23 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
 
-const SUPPORTED_CURRENCIES = new Set(["ngn", "usd", "gbp"]);
+const SUPPORTED_CURRENCIES = new Set(["ngn", "usd"]);
 const SUPPORTED_PAYMENT_PROVIDERS = new Set(["flutterwave", "paystack"]);
 
 const CURRENCY_DISPLAY: Record<string, { symbol: string }> = {
   usd: { symbol: "$" },
-  gbp: { symbol: "£" },
   ngn: { symbol: "₦" },
 };
 
 type SubscriptionPricingOverride = {
   price_ngn: number | string | null;
   price_usd: number | string | null;
-  price_gbp: number | string | null;
 };
 
 async function getSubscriptionAmountCents(
   tierId: string,
   currency: CheckoutCurrency,
-  fallbackAmounts: { ngn: number; usd: number; gbp: number }
+  fallbackAmounts: { ngn: number; usd: number }
 ) {
   const fallback = fallbackAmounts[currency.toLowerCase() as keyof typeof fallbackAmounts];
   if (!supabaseServiceRoleKey) return fallback;
@@ -79,7 +77,7 @@ async function getSubscriptionAmountCents(
   });
   const { data, error } = await supabaseAdmin
     .from("subscription_pricing")
-    .select("price_ngn, price_usd, price_gbp")
+    .select("price_ngn, price_usd")
     .eq("tier_id", tierId)
     .maybeSingle<SubscriptionPricingOverride>();
 
@@ -314,7 +312,7 @@ export async function POST(request: NextRequest) {
     const normalizedCurrency = String(currency).toLowerCase();
     if (!SUPPORTED_CURRENCIES.has(normalizedCurrency)) {
       return NextResponse.json(
-        { error: "Invalid currency. Supported: NGN, USD, GBP" },
+        { error: "Invalid currency. Supported: NGN, USD" },
         { status: 400 }
       );
     }

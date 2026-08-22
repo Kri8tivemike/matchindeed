@@ -42,11 +42,12 @@ import {
   PRICE_PER_CREDIT_BY_TIER,
 } from "@/lib/credits/config";
 import { buildCheckoutUrl } from "@/lib/payments/checkout-intent";
+import { getCheckoutCurrencyForCountryCode } from "@/lib/payments/region-currency";
 
 // ---------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------
-type Currency = "NGN" | "USD" | "GBP";
+type Currency = "NGN" | "USD";
 
 type WalletData = {
   balance_cents: number;
@@ -62,7 +63,7 @@ type SubscriptionInfo = {
 
 type CreditAllocation = {
   monthly: number;
-  pricePerCredit: { ngn: number; usd: number; gbp: number };
+  pricePerCredit: { ngn: number; usd: number };
 };
 
 type Transaction = {
@@ -91,10 +92,9 @@ type CreditPurchaseAvailability = {
 // Helpers
 // ---------------------------------------------------------------
 
-/** Payment minimum charge amounts per currency (in main unit, e.g. pounds/dollars) */
+/** Payment minimum charge amounts per currency in the main unit. */
 const PAYMENT_MINIMUM_AMOUNT: Record<Currency, number> = {
   USD: 0.50,  // $0.50
-  GBP: 0.30,  // £0.30
   NGN: 50.00, // ₦50.00
 };
 
@@ -103,7 +103,7 @@ function getMinTopUpAmount(currency: Currency): number {
   return PAYMENT_MINIMUM_AMOUNT[currency];
 }
 
-/** Detect user currency based on IP (Nigeria → NGN, UK → GBP, else USD). Uses /api/geo; client-side fallback for Tailscale. */
+/** Detect user currency based on IP (Nigeria → NGN, everywhere else → USD). */
 async function detectCurrency(): Promise<Currency> {
   try {
     const res = await fetch("/api/geo");
@@ -115,15 +115,13 @@ async function detectCurrency(): Promise<Currency> {
         if (fb.ok) {
           const d = await fb.json();
           const cc = d.country_code || d.countryCode;
-          if (cc === "NG") return "NGN";
-          if (cc === "GB" || cc === "UK") return "GBP";
+          return getCheckoutCurrencyForCountryCode(cc);
         }
       } catch {
         /* ignore */
       }
     }
     if (c === "ngn") return "NGN";
-    if (c === "gbp") return "GBP";
     return "USD";
   } catch {
     return "USD";
@@ -135,8 +133,6 @@ function formatPrice(cents: number, currency: Currency): string {
   const amount = cents / 100;
   if (currency === "NGN")
     return `₦${amount.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (currency === "GBP")
-    return `£${amount.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
@@ -152,7 +148,7 @@ function shouldCenterCheckoutError(message: string): boolean {
 
 /** Currency symbol */
 function currencySymbol(c: Currency): string {
-  return c === "NGN" ? "₦" : c === "GBP" ? "£" : "$";
+  return c === "NGN" ? "₦" : "$";
 }
 
 function formatTransactionTitle(tx: Transaction): string {
@@ -193,7 +189,7 @@ function getCreditAllocation(tier: string): CreditAllocation {
         pricePerCredit: PRICE_PER_CREDIT_BY_TIER.premium,
       };
     case "vip":
-      return { monthly: Infinity, pricePerCredit: { ngn: 0, usd: 0, gbp: 0 } };
+      return { monthly: Infinity, pricePerCredit: { ngn: 0, usd: 0 } };
     default:
       return {
         monthly: 0,
@@ -945,7 +941,7 @@ function WalletContent() {
                   {formatPrice(balance, currency)}
                 </h2>
                 <p className="mt-2 text-[11px] text-white/60">
-                  {currency === "NGN" ? "Nigerian Naira" : currency === "GBP" ? "British Pounds" : "US Dollars"}
+                  {currency === "NGN" ? "Nigerian Naira" : "US Dollars"}
                 </p>
               </div>
               {/* Decorative circle */}
@@ -1257,7 +1253,7 @@ function WalletContent() {
 
               {/* Preset amounts */}
               <div className="flex gap-2">
-                {(currency === "NGN" ? [5000, 10000, 25000] : currency === "GBP" ? [5, 10, 25] : [5, 10, 25]).map(
+                {(currency === "NGN" ? [5000, 10000, 25000] : [5, 10, 25]).map(
                   (amt) => (
                     <button
                       key={amt}

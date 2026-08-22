@@ -6,8 +6,8 @@ import {
   parseCheckoutIntent,
 } from "../../src/lib/payments/checkout-intent.ts";
 
-test("subscription checkout can switch between international currencies", () => {
-  for (const currency of ["USD", "GBP"]) {
+test("subscription checkout supports the two active currencies", () => {
+  for (const currency of ["NGN", "USD"]) {
     const url = buildCheckoutUrl({
       type: "subscription",
       tier: "basic",
@@ -23,6 +23,18 @@ test("subscription checkout can switch between international currencies", () => 
       assert.equal(parsed.intent.tier, "basic");
     }
   }
+});
+
+test("GBP checkout links are rejected for new purchases", () => {
+  const parsed = parseCheckoutIntent(
+    new URLSearchParams("type=subscription&tier=basic&currency=GBP")
+  );
+
+  assert.deepEqual(parsed, {
+    ok: false,
+    message: "This checkout link is missing required payment details.",
+    returnPath: "/dashboard/profile/subscription",
+  });
 });
 
 test("wallet and credit checkout amounts stay bound to their currency", () => {

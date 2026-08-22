@@ -18,7 +18,6 @@ type PricingTier = {
   tier_id: string;
   price_ngn: number;
   price_usd: number;
-  price_gbp: number;
   updated_at: string;
 };
 
@@ -26,7 +25,7 @@ type PricingTier = {
  * AdminPricingPage - Manage subscription pricing
  * 
  * Features:
- * - Edit prices for all tiers (NGN, USD, GBP)
+ * - Edit prices for all tiers (NGN and USD)
  * - Preview changes before saving
  * - Save with admin logging
  */
@@ -59,11 +58,11 @@ export default function AdminPricingPage() {
       const missingTiers = tiers.filter(t => !existingTiers.includes(t));
 
       // Create default pricing for missing tiers
-      const defaultPricing: Record<string, { ngn: number; usd: number; gbp: number }> = {
-        basic: { ngn: 7500, usd: 9.99, gbp: 7.99 },
-        standard: { ngn: 15000, usd: 19.99, gbp: 16.99 },
-        premium: { ngn: 27000, usd: 34.99, gbp: 29.99 },
-        vip: { ngn: 1500000, usd: 1000, gbp: 800 },
+      const defaultPricing: Record<string, { ngn: number; usd: number; legacyGbp: number }> = {
+        basic: { ngn: 7500, usd: 9.99, legacyGbp: 7.99 },
+        standard: { ngn: 15000, usd: 19.99, legacyGbp: 16.99 },
+        premium: { ngn: 27000, usd: 34.99, legacyGbp: 29.99 },
+        vip: { ngn: 1500000, usd: 1000, legacyGbp: 800 },
       };
 
       if (missingTiers.length > 0) {
@@ -71,7 +70,7 @@ export default function AdminPricingPage() {
           tier_id: tier,
           price_ngn: defaultPricing[tier].ngn,
           price_usd: defaultPricing[tier].usd,
-          price_gbp: defaultPricing[tier].gbp,
+          price_gbp: defaultPricing[tier].legacyGbp,
         }));
 
         await supabase.from("subscription_pricing").insert(newPricing);
@@ -112,7 +111,7 @@ export default function AdminPricingPage() {
   /**
    * Update a specific tier's price
    */
-  const updatePrice = (tierId: string, currency: "price_ngn" | "price_usd" | "price_gbp", value: number) => {
+  const updatePrice = (tierId: string, currency: "price_ngn" | "price_usd", value: number) => {
     setPricing(prev => prev.map(tier => 
       tier.tier_id === tierId 
         ? { ...tier, [currency]: value }
@@ -137,7 +136,6 @@ export default function AdminPricingPage() {
           .update({
             price_ngn: tier.price_ngn,
             price_usd: tier.price_usd,
-            price_gbp: tier.price_gbp,
             updated_at: new Date().toISOString(),
             updated_by: user?.id,
           })
@@ -321,26 +319,6 @@ export default function AdminPricingPage() {
                     </div>
                   </div>
 
-                  {/* GBP */}
-                  <div>
-                    <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
-                      <span>British Pound (£)</span>
-                      {original && tier.price_gbp !== original.price_gbp && (
-                        <span className="text-xs text-amber-600">
-                          Changed from £{original.price_gbp.toLocaleString()}
-                        </span>
-                      )}
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">£</span>
-                      <input
-                        type="number"
-                        value={tier.price_gbp}
-                        onChange={(e) => updatePrice(tier.tier_id, "price_gbp", parseFloat(e.target.value) || 0)}
-                        className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/20 outline-none"
-                      />
-                    </div>
-                  </div>
                 </div>
 
                 {/* Last Updated */}
@@ -363,7 +341,6 @@ export default function AdminPricingPage() {
           <li>• Prices are per month for subscription plans</li>
           <li>• NGN prices are shown to users with Nigerian IP addresses</li>
           <li>• USD prices are shown to international users (default)</li>
-          <li>• GBP prices are shown to users from the United Kingdom</li>
           <li>• Changes take effect immediately for new subscriptions</li>
           <li>• Existing subscriptions are not affected until renewal</li>
         </ul>

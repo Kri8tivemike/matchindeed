@@ -5,7 +5,6 @@ import {
   getPaymentMinimumAmountCents,
   getRecommendedPaymentProvider,
   getSupportedPaymentProviders,
-  getUnsupportedProviderMessage,
   isPaymentAmountSupported,
   isPaymentProviderSupported,
 } from "../../src/lib/payments/gateway-currency.ts";
@@ -15,15 +14,6 @@ test("NGN supports Paystack and Flutterwave with Paystack recommended", () => {
   assert.equal(getRecommendedPaymentProvider("NGN"), "paystack");
   assert.equal(isPaymentProviderSupported("paystack", "NGN"), true);
   assert.equal(isPaymentProviderSupported("flutterwave", "NGN"), true);
-});
-
-test("GBP supports Flutterwave only", () => {
-  assert.deepEqual(getSupportedPaymentProviders("GBP"), ["flutterwave"]);
-  assert.equal(isPaymentProviderSupported("paystack", "GBP"), false);
-  assert.equal(
-    getUnsupportedProviderMessage("paystack", "GBP"),
-    "Paystack is not available for GBP payments. Please use Flutterwave."
-  );
 });
 
 test("USD supports Flutterwave only by default", () => {
@@ -59,8 +49,7 @@ test("Paystack enforces its documented USD minimum", () => {
   assert.equal(isPaymentAmountSupported("flutterwave", "USD", 50), true);
 });
 
-test("NGN and GBP retain MatchIndeed minimums", () => {
+test("NGN retains the MatchIndeed minimum for both providers", () => {
   assert.equal(getPaymentMinimumAmountCents("paystack", "NGN"), 5000);
   assert.equal(getPaymentMinimumAmountCents("flutterwave", "NGN"), 5000);
-  assert.equal(getPaymentMinimumAmountCents("flutterwave", "GBP"), 30);
 });
