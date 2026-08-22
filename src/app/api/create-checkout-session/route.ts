@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { STRIPE_SUBSCRIPTION_AMOUNTS_SMALLEST_UNIT } from "@/lib/subscription/config";
 import { canAccessPaidFeatures } from "@/lib/subscription/permissions";
@@ -47,6 +48,7 @@ const baseTierPricing: Record<
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
 
 const SUPPORTED_CURRENCIES = new Set(["ngn", "usd", "gbp"]);
@@ -57,6 +59,41 @@ const CURRENCY_DISPLAY: Record<string, { symbol: string }> = {
   gbp: { symbol: "£" },
   ngn: { symbol: "₦" },
 };
+
+type SubscriptionPricingOverride = {
+  price_ngn: number | string | null;
+  price_usd: number | string | null;
+  price_gbp: number | string | null;
+};
+
+async function getSubscriptionAmountCents(
+  tierId: string,
+  currency: CheckoutCurrency,
+  fallbackAmounts: { ngn: number; usd: number; gbp: number }
+) {
+  const fallback = fallbackAmounts[currency.toLowerCase() as keyof typeof fallbackAmounts];
+  if (!supabaseServiceRoleKey) return fallback;
+
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await supabaseAdmin
+    .from("subscription_pricing")
+    .select("price_ngn, price_usd, price_gbp")
+    .eq("tier_id", tierId)
+    .maybeSingle<SubscriptionPricingOverride>();
+
+  if (error) {
+    console.error("Unable to read authoritative subscription pricing:", error.message);
+    return fallback;
+  }
+
+  const column = `price_${currency.toLowerCase()}` as keyof SubscriptionPricingOverride;
+  const configuredPrice = Number(data?.[column]);
+  return Number.isFinite(configuredPrice) && configuredPrice > 0
+    ? Math.round(configuredPrice * 100)
+    : fallback;
+}
 
 async function getAuthenticatedUser() {
   const cookieStore = await cookies();
@@ -260,7 +297,6 @@ export async function POST(request: NextRequest) {
       tier,
       userId,
       currency = "usd",
-      amount,
       amountCents,
       type,
       credits,
@@ -421,16 +457,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid tier" }, { status: 400 });
     }
 
-    let finalAmount =
-      normalizedCurrency === "ngn"
-        ? tierPricing.amounts.ngn
-        : normalizedCurrency === "gbp"
-          ? tierPricing.amounts.gbp
-          : tierPricing.amounts.usd;
-
-    if (amount && typeof amount === "number") {
-      finalAmount = Math.round(amount * 100);
-    }
+    const finalAmount = await getSubscriptionAmountCents(
+      String(tier).toLowerCase(),
+      checkoutCurrency,
+      tierPricing.amounts
+    );
 
     const payment = await createHostedCheckout({
       provider,
