@@ -10,7 +10,7 @@ export const MONTHLY_CREDITS_BY_TIER: Record<TierId, number> = {
 };
 
 // ₦100/credit for all tiers. Minimum purchase = 10 credits (₦1,000 / $0.70 / £0.54).
-// All currency minimums are verified to exceed Stripe's floor (NGN ₦50, USD $0.50, GBP £0.30).
+// Provider-specific payment floors are enforced by the shared checkout gateway rules.
 export const MIN_CREDIT_PURCHASE = 10;
 
 export const PRICE_PER_CREDIT_BY_TIER: Record<

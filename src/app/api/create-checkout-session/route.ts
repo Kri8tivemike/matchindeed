@@ -18,6 +18,7 @@ import type {
   CheckoutPaymentProvider,
 } from "@/lib/payments/checkout-intent";
 import {
+  getPaymentMinimumAmountCents,
   getUnsupportedProviderMessage,
   isPaymentProviderSupported,
 } from "@/lib/payments/gateway-currency";
@@ -50,12 +51,6 @@ const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
 
 const SUPPORTED_CURRENCIES = new Set(["ngn", "usd", "gbp"]);
 const SUPPORTED_PAYMENT_PROVIDERS = new Set(["flutterwave", "paystack"]);
-
-const PAYMENT_MINIMUM_AMOUNT_CENTS: Record<string, number> = {
-  usd: 50,
-  gbp: 30,
-  ngn: 5000,
-};
 
 const CURRENCY_DISPLAY: Record<string, { symbol: string }> = {
   usd: { symbol: "$" },
@@ -110,12 +105,17 @@ function parseCredits(value: unknown): number | null {
   return value;
 }
 
-function getMinimumAmountError(currency: string, amountCents: number): string | null {
-  const min = PAYMENT_MINIMUM_AMOUNT_CENTS[currency];
-  if (!min || amountCents >= min) return null;
-  const display = CURRENCY_DISPLAY[currency] || { symbol: "" };
+function getMinimumAmountError(
+  provider: CheckoutPaymentProvider,
+  currency: CheckoutCurrency,
+  amountCents: number
+): string | null {
+  const min = getPaymentMinimumAmountCents(provider, currency);
+  if (amountCents >= min) return null;
+  const display = CURRENCY_DISPLAY[currency.toLowerCase()] || { symbol: "" };
   const minFormatted = (min / 100).toFixed(2);
-  return `The minimum top-up amount is ${display.symbol}${minFormatted}. Please increase the amount and try again.`;
+  const providerName = provider === "paystack" ? "Paystack" : "Flutterwave";
+  return `${providerName}'s minimum ${currency} payment is ${display.symbol}${minFormatted}. Please increase the amount or choose another payment method.`;
 }
 
 function getCheckoutErrorMessage(error: unknown) {
@@ -325,7 +325,11 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const minTopUpError = getMinimumAmountError(normalizedCurrency, parsedAmountCents);
+      const minTopUpError = getMinimumAmountError(
+        provider,
+        checkoutCurrency,
+        parsedAmountCents
+      );
       if (minTopUpError) {
         return NextResponse.json({ error: minTopUpError }, { status: 400 });
       }
@@ -370,9 +374,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const minCreditError = getMinimumAmountError(normalizedCurrency, parsedAmountCents);
+      const minCreditError = getMinimumAmountError(
+        provider,
+        checkoutCurrency,
+        parsedAmountCents
+      );
       if (minCreditError) {
-        const min = PAYMENT_MINIMUM_AMOUNT_CENTS[normalizedCurrency] || 50;
+        const min = getPaymentMinimumAmountCents(provider, checkoutCurrency);
         const display = CURRENCY_DISPLAY[normalizedCurrency] || { symbol: "" };
         const minFormatted = (min / 100).toFixed(2);
         const pricePerCreditCents = Math.round(parsedAmountCents / parsedCredits);

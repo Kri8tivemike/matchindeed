@@ -30,8 +30,10 @@ import {
   parseCheckoutIntent,
 } from "@/lib/payments/checkout-intent";
 import {
+  getPaymentMinimumAmountCents,
   getRecommendedPaymentProvider,
   getSupportedPaymentProviders,
+  isPaymentAmountSupported,
 } from "@/lib/payments/gateway-currency";
 
 type CheckoutDisplay = {
@@ -42,23 +44,32 @@ type CheckoutDisplay = {
   payload: Record<string, string | number>;
 };
 
-const providerCards: Record<CheckoutPaymentProvider, {
-  id: CheckoutPaymentProvider;
-  title: string;
-  description: string;
-}> = {
-  flutterwave: {
-    id: "flutterwave",
+function getProviderCard(
+  provider: CheckoutPaymentProvider,
+  currency: CheckoutCurrency
+) {
+  if (provider === "paystack") {
+    return {
+      id: provider,
+      title: "Paystack",
+      description:
+        currency === "NGN"
+          ? "Naira checkout with cards, bank transfer, USSD, and other Nigerian payment methods."
+          : "USD checkout for eligible international cards, including cards issued in the US, UK, and Canada.",
+    };
+  }
+
+  return {
+    id: provider,
     title: "Flutterwave",
     description:
-      "Supports NGN, GBP, USD, and international card/account checkout where available.",
-  },
-  paystack: {
-    id: "paystack",
-    title: "Paystack",
-    description: "Best for Nigerian Naira payments.",
-  },
-};
+      currency === "NGN"
+        ? "Naira checkout with cards, bank transfer, USSD, and other local payment methods."
+        : currency === "GBP"
+          ? "GBP checkout for UK and international cards, with supported account payment options."
+          : "USD checkout for eligible international cards and supported account payment options.",
+  };
+}
 
 function formatMoney(amountCents: number, currency: CheckoutCurrency) {
   const amount = amountCents / 100;
@@ -188,10 +199,18 @@ function CheckoutContent() {
     ? getCheckoutDisplay(parsedIntent.intent, subscriptionPricing)
     : null;
   const checkoutCurrency = parsedIntent.ok ? parsedIntent.intent.currency : null;
+  const currencyProviders = useMemo(
+    () => (checkoutCurrency ? getSupportedPaymentProviders(checkoutCurrency) : []),
+    [checkoutCurrency]
+  );
   const supportedProviders = useMemo(
     () =>
-      checkoutCurrency ? getSupportedPaymentProviders(checkoutCurrency) : [],
-    [checkoutCurrency]
+      checkoutCurrency && display
+        ? currencyProviders.filter((providerId) =>
+            isPaymentAmountSupported(providerId, checkoutCurrency, display.amountCents)
+          )
+        : [],
+    [checkoutCurrency, currencyProviders, display]
   );
   const selectedProvider =
     checkoutCurrency && supportedProviders.includes(provider)
@@ -324,7 +343,10 @@ function CheckoutContent() {
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     {supportedProviders.map((providerId) => {
-                      const card = providerCards[providerId];
+                      const card = getProviderCard(
+                        providerId,
+                        parsedIntent.intent.currency
+                      );
                       const selected = selectedProvider === card.id;
                       return (
                         <button
@@ -365,10 +387,21 @@ function CheckoutContent() {
                         : checkoutCurrency === "GBP"
                           ? "Flutterwave supports GBP checkout for UK and international customers."
                           : supportedProviders.includes("paystack")
-                            ? "Flutterwave and Paystack are available for USD checkout."
+                            ? "Customers in the US, Canada, the UK, and other supported countries can pay in USD with an eligible international card. Their bank may convert the charge from their card currency."
                             : "Flutterwave is currently used for USD and international checkout."}
                     </p>
                   )}
+                  {checkoutCurrency === "USD" &&
+                    currencyProviders.includes("paystack") &&
+                    display &&
+                    !isPaymentAmountSupported("paystack", "USD", display.amountCents) && (
+                      <p className="mt-2 text-xs leading-5 text-amber-700">
+                        Paystack is unavailable for this order because its minimum USD
+                        payment is {`$${(
+                          getPaymentMinimumAmountCents("paystack", "USD") / 100
+                        ).toFixed(2)}`}.
+                      </p>
+                    )}
                 </div>
 
                 <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
