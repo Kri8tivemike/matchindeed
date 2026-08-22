@@ -1511,7 +1511,10 @@ export default function Home() {
           </div>
 
           <div className="mt-10 border-t border-gray-100 pt-6 text-center text-xs text-gray-400">
-            <p>&copy; 2026 MatchIndeed. Operated by Firstoutlook Ltd (UK).</p>
+            <p>
+              MatchIndeed is a platform affiliated with DI‑YIELDCOM GLOBAL SERVICES,
+              the registered business entity responsible for its operations.
+            </p>
           </div>
         </div>
       </footer>
