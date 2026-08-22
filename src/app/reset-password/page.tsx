@@ -25,32 +25,11 @@ import {
   ArrowRight,
 } from "lucide-react";
 import Image from "next/image";
-
-// ---------------------------------------------------------------
-// Password strength helper (same as register page)
-// ---------------------------------------------------------------
-function getPasswordStrength(pw: string) {
-  const rules = [
-    { label: "At least 6 characters", met: pw.length >= 6 },
-    { label: "Contains a number", met: /\d/.test(pw) },
-    { label: "Contains uppercase", met: /[A-Z]/.test(pw) },
-    { label: "Contains special char", met: /[^A-Za-z0-9]/.test(pw) },
-  ];
-  const score = rules.filter((r) => r.met).length;
-  let level: "weak" | "fair" | "good" | "strong" = "weak";
-  let color = "bg-red-400";
-  if (score >= 4) {
-    level = "strong";
-    color = "bg-green-500";
-  } else if (score >= 3) {
-    level = "good";
-    color = "bg-blue-500";
-  } else if (score >= 2) {
-    level = "fair";
-    color = "bg-amber-400";
-  }
-  return { rules, score, level, color };
-}
+import {
+  evaluatePassword,
+  getPasswordValidationError,
+} from "@/lib/auth/validation";
+import { parsePasswordRecoveryUrl } from "@/lib/auth/password-recovery";
 
 // ---------------------------------------------------------------
 // Shared branding panel
@@ -134,34 +113,54 @@ function ResetPasswordContent() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [validating, setValidating] = useState(true);
+  const [recoveryReady, setRecoveryReady] = useState(false);
 
-  const pwStrength = useMemo(() => getPasswordStrength(password), [password]);
+  const pwStrength = useMemo(() => evaluatePassword(password), [password]);
 
-  // Verify the reset token from URL hash
+  // Establish the authenticated recovery session before allowing a password update.
   useEffect(() => {
-    const verifyToken = async () => {
-      try {
-        const hashParams = new URLSearchParams(
-          window.location.hash.substring(1)
-        );
-        const accessToken = hashParams.get("access_token");
-        const type = hashParams.get("type");
+    let active = true;
 
-        if (type === "recovery" && accessToken) {
-          setValidating(false);
+    const establishRecoverySession = async () => {
+      try {
+        const credentials = parsePasswordRecoveryUrl(window.location.href);
+
+        if (credentials.kind === "pkce") {
+          const { error: exchangeError } =
+            await supabase.auth.exchangeCodeForSession(credentials.code);
+          if (exchangeError) throw exchangeError;
+        } else if (credentials.kind === "implicit") {
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token: credentials.accessToken,
+            refresh_token: credentials.refreshToken,
+          });
+          if (sessionError) throw sessionError;
         } else {
-          setError(
-            "Invalid or expired reset link. Please request a new one."
-          );
-          setValidating(false);
+          throw new Error("Invalid or expired reset link.");
         }
-      } catch {
-        setError("Error validating reset link. Please try again.");
-        setValidating(false);
+
+        const { data, error: userError } = await supabase.auth.getUser();
+        if (userError || !data.user) {
+          throw userError || new Error("Recovery session is unavailable.");
+        }
+
+        window.history.replaceState({}, document.title, "/reset-password");
+        if (active) setRecoveryReady(true);
+      } catch (sessionError) {
+        console.error("Password recovery session error:", sessionError);
+        if (active) {
+          setError("Invalid or expired reset link. Please request a new one.");
+        }
+      } finally {
+        if (active) setValidating(false);
       }
     };
 
-    verifyToken();
+    establishRecoverySession();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -175,20 +174,16 @@ function ResetPasswordContent() {
       return;
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long");
+    const passwordError = getPasswordValidationError(password);
+    if (passwordError) {
+      setError(passwordError);
       setLoading(false);
       return;
     }
 
     try {
-      const hashParams = new URLSearchParams(
-        window.location.hash.substring(1)
-      );
-      const accessToken = hashParams.get("access_token");
-
-      if (!accessToken) {
-        throw new Error("Invalid reset link");
+      if (!recoveryReady) {
+        throw new Error("Invalid or expired reset link. Please request a new one.");
       }
 
       const { error: updateError } = await supabase.auth.updateUser({
@@ -197,6 +192,7 @@ function ResetPasswordContent() {
 
       if (updateError) throw updateError;
 
+      await supabase.auth.signOut({ scope: "local" });
       setSuccess(true);
 
       setTimeout(() => {
@@ -216,6 +212,32 @@ function ResetPasswordContent() {
   // ---- Validating State ----
   if (validating) {
     return <LoadingSpinner text="Validating reset link..." />;
+  }
+
+  if (!recoveryReady) {
+    return (
+      <div className="flex min-h-screen">
+        <BrandPanel />
+        <div className="flex flex-1 flex-col items-center justify-center bg-gray-50 px-6 py-12">
+          <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-xl ring-1 ring-black/5">
+            <XCircle className="mx-auto h-12 w-12 text-red-500" />
+            <h1 className="mt-4 text-2xl font-bold text-gray-900">
+              Reset link unavailable
+            </h1>
+            <p className="mt-2 text-sm text-gray-500">
+              {error || "This password reset link is invalid or has expired."}
+            </p>
+            <Link
+              href="/forgot-password"
+              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#1f419a] px-5 py-3 text-sm font-semibold text-white hover:bg-[#17357b]"
+            >
+              Request a new reset link
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // ---- Success State ----
@@ -306,7 +328,7 @@ function ResetPasswordContent() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     placeholder="Enter new password"
                     className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-9 pr-10 text-sm transition-colors focus:border-[#1f419a] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20"
                   />
@@ -329,7 +351,7 @@ function ResetPasswordContent() {
                     <div className="flex items-center gap-2">
                       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
                         <div
-                          className={`h-full rounded-full transition-all duration-300 ${pwStrength.color}`}
+                          className={`h-full rounded-full transition-all duration-300 ${pwStrength.colorClass}`}
                           style={{
                             width: `${(pwStrength.score / 4) * 100}%`,
                           }}
@@ -390,7 +412,7 @@ function ResetPasswordContent() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     placeholder="Confirm new password"
                     className={`w-full rounded-xl border bg-gray-50 py-3 pl-9 pr-10 text-sm transition-colors focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20 ${
                       confirmPassword && confirmPassword !== password
@@ -422,7 +444,12 @@ function ResetPasswordContent() {
               {/* Submit */}
               <button
                 type="submit"
-                disabled={loading}
+                disabled={
+                  loading ||
+                  !recoveryReady ||
+                  !pwStrength.isValid ||
+                  password !== confirmPassword
+                }
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-3 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (

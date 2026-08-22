@@ -16,11 +16,17 @@ import Image from "next/image";
 import CloudflareTurnstile from "@/components/CloudflareTurnstile";
 
 export default function ForgotPasswordPage() {
+  const turnstileEnabled = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const handleTurnstileVerify = useCallback(() => {}, []);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileAttempt, setTurnstileAttempt] = useState(0);
+  const handleTurnstileVerify = useCallback((token: string) => {
+    setTurnstileToken(token);
+    setError(null);
+  }, []);
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,13 +34,19 @@ export default function ForgotPasswordPage() {
     setError(null);
     setSuccess(false);
 
+    if (turnstileEnabled && !turnstileToken) {
+      setError("Please complete the security check.");
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, turnstileToken }),
       });
       const payload = await response.json().catch(() => ({} as { error?: string }));
 
@@ -49,6 +61,10 @@ export default function ForgotPasswordPage() {
           ? error.message
           : "An error occurred. Please try again."
       );
+      if (turnstileEnabled) {
+        setTurnstileToken(null);
+        setTurnstileAttempt((current) => current + 1);
+      }
     } finally {
       setLoading(false);
     }
@@ -191,12 +207,17 @@ export default function ForgotPasswordPage() {
                 </div>
 
                 {/* Bot Protection */}
-                <CloudflareTurnstile onVerify={handleTurnstileVerify} />
+                <CloudflareTurnstile
+                  key={turnstileAttempt}
+                  onVerify={handleTurnstileVerify}
+                  onExpire={() => setTurnstileToken(null)}
+                  onError={() => setTurnstileToken(null)}
+                />
 
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || (turnstileEnabled && !turnstileToken)}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-3 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? (

@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { sendPasswordResetEmail } from "@/lib/email";
 import { getPreferredEmailRecipientName } from "@/lib/email-recipient-name";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -22,11 +23,26 @@ function isUserNotFoundError(message?: string) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { email } = await request.json();
+    const { email, turnstileToken } = await request.json();
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 
     if (!normalizedEmail) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
+    }
+
+    const remoteIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      undefined;
+    const turnstileResult = await verifyTurnstileToken(
+      typeof turnstileToken === "string" ? turnstileToken : "",
+      remoteIp
+    );
+    if (!turnstileResult.success) {
+      return NextResponse.json(
+        { error: "Security check failed. Please refresh and try again." },
+        { status: 403 }
+      );
     }
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
@@ -36,7 +52,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const redirectTo = new URL("/reset-password", request.nextUrl.origin).toString();
+    const appOrigin = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+    const redirectTo = new URL("/reset-password", appOrigin).toString();
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "recovery",
       email: normalizedEmail,
