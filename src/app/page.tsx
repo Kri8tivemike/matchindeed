@@ -21,7 +21,6 @@ import {
   ChevronDown,
   Video,
   Shield,
-  Heart,
   Users,
   Star,
   CheckCircle,
@@ -662,32 +661,20 @@ export default function Home() {
               Meet real people face-to-face
             </div>
             <h1 className="mx-auto max-w-[20rem] text-3xl font-extrabold leading-[1.1] tracking-tight text-white sm:max-w-none sm:text-5xl lg:text-6xl md:mx-0">
-              Meet Real People.
+              Ready for marriage?
               <span className="block bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">
-                Face-to-Face.
+                Find someone serious
               </span>
-              <span className="block">Before You Match.</span>
+              <span className="block">on MatchIndeed.</span>
             </h1>
             <p className="mx-auto mt-4 hidden max-w-md text-base text-white/75 sm:mt-5 sm:max-w-lg sm:text-lg md:mx-0 md:block md:text-xl">
-              Skip the swiping, small talk, and disappointment. Meet on a short
-              video date first, then decide if you want to keep talking.
+              MatchIndeed is for singles who want commitment, not games. Join
+              marriage minded singles in London and beyond.
             </p>
 
-            {/* Trust badges */}
-            <div className="mx-auto mt-6 hidden max-w-sm flex-wrap items-center justify-center gap-x-4 gap-y-3 text-sm text-white/60 sm:mt-8 md:mx-0 md:flex md:max-w-none md:justify-start md:gap-6">
-              <div className="flex items-center gap-1.5">
-                <Shield className="h-4 w-4" />
-                Verified Profiles
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Video className="h-4 w-4" />
-                Secure Video Calls
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Heart className="h-4 w-4" />
-                Real Connections
-              </div>
-            </div>
+            <p className="mx-auto mt-6 hidden max-w-sm text-sm font-medium text-white/75 sm:mt-8 md:mx-0 md:block md:max-w-none">
+              MatchIndeed — where commitment begins.
+            </p>
           </div>
 
           {/* Search Form Card */}
@@ -799,7 +786,7 @@ export default function Home() {
                   type="submit"
                   className="flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-3 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.02]"
                 >
-                  View Singles
+                  Join now
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </form>
@@ -807,24 +794,13 @@ export default function Home() {
           </div>
 
           <p className="mx-auto -mt-3 max-w-md px-4 text-center text-base text-white/75 md:hidden">
-            Skip the swiping, small talk, and disappointment. Meet on a short
-            video date first, then decide if you want to keep talking.
+            MatchIndeed is for singles who want commitment, not games. Join
+            marriage minded singles in London and beyond.
           </p>
 
-          <div className="mx-auto -mt-3 flex max-w-sm flex-wrap items-center justify-center gap-x-4 gap-y-3 px-4 text-sm text-white/60 md:hidden">
-            <div className="flex items-center gap-1.5">
-              <Shield className="h-4 w-4" />
-              Verified Profiles
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Video className="h-4 w-4" />
-              Secure Video Calls
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Heart className="h-4 w-4" />
-              Real Connections
-            </div>
-          </div>
+          <p className="mx-auto -mt-3 max-w-sm px-4 text-center text-sm font-medium text-white/75 md:hidden">
+            MatchIndeed — where commitment begins.
+          </p>
         </div>
       </section>
 
