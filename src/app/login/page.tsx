@@ -224,26 +224,32 @@ export default function LoginPage() {
       </div>
 
       {/* ===== Right Panel — Login Form ===== */}
-      <div className="flex min-w-0 flex-1 flex-col items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 sm:py-12">
-        <div className="w-full min-w-0 max-w-md">
+      <div className="flex min-w-0 flex-1 flex-col items-center justify-start bg-gray-50 px-4 py-5 sm:justify-center sm:px-6 sm:py-8 lg:py-12">
+        <div className="w-full min-w-0 max-w-sm">
           {/* Mobile logo */}
-          <div className="mb-6 text-center sm:mb-8 lg:hidden">
+          <div className="mb-4 text-center sm:mb-6 lg:hidden">
             <Link href="/" className="inline-block">
-              <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
+              <Image
+                src="/matchindeed-logo-black-font.png"
+                alt="MatchIndeed"
+                width={150}
+                height={40}
+                className="h-auto w-[132px] sm:w-[150px]"
+              />
             </Link>
           </div>
 
           {/* Heading */}
-          <div className="mb-6 sm:mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">Welcome back</h1>
-            <p className="mt-2 text-gray-500">
+          <div className="mb-4 sm:mb-5">
+            <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">Welcome back</h1>
+            <p className="mt-1 text-sm text-gray-500 sm:mt-1.5 sm:text-base">
               Sign in to your account to continue
             </p>
           </div>
 
           {/* Form Card */}
-          <div className="min-w-0 rounded-2xl bg-white p-5 shadow-xl ring-1 ring-black/5 sm:p-8">
-            <form onSubmit={handleLogin} className="space-y-5">
+          <div className="min-w-0 rounded-2xl bg-white p-4 shadow-lg ring-1 ring-black/5 sm:p-6">
+            <form onSubmit={handleLogin} className="space-y-4">
               {/* Error */}
               {error && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -265,7 +271,7 @@ export default function LoginPage() {
 
               {/* Email */}
               <div>
-                <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-gray-700">
+                <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
                   Email address
                 </label>
                 <div className="relative">
@@ -277,14 +283,14 @@ export default function LoginPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     placeholder="you@example.com"
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-4 text-sm transition-colors focus:border-[#1f419a] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20"
+                    className="min-h-11 w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-4 text-sm transition-colors focus:border-[#1f419a] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20"
                   />
                 </div>
               </div>
 
               {/* Password */}
               <div>
-                <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-gray-700">
+                <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
                   Password
                 </label>
                 <div className="relative">
@@ -296,7 +302,7 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     placeholder="Enter your password"
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-10 text-sm transition-colors focus:border-[#1f419a] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20"
+                    className="min-h-11 w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-10 text-sm transition-colors focus:border-[#1f419a] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1f419a]/20"
                   />
                   <button
                     type="button"
@@ -332,7 +338,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading || !!(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-3 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? (
                   <>
@@ -345,8 +351,8 @@ export default function LoginPage() {
               </button>
 
               {/* Social sign-in */}
-              <div className="mt-4">
-                <div className="relative mb-4">
+              <div className="mt-2">
+                <div className="relative mb-3">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-gray-200" />
                   </div>
@@ -359,7 +365,7 @@ export default function LoginPage() {
             </form>
 
             {/* Divider */}
-            <div className="relative my-6">
+            <div className="relative my-4">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-200" />
               </div>
@@ -373,7 +379,7 @@ export default function LoginPage() {
             {/* Register Link */}
             <Link
               href="/?focusSignup=1"
-              className="flex w-full items-center justify-center rounded-xl border border-gray-200 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
             >
               Create new account
             </Link>

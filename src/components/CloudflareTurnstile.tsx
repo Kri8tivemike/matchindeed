@@ -190,7 +190,7 @@ export default function CloudflareTurnstile({
   return (
     <div
       ref={containerRef}
-      className="my-2 flex min-h-[65px] min-w-0 justify-center overflow-hidden"
+      className="my-1 flex min-h-[65px] min-w-0 justify-center overflow-hidden"
     />
   );
 }
