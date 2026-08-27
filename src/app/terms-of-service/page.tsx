@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   },
 };
 
-const lastUpdated = "February 25, 2026";
+const lastUpdated = "August 27, 2026";
 
 export default function TermsOfServicePage() {
   return (
@@ -56,7 +56,7 @@ export default function TermsOfServicePage() {
               Terms of Service. If you do not agree, do not use the platform.
             </p>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              MatchIndeed is operated by Firstoutlook Ltd (UK).
+              MatchIndeed is operated by DI‑YIELDCOM GLOBAL SERVICES.
             </p>
           </section>
 

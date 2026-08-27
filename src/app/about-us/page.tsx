@@ -5,25 +5,25 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "About Us",
   description:
-    "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by Firstoutlook Ltd (UK).",
+    "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by DI-YIELDCOM GLOBAL SERVICES.",
   alternates: {
     canonical: "/about-us",
   },
   openGraph: {
     title: "About Us | MatchIndeed",
     description:
-      "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by Firstoutlook Ltd (UK).",
+      "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by DI-YIELDCOM GLOBAL SERVICES.",
     url: "/about-us",
   },
   twitter: {
     card: "summary",
     title: "About Us | MatchIndeed",
     description:
-      "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by Firstoutlook Ltd (UK).",
+      "Learn about MatchIndeed, a digital booking and video-meeting platform owned and operated by DI-YIELDCOM GLOBAL SERVICES.",
   },
 };
 
-const lastUpdated = "February 25, 2026";
+const lastUpdated = "August 27, 2026";
 
 export default function AboutUsPage() {
   return (
@@ -53,12 +53,12 @@ export default function AboutUsPage() {
             </h2>
             <p className="mt-3 text-sm leading-7 text-gray-700">
               MatchIndeed is a digital booking and video‑meeting platform owned and
-              operated by Firstoutlook Ltd (UK).
+              operated by DI‑YIELDCOM GLOBAL SERVICES.
             </p>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              MatchIndeed is owned and operated by Firstoutlook Ltd, a
-              UK‑registered business. DI‑YIELDCOM GLOBAL SERVICES provides additional
-              technology development and operational support for the platform.
+              DI‑YIELDCOM GLOBAL SERVICES is the registered business entity responsible
+              for MatchIndeed&apos;s operations, technology development, and operational
+              support.
             </p>
           </section>
 

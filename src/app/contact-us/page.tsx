@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Mail, Send, ShieldCheck, HelpCircle, LogIn, LogOut, UserCircle2 } from "lucide-react";
+import { Mail, Send, ShieldCheck, HelpCircle, LogIn, LogOut, UserCircle2, MapPin, Phone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -330,6 +330,20 @@ export default function ContactUsPage() {
               <p className="mt-1 text-sm text-slate-600">
                 Choose the reason that matches your issue and include key details in the form.
               </p>
+            </div>
+            <div className="rounded-2xl border border-[#dbe4ff] bg-white p-5 shadow-sm sm:col-span-2">
+              <MapPin className="mb-3 h-5 w-5 text-[#1f419a]" />
+              <p className="text-sm font-semibold text-slate-900">Office address</p>
+              <address className="mt-1 text-sm not-italic leading-6 text-slate-600">
+                16 Adeshina St, Animashaun, Lagos 101241, Lagos, Nigeria
+              </address>
+              <a
+                href="tel:+2348060886390"
+                className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[#1f419a] hover:underline"
+              >
+                <Phone className="h-4 w-4" />
+                +234 806 088 6390
+              </a>
             </div>
           </div>
         </section>

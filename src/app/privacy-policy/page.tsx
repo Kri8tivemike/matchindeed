@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   },
 };
 
-const lastUpdated = "February 25, 2026";
+const lastUpdated = "August 27, 2026";
 
 export default function PrivacyPolicyPage() {
   return (
@@ -55,7 +55,7 @@ export default function PrivacyPolicyPage() {
               your personal information.
             </p>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              Firstoutlook Ltd is the data controller for MatchIndeed.
+              DI‑YIELDCOM GLOBAL SERVICES is the data controller for MatchIndeed.
             </p>
           </section>
 
@@ -194,9 +194,10 @@ export default function PrivacyPolicyPage() {
               11. International Transfers
             </h2>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              Your data may be processed in countries outside your own. We use
-              safeguards, including contractual clauses, to protect your
-              information.
+              If Personal Data is transferred outside Nigeria, MatchIndeed applies
+              safeguards that comply with the Nigeria Data Protection Act (NDPA
+              2023), the Nigeria Data Protection Regulation (NDPR), and other
+              applicable privacy laws.
             </p>
           </section>
 
@@ -213,25 +214,31 @@ export default function PrivacyPolicyPage() {
           <hr className="my-10 border-gray-200" />
 
           <h2 className="text-2xl font-bold text-gray-900">
-            Data Processing Addendum (DPA)
+            Data Processing Agreement (DPA)
           </h2>
           <p className="mt-2 text-sm text-gray-500">Last Updated: {lastUpdated}</p>
           <p className="mt-4 text-sm leading-7 text-gray-700">
-            This Data Processing Addendum forms part of the Terms of Service and
-            governs how matchindeed.com processes personal data when providing
-            platform services.
+            This Data Processing Agreement forms part of MatchIndeed&apos;s Terms and
+            Conditions and Privacy Policy.
           </p>
 
           <section className="mt-8">
-            <h3 className="text-base font-semibold text-gray-900">1. Definitions</h3>
+            <h3 className="text-base font-semibold text-gray-900">1. Introduction</h3>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              In this DPA, Personal Data means any information relating to an
-              identified or identifiable person, Processing means any operation
-              performed on Personal Data, Controller means the entity that
-              determines why and how data is processed, Processor means the
-              entity that processes Personal Data on behalf of the Controller,
-              and Sub-processor means any third party engaged by the Processor.
-              Applicable laws include GDPR, UK GDPR, and relevant privacy laws.
+              This Data Processing Agreement (&ldquo;DPA&rdquo;) forms part of the Terms
+              and Conditions and Privacy Policy of MatchIndeed, operated by
+              DI‑YIELDCOM GLOBAL SERVICES, and governs how Personal Data is collected,
+              processed, stored, transferred, and protected in accordance with:
+            </p>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-7 text-gray-700">
+              <li>Nigeria Data Protection Act (NDPA 2023).</li>
+              <li>Nigeria Data Protection Regulation (NDPR).</li>
+              <li>General Data Protection Regulation (GDPR).</li>
+              <li>Other applicable international privacy laws.</li>
+            </ul>
+            <p className="mt-3 text-sm leading-7 text-gray-700">
+              This DPA applies to all users, customers, partners, and service
+              providers who interact with MatchIndeed.
             </p>
           </section>
 
@@ -240,10 +247,10 @@ export default function PrivacyPolicyPage() {
               2. Roles of the Parties
             </h3>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              Firstoutlook Ltd is the Controller for MatchIndeed and determines the
-              purpose and means of processing. matchindeed.com, acting as Processor
-              where applicable, processes Personal Data only to provide the services
-              under the Agreement.
+              DI‑YIELDCOM GLOBAL SERVICES is the Controller for MatchIndeed and
+              determines the purpose and means of processing. MatchIndeed, acting as
+              Processor where applicable, processes Personal Data only to provide the
+              services under the Agreement.
             </p>
           </section>
 
@@ -323,12 +330,35 @@ export default function PrivacyPolicyPage() {
 
           <section className="mt-8">
             <h3 className="text-base font-semibold text-gray-900">
-              8. International Transfers
+              8. Nigeria‑Compliant International Transfers
             </h3>
             <p className="mt-3 text-sm leading-7 text-gray-700">
-              If data is transferred outside the UK or EEA, safeguards such as
-              Standard Contractual Clauses (SCCs), the UK International Data
-              Transfer Addendum, or equivalent protections are applied.
+              If Personal Data is transferred outside Nigeria, MatchIndeed ensures
+              that such transfers comply with the Nigeria Data Protection Act (NDPA
+              2023) and the Nigeria Data Protection Regulation (NDPR). Appropriate
+              safeguards are applied, including:
+            </p>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-7 text-gray-700">
+              <li>Standard Contractual Clauses (SCCs) approved under GDPR.</li>
+              <li>NDPA‑compliant data transfer agreements.</li>
+              <li>
+                Adequacy decisions where the destination country provides sufficient
+                data protection.
+              </li>
+              <li>
+                Contractual and technical safeguards to ensure the protection of
+                Personal Data.
+              </li>
+              <li>
+                Binding agreements with Processors and Sub‑processors to maintain
+                NDPA, NDPR, and GDPR standards.
+              </li>
+            </ul>
+            <p className="mt-3 text-sm leading-7 text-gray-700">
+              Where data is transferred to countries without adequate protection
+              laws, MatchIndeed implements additional security measures, including
+              encryption, access controls, and strict contractual obligations to
+              ensure that Personal Data remains protected.
             </p>
           </section>
 
