@@ -38,6 +38,7 @@ type TurnstileAPI = {
     options: {
       sitekey: string;
       theme?: "light" | "dark" | "auto";
+      size?: "normal" | "flexible" | "compact";
       callback: (token: string) => void;
       "expired-callback"?: () => void;
       "error-callback"?: () => void;
@@ -103,6 +104,7 @@ export default function CloudflareTurnstile({
 }: CloudflareTurnstileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
+  const widgetSizeRef = useRef<"flexible" | "compact" | null>(null);
   const onVerifyRef = useRef(onVerify);
   const onExpireRef = useRef(onExpire);
   const onErrorRef = useRef(onError);
@@ -119,21 +121,40 @@ export default function CloudflareTurnstile({
   useEffect(() => {
     if (!siteKey) return;
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
 
     loadTurnstile()
       .then((turnstile) => {
-        if (cancelled || !containerRef.current || widgetIdRef.current !== null) {
-          return;
-        }
+        const renderWidget = () => {
+          if (cancelled || !containerRef.current) return;
 
-        widgetIdRef.current = turnstile.render(containerRef.current, {
-          sitekey: siteKey,
-          theme,
-          callback: (token) => onVerifyRef.current(token),
-          "expired-callback": () => onExpireRef.current?.(),
-          "error-callback": () => onErrorRef.current?.(),
-          "response-field": false,
-        });
+          const size =
+            containerRef.current.clientWidth < 300 ? "compact" : "flexible";
+          if (widgetIdRef.current !== null && widgetSizeRef.current === size) {
+            return;
+          }
+
+          if (widgetIdRef.current !== null) {
+            turnstile.remove(widgetIdRef.current);
+          }
+
+          widgetSizeRef.current = size;
+          widgetIdRef.current = turnstile.render(containerRef.current, {
+            sitekey: siteKey,
+            theme,
+            size,
+            callback: (token) => onVerifyRef.current(token),
+            "expired-callback": () => onExpireRef.current?.(),
+            "error-callback": () => onErrorRef.current?.(),
+            "response-field": false,
+          });
+        };
+
+        renderWidget();
+        const container = containerRef.current;
+        if (!container) return;
+        resizeObserver = new ResizeObserver(renderWidget);
+        resizeObserver.observe(container);
       })
       .catch(() => {
         if (!cancelled) onErrorRef.current?.();
@@ -141,6 +162,7 @@ export default function CloudflareTurnstile({
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
       if (widgetIdRef.current !== null) {
         try {
           window.turnstile?.remove(widgetIdRef.current);
@@ -149,6 +171,7 @@ export default function CloudflareTurnstile({
         }
         widgetIdRef.current = null;
       }
+      widgetSizeRef.current = null;
     };
   }, [siteKey, theme]);
 
@@ -164,5 +187,10 @@ export default function CloudflareTurnstile({
   // If no site key configured, don't render anything (dev mode graceful skip)
   if (!siteKey) return null;
 
-  return <div ref={containerRef} className="my-2 min-h-[65px]" />;
+  return (
+    <div
+      ref={containerRef}
+      className="my-2 flex min-h-[65px] min-w-0 justify-center overflow-hidden"
+    />
+  );
 }

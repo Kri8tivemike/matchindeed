@@ -170,7 +170,7 @@ export default function LoginPage() {
   // Render
   // ---------------------------------------------------------------
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen w-full overflow-x-hidden">
       {/* ===== Left Panel — Branding (desktop only) ===== */}
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-[#1e2a78] via-[#2a44a3] to-[#4463cf] p-12 lg:flex">
         {/* Decorative blurs */}
@@ -224,17 +224,17 @@ export default function LoginPage() {
       </div>
 
       {/* ===== Right Panel — Login Form ===== */}
-      <div className="flex flex-1 flex-col items-center justify-center bg-gray-50 px-6 py-12">
-        <div className="w-full max-w-md">
+      <div className="flex min-w-0 flex-1 flex-col items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 sm:py-12">
+        <div className="w-full min-w-0 max-w-md">
           {/* Mobile logo */}
-          <div className="mb-8 text-center lg:hidden">
+          <div className="mb-6 text-center sm:mb-8 lg:hidden">
             <Link href="/" className="inline-block">
               <Image src="/matchindeed-logo-black-font.png" alt="MatchIndeed" width={150} height={40} style={{ width: "auto", height: "auto" }} />
             </Link>
           </div>
 
           {/* Heading */}
-          <div className="mb-8">
+          <div className="mb-6 sm:mb-8">
             <h1 className="text-3xl font-bold text-gray-900">Welcome back</h1>
             <p className="mt-2 text-gray-500">
               Sign in to your account to continue
@@ -242,7 +242,7 @@ export default function LoginPage() {
           </div>
 
           {/* Form Card */}
-          <div className="rounded-2xl bg-white p-8 shadow-xl ring-1 ring-black/5">
+          <div className="min-w-0 rounded-2xl bg-white p-5 shadow-xl ring-1 ring-black/5 sm:p-8">
             <form onSubmit={handleLogin} className="space-y-5">
               {/* Error */}
               {error && (
@@ -309,7 +309,7 @@ export default function LoginPage() {
               </div>
 
               {/* Remember + Forgot */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <label className="flex items-center gap-2 text-sm text-gray-600">
                   <input
                     type="checkbox"
