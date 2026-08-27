@@ -1624,10 +1624,10 @@ export default function DiscoverPage() {
                           ? "Request video meeting"
                           : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
                       }
-                      className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-[13px] font-medium leading-tight transition-colors sm:h-10 sm:py-0 sm:text-xs ${
+                      className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-[13px] font-semibold leading-tight transition-colors sm:h-10 sm:py-0 sm:text-xs ${
                         currentProfileCanRequestMeeting
                           ? "border-[#1f419a] bg-[#1f419a] text-white hover:bg-[#17357f]"
-                          : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
+                          : "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-700 disabled:opacity-100"
                       }`}
                     >
                       <Video className="h-3.5 w-3.5 flex-shrink-0" />
@@ -1690,10 +1690,10 @@ export default function DiscoverPage() {
                             ? "Request video meeting"
                             : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
                         }
-                        className={`hidden h-11 w-full items-center justify-center gap-2 rounded-full border-2 text-sm font-medium shadow-sm transition-all md:flex ${
+                        className={`hidden h-11 w-full items-center justify-center gap-2 rounded-full border-2 text-sm font-semibold shadow-sm transition-all md:flex ${
                           currentProfileCanRequestMeeting
                             ? "border-[#1f419a] bg-white text-[#1f419a] hover:scale-105 hover:bg-[#eef2ff] hover:shadow-md active:scale-95"
-                            : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                            : "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-700 shadow-none disabled:opacity-100"
                         }`}
                       >
                         <Video className="h-4 w-4" />
@@ -1746,10 +1746,10 @@ export default function DiscoverPage() {
                             ? "Request video meeting"
                             : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
                         }
-                        className={`hidden h-11 w-full items-center justify-center gap-2 rounded-full border-2 text-sm font-medium shadow-sm transition-all md:flex ${
+                        className={`hidden h-11 w-full items-center justify-center gap-2 rounded-full border-2 text-sm font-semibold shadow-sm transition-all md:flex ${
                           currentProfileCanRequestMeeting
                             ? "border-[#1f419a] bg-white text-[#1f419a] hover:scale-105 hover:bg-[#eef2ff] hover:shadow-md active:scale-95"
-                            : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                            : "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-700 shadow-none disabled:opacity-100"
                         }`}
                       >
                         <Video className="h-4 w-4" />
@@ -1934,10 +1934,10 @@ export default function DiscoverPage() {
                                   ? "Request video meeting"
                                   : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
                               }
-                              className={`h-11 w-full rounded-full border-2 text-sm font-medium shadow-sm flex items-center justify-center gap-2 transition-all ${
+                              className={`h-11 w-full rounded-full border-2 text-sm font-semibold shadow-sm flex items-center justify-center gap-2 transition-all ${
                                 topPickCanRequestMeeting
                                   ? "border-[#1f419a] bg-[#1f419a] text-white hover:bg-[#17357f] hover:shadow-md hover:scale-105 active:scale-95"
-                                  : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                                  : "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-700 shadow-none disabled:opacity-100"
                               }`}
                             >
                               <Video className="h-4 w-4" />
@@ -1990,10 +1990,10 @@ export default function DiscoverPage() {
                                   ? "Request video meeting"
                                   : NO_ACTIVE_MEETING_AVAILABILITY_TEXT
                               }
-                              className={`h-11 w-full rounded-full border-2 text-sm font-medium shadow-sm flex items-center justify-center gap-2 transition-all ${
+                              className={`h-11 w-full rounded-full border-2 text-sm font-semibold shadow-sm flex items-center justify-center gap-2 transition-all ${
                                 topPickCanRequestMeeting
                                   ? "border-[#1f419a] bg-white text-[#1f419a] hover:bg-[#eef2ff] hover:shadow-md hover:scale-105 active:scale-95"
-                                  : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                                  : "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-700 shadow-none disabled:opacity-100"
                               }`}
                             >
                               <Video className="h-4 w-4" />

@@ -733,7 +733,7 @@ export default function ProfileDetailModal({
                   className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-semibold leading-tight shadow-lg transition-all sm:text-sm ${
                     canRequestMeeting
                       ? "bg-gradient-to-r from-[#1f419a] to-[#2a44a3] text-white hover:scale-[1.02] hover:shadow-xl"
-                      : "cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-400 shadow-none"
+                      : "cursor-not-allowed border border-slate-300 bg-slate-100 text-slate-700 shadow-none disabled:opacity-100"
                   }`}
                 >
                   <Video className="h-4 w-4 flex-shrink-0" />
