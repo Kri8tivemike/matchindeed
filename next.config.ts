@@ -25,6 +25,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "szmkvcifwopbnatsdcmw.supabase.co",
       },
+      {
+        protocol: "https",
+        hostname: "auth.matchindeed.com",
+      },
     ],
   },
   async rewrites() {
