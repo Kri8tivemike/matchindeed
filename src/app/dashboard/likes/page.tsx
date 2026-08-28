@@ -668,7 +668,7 @@ export default function LikesPage() {
           <div>
             <h1 className="flex items-center gap-2.5 text-2xl font-bold text-gray-900">
               <Heart className="h-7 w-7 text-[#1f419a]" />
-              Likes
+              Engagements
             </h1>
             <p className="mt-1 text-sm text-gray-500">See who likes you, who viewed you, and people you&apos;ve liked</p>
           </div>

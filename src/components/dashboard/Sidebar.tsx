@@ -465,7 +465,7 @@ export default function Sidebar({ active }: SidebarProps) {
         <Link href="/dashboard/likes" className={itemClass("likes")}>
           <span className="flex items-center gap-2">
             <Heart className="h-4 w-4" />
-            Likes
+            Engagements
           </span>
           <ChevronRight className={`h-4 w-4 ${currentActive === "likes" ? "text-[#1f419a]" : "text-gray-400"}`}/>
         </Link>

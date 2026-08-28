@@ -68,7 +68,7 @@ const navItems: NavItem[] = [
   {
     href: "/dashboard/likes",
     icon: Heart,
-    label: "Likes",
+    label: "Engagements",
     match: (p) => p.startsWith("/dashboard/likes") || p.startsWith("/dashboard/matches"),
   },
   {
@@ -246,7 +246,7 @@ export default function MobileNav() {
                   </span>
                 )}
                 {/* Badge for Likes */}
-                {item.label === "Likes" && likesCount > 0 && (
+                {item.href === "/dashboard/likes" && likesCount > 0 && (
                   <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#1f419a] px-1 text-[9px] font-bold text-white">
                     {likesCount > 99 ? "99+" : likesCount}
                   </span>
