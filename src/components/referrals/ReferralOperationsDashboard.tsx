@@ -363,6 +363,11 @@ export default function ReferralOperationsDashboard() {
   const [ambassadors, setAmbassadors] = useState<AmbassadorRow[]>([]);
   const [ambassadorSummary, setAmbassadorSummary] =
     useState<AmbassadorSummary | null>(null);
+  const [rewardSearch, setRewardSearch] = useState("");
+  const [rewardStatusFilter, setRewardStatusFilter] = useState("all");
+  const [rewardRiskFilter, setRewardRiskFilter] = useState("all");
+  const [rewardMilestoneFilter, setRewardMilestoneFilter] = useState("all");
+  const [rewardSourceFilter, setRewardSourceFilter] = useState("all");
   const [candidateSearch, setCandidateSearch] = useState("");
   const [candidateResults, setCandidateResults] = useState<AmbassadorCandidate[]>([]);
   const [selectedCandidate, setSelectedCandidate] =
@@ -432,6 +437,81 @@ export default function ReferralOperationsDashboard() {
     auditPagination.total,
     auditPagination.page * auditPagination.limit
   );
+  const rewardFilterOptions = useMemo(() => {
+    const statuses = new Set<string>();
+    const risks = new Set<string>();
+    const milestones = new Set<string>();
+    const sources = new Set<string>();
+
+    for (const reward of rewards) {
+      if (reward.status) statuses.add(reward.status);
+      risks.add(reward.risk_level || "low");
+      if (reward.milestone) milestones.add(reward.milestone);
+      const source = getRewardAttribution(reward).source;
+      if (source) sources.add(source);
+    }
+
+    return {
+      statuses: Array.from(statuses).sort(),
+      risks: Array.from(risks).sort(),
+      milestones: Array.from(milestones).sort(),
+      sources: Array.from(sources).sort(),
+    };
+  }, [rewards]);
+  const filteredRewards = useMemo(() => {
+    const query = rewardSearch.trim().toLowerCase();
+
+    return rewards.filter((reward) => {
+      const attribution = getRewardAttribution(reward);
+      if (rewardStatusFilter !== "all" && reward.status !== rewardStatusFilter) {
+        return false;
+      }
+      if (rewardRiskFilter !== "all" && (reward.risk_level || "low") !== rewardRiskFilter) {
+        return false;
+      }
+      if (rewardMilestoneFilter !== "all" && reward.milestone !== rewardMilestoneFilter) {
+        return false;
+      }
+      if (rewardSourceFilter !== "all" && attribution.source !== rewardSourceFilter) {
+        return false;
+      }
+      if (!query) return true;
+
+      return [
+        reward.referrer?.display_name,
+        reward.referrer?.email,
+        reward.referred_user?.display_name,
+        reward.referred_user?.email,
+        milestoneLabel(reward.milestone),
+        reward.status,
+        reward.risk_level || "low",
+        formatSourceName(attribution.source),
+        attribution.campaign,
+        attribution.medium,
+      ].some((value) => value?.toLowerCase().includes(query));
+    });
+  }, [
+    rewardMilestoneFilter,
+    rewardRiskFilter,
+    rewardSearch,
+    rewardSourceFilter,
+    rewardStatusFilter,
+    rewards,
+  ]);
+  const hasActiveRewardFilters =
+    rewardSearch.trim().length > 0 ||
+    rewardStatusFilter !== "all" ||
+    rewardRiskFilter !== "all" ||
+    rewardMilestoneFilter !== "all" ||
+    rewardSourceFilter !== "all";
+
+  const clearRewardFilters = () => {
+    setRewardSearch("");
+    setRewardStatusFilter("all");
+    setRewardRiskFilter("all");
+    setRewardMilestoneFilter("all");
+    setRewardSourceFilter("all");
+  };
 
   const authedFetch = useCallback(async (url: string, init?: RequestInit) => {
     const {
@@ -1319,8 +1399,87 @@ export default function ReferralOperationsDashboard() {
       {activeSection === "rewards" && (
         <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-5 py-4">
-            <h2 className="font-semibold text-gray-950">Reward ledger</h2>
-            <p className="mt-1 text-sm text-gray-500">Latest referral reward decisions and review status.</p>
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+              <div>
+                <h2 className="font-semibold text-gray-950">Reward ledger</h2>
+                <p className="mt-1 text-sm text-gray-500">Latest referral reward decisions and review status.</p>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Showing {filteredRewards.length} of {rewards.length}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_repeat(4,minmax(120px,auto))_auto]">
+              <label className="relative block min-w-0 md:col-span-2 xl:col-span-1">
+                <span className="sr-only">Search rewards</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="search"
+                  value={rewardSearch}
+                  onChange={(event) => setRewardSearch(event.target.value)}
+                  placeholder="Search users, source or campaign"
+                  className="h-10 w-full rounded-md border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-900 outline-none transition focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/10"
+                />
+              </label>
+
+              <select
+                aria-label="Filter rewards by status"
+                value={rewardStatusFilter}
+                onChange={(event) => setRewardStatusFilter(event.target.value)}
+                className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/10"
+              >
+                <option value="all">All statuses</option>
+                {rewardFilterOptions.statuses.map((status) => (
+                  <option key={status} value={status}>{formatSourceName(status)}</option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter rewards by risk"
+                value={rewardRiskFilter}
+                onChange={(event) => setRewardRiskFilter(event.target.value)}
+                className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/10"
+              >
+                <option value="all">All risk levels</option>
+                {rewardFilterOptions.risks.map((risk) => (
+                  <option key={risk} value={risk}>{formatSourceName(risk)} risk</option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter rewards by milestone"
+                value={rewardMilestoneFilter}
+                onChange={(event) => setRewardMilestoneFilter(event.target.value)}
+                className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/10"
+              >
+                <option value="all">All milestones</option>
+                {rewardFilterOptions.milestones.map((milestone) => (
+                  <option key={milestone} value={milestone}>{milestoneLabel(milestone)}</option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter rewards by source"
+                value={rewardSourceFilter}
+                onChange={(event) => setRewardSourceFilter(event.target.value)}
+                className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-[#1f419a] focus:ring-2 focus:ring-[#1f419a]/10"
+              >
+                <option value="all">All sources</option>
+                {rewardFilterOptions.sources.map((source) => (
+                  <option key={source} value={source}>{formatSourceName(source)}</option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={clearRewardFilters}
+                disabled={!hasActiveRewardFilters}
+                className="h-10 rounded-md border border-gray-200 px-3 text-sm font-semibold text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Clear
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-100 text-sm">
@@ -1343,8 +1502,22 @@ export default function ReferralOperationsDashboard() {
                       No referral rewards yet.
                     </td>
                   </tr>
+                ) : filteredRewards.length === 0 ? (
+                  <tr>
+                    <td className="px-5 py-10 text-center" colSpan={8}>
+                      <p className="font-medium text-gray-800">No rewards match these filters</p>
+                      <p className="mt-1 text-sm text-gray-500">Try a different search or clear the current filters.</p>
+                      <button
+                        type="button"
+                        onClick={clearRewardFilters}
+                        className="mt-3 text-sm font-semibold text-[#1f419a] hover:underline"
+                      >
+                        Clear filters
+                      </button>
+                    </td>
+                  </tr>
                 ) : (
-                  rewards.map((reward) => {
+                  filteredRewards.map((reward) => {
                     const attribution = getRewardAttribution(reward);
                     return (
                       <tr key={reward.id} className="hover:bg-gray-50/70">
