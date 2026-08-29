@@ -9,9 +9,11 @@ import {
   ArrowRight,
   CheckCircle2,
   CreditCard,
+  Landmark,
   Loader2,
   LockKeyhole,
   ShieldCheck,
+  Smartphone,
   Wallet,
 } from "lucide-react";
 import NotificationBell from "@/components/NotificationBell";
@@ -46,6 +48,81 @@ type CheckoutDisplay = {
 
 const SUBSCRIPTION_CURRENCIES: CheckoutCurrency[] = ["NGN", "USD"];
 
+function CardBrandMarks({ currency }: { currency: CheckoutCurrency }) {
+  return (
+    <div
+      className="flex min-w-0 items-center gap-1.5"
+      aria-label={`Supported card brands: Visa, Mastercard, American Express${
+        currency === "NGN" ? ", and Verve" : ""
+      }`}
+    >
+      <span
+        title="Visa"
+        className="flex h-5 min-w-9 items-center justify-center rounded border border-gray-200 bg-white px-1 text-[9px] font-black italic tracking-tight text-[#1434CB]"
+      >
+        VISA
+      </span>
+      <span
+        title="Mastercard"
+        className="relative flex h-5 w-8 items-center justify-center rounded border border-gray-200 bg-white"
+      >
+        <span className="absolute left-[7px] h-3 w-3 rounded-full bg-[#EB001B]" />
+        <span className="absolute right-[7px] h-3 w-3 rounded-full bg-[#F79E1B] opacity-90" />
+      </span>
+      <span
+        title="American Express"
+        className="flex h-5 min-w-8 items-center justify-center rounded bg-[#2E77BC] px-1 text-[7px] font-black leading-none text-white"
+      >
+        AMEX
+      </span>
+      {currency === "NGN" && (
+        <span
+          title="Verve"
+          className="flex h-5 min-w-9 items-center justify-center rounded border border-gray-200 bg-white px-1 text-[8px] font-black italic text-[#009B4D]"
+        >
+          Verve
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ProviderPaymentMethods({
+  provider,
+  currency,
+}: {
+  provider: CheckoutPaymentProvider;
+  currency: CheckoutCurrency;
+}) {
+  return (
+    <div className="mt-2 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden">
+      <CardBrandMarks currency={currency} />
+      {currency === "NGN" && (
+        <>
+          <span
+            title="Bank transfer"
+            aria-label="Bank transfer"
+            className="flex h-5 min-w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-600"
+          >
+            <Landmark className="h-3 w-3" />
+          </span>
+          <span
+            title="USSD"
+            aria-label="USSD"
+            className="flex h-5 min-w-9 items-center justify-center gap-0.5 rounded border border-gray-200 bg-white px-1 text-[7px] font-bold text-gray-600"
+          >
+            <Smartphone className="h-2.5 w-2.5" />
+            USSD
+          </span>
+        </>
+      )}
+      <span className="sr-only">
+        {provider === "paystack" ? "Available through Paystack" : "Available through Flutterwave"}
+      </span>
+    </div>
+  );
+}
+
 function getProviderCard(
   provider: CheckoutPaymentProvider,
   currency: CheckoutCurrency
@@ -56,8 +133,8 @@ function getProviderCard(
       title: "Paystack",
       description:
         currency === "NGN"
-          ? "Naira checkout with cards, bank transfer, USSD, and other Nigerian payment methods."
-          : "USD checkout for eligible international cards, including cards issued in the US, UK, and Canada.",
+          ? "Fast local checkout for Nigerian payments."
+          : "International card checkout billed securely in USD.",
     };
   }
 
@@ -66,8 +143,8 @@ function getProviderCard(
     title: "Flutterwave",
     description:
       currency === "NGN"
-        ? "Naira checkout with cards, bank transfer, USSD, and other local payment methods."
-        : "USD checkout for eligible international cards and supported account payment options.",
+        ? "Flexible local checkout with multiple payment options."
+        : "International card and account checkout in USD.",
   };
 }
 
@@ -306,13 +383,13 @@ function CheckoutContent() {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl gap-6 px-4 py-6">
+      <div className="mx-auto flex max-w-7xl gap-5 px-4 py-5">
         <aside className="hidden w-56 flex-shrink-0 md:block">
           <Sidebar active="subscription" />
         </aside>
 
         <main className="min-w-0 flex-1">
-          <div className="mb-5">
+          <div className="mb-4">
             <Link
               href={display?.returnPath || "/dashboard/profile/subscription"}
               className="inline-flex items-center gap-2 text-sm font-semibold text-[#1f419a] hover:underline"
@@ -320,7 +397,7 @@ function CheckoutContent() {
               <ArrowLeft className="h-4 w-4" />
               Back
             </Link>
-            <h1 className="mt-3 text-2xl font-bold text-gray-900">Complete Payment</h1>
+            <h1 className="mt-2 text-2xl font-bold text-gray-900">Complete Payment</h1>
             <p className="mt-1 text-sm text-gray-500">
               Review your order, choose a secure checkout provider, and continue.
             </p>
@@ -339,16 +416,19 @@ function CheckoutContent() {
               </Link>
             </div>
           ) : (
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-              <section className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <section className="space-y-3">
                 {parsedIntent.intent.type === "subscription" && (
-                  <div className="rounded-xl border border-gray-200 bg-white p-5">
-                    <h2 className="text-lg font-bold text-gray-900">Payment Currency</h2>
-                    <p className="mt-1 text-sm text-gray-500">
-                      Choose the currency that will be shown at the hosted checkout.
-                    </p>
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                      <div>
+                        <h2 className="text-base font-bold text-gray-900">Payment Currency</h2>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          Nigeria uses NGN; international payments use USD.
+                        </p>
+                      </div>
                     <div
-                      className="mt-4 grid max-w-xs grid-cols-2 rounded-lg border border-gray-200 bg-gray-50 p-1"
+                      className="grid w-full grid-cols-2 rounded-lg border border-gray-200 bg-gray-50 p-1 sm:w-52"
                       role="radiogroup"
                       aria-label="Payment currency"
                     >
@@ -361,7 +441,7 @@ function CheckoutContent() {
                             role="radio"
                             aria-checked={selected}
                             onClick={() => changeSubscriptionCurrency(currency)}
-                            className={`min-h-10 rounded-md px-3 text-sm font-semibold transition-colors ${
+                            className={`min-h-9 rounded-md px-3 text-xs font-bold transition-colors ${
                               selected
                                 ? "bg-white text-[#1f419a] shadow-sm"
                                 : "text-gray-600 hover:text-gray-900"
@@ -372,20 +452,17 @@ function CheckoutContent() {
                         );
                       })}
                     </div>
-                    <p className="mt-3 text-xs leading-5 text-gray-500">
-                      Nigerian customers pay in NGN. Customers everywhere else pay in
-                      USD with either Paystack or Flutterwave.
-                    </p>
+                    </div>
                   </div>
                 )}
 
-                <div className="rounded-xl border border-gray-200 bg-white p-5">
-                  <h2 className="text-lg font-bold text-gray-900">Payment Method</h2>
-                  <p className="mt-1 text-sm text-gray-500">
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h2 className="text-base font-bold text-gray-900">Payment Method</h2>
+                  <p className="mt-0.5 text-xs text-gray-500">
                     Choose how you want to complete this transaction.
                   </p>
 
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
                     {supportedProviders.map((providerId) => {
                       const card = getProviderCard(
                         providerId,
@@ -397,27 +474,37 @@ function CheckoutContent() {
                           key={card.id}
                           type="button"
                           onClick={() => setProvider(card.id)}
-                          className={`min-h-[140px] rounded-xl border p-4 text-left transition-colors ${
+                          className={`relative rounded-lg border p-3.5 text-left transition-all ${
                             selected
-                              ? "border-[#1f419a] bg-[#eef2ff] shadow-sm"
-                              : "border-gray-200 bg-white hover:border-[#1f419a]/40"
+                              ? "border-[#2448ad] bg-[#f1f4ff] shadow-sm ring-1 ring-[#2448ad]/10"
+                              : "border-gray-200 bg-white hover:border-[#1f419a]/40 hover:bg-gray-50/50"
                           }`}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white text-[#1f419a] shadow-sm">
-                              <CreditCard className="h-5 w-5" />
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-2.5">
+                              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-[#1f419a] shadow-sm">
+                                <CreditCard className="h-4 w-4" />
+                              </div>
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <h3 className="text-sm font-bold text-gray-900">{card.title}</h3>
+                                {checkoutCurrency === "NGN" && card.id === "paystack" && (
+                                  <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-emerald-700">
+                                    Recommended
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            {selected && <CheckCircle2 className="h-5 w-5 text-[#1f419a]" />}
+                            <CheckCircle2
+                              className={`h-4 w-4 flex-shrink-0 ${
+                                selected ? "text-[#1f419a]" : "text-gray-300"
+                              }`}
+                            />
                           </div>
-                          <div className="mt-4 flex items-center gap-2">
-                            <h3 className="text-base font-bold text-gray-900">{card.title}</h3>
-                            {checkoutCurrency === "NGN" && card.id === "paystack" && (
-                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
-                                Recommended
-                              </span>
-                            )}
-                          </div>
-                          <p className="mt-2 text-sm leading-5 text-gray-500">
+                          <ProviderPaymentMethods
+                            provider={card.id}
+                            currency={parsedIntent.intent.currency}
+                          />
+                          <p className="mt-2 text-xs leading-4 text-gray-500">
                             {card.description}
                           </p>
                         </button>
@@ -425,7 +512,7 @@ function CheckoutContent() {
                     })}
                   </div>
                   {checkoutCurrency && (
-                    <p className="mt-3 text-xs leading-5 text-gray-500">
+                    <p className="mt-2.5 text-[11px] leading-4 text-gray-500">
                       {checkoutCurrency === "NGN"
                         ? "Paystack is recommended for Nigerian Naira payments. Flutterwave is also available."
                         : supportedProviders.includes("paystack")
@@ -446,7 +533,7 @@ function CheckoutContent() {
                     )}
                 </div>
 
-                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-900">
                   <div className="flex items-start gap-3">
                     <ShieldCheck className="mt-0.5 h-5 w-5 flex-shrink-0" />
                     <p>
@@ -457,10 +544,10 @@ function CheckoutContent() {
                 </div>
               </section>
 
-              <aside className="space-y-4">
-                <div className="rounded-xl border border-gray-200 bg-white p-5">
-                  <h2 className="text-lg font-bold text-gray-900">Order Summary</h2>
-                  <div className="mt-4 space-y-3">
+              <aside className="space-y-3">
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h2 className="text-base font-bold text-gray-900">Order Summary</h2>
+                  <div className="mt-3 space-y-3">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <p className="font-semibold text-gray-900">{display?.title}</p>
@@ -477,7 +564,7 @@ function CheckoutContent() {
                       </div>
                       <div className="mt-2 flex items-center justify-between">
                         <span className="text-sm text-gray-500">Total</span>
-                        <span className="text-xl font-bold text-gray-900">
+                        <span className="text-lg font-bold text-gray-900">
                           {display && formatMoney(display.amountCents, parsedIntent.intent.currency)}
                         </span>
                       </div>
@@ -488,7 +575,7 @@ function CheckoutContent() {
                     type="button"
                     onClick={startCheckout}
                     disabled={processing}
-                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1f419a] to-[#2a44a3] px-4 py-3 text-sm font-bold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-60"
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-[#2448ad] px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#1f419a] disabled:opacity-60"
                   >
                     {processing ? (
                       <>
@@ -504,7 +591,7 @@ function CheckoutContent() {
                   </button>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <div className="flex items-start gap-3">
                     <LockKeyhole className="mt-0.5 h-5 w-5 text-gray-500" />
                     <div>
