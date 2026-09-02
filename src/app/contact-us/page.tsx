@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Mail, Send, ShieldCheck, HelpCircle, LogIn, LogOut, UserCircle2, MapPin, Phone } from "lucide-react";
+import { Mail, Send, ShieldCheck, HelpCircle, LogIn, LogOut, UserCircle2, Phone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -332,11 +332,11 @@ export default function ContactUsPage() {
               </p>
             </div>
             <div className="rounded-2xl border border-[#dbe4ff] bg-white p-5 shadow-sm sm:col-span-2">
-              <MapPin className="mb-3 h-5 w-5 text-[#1f419a]" />
-              <p className="text-sm font-semibold text-slate-900">Office address</p>
-              <address className="mt-1 text-sm not-italic leading-6 text-slate-600">
-                16 Adeshina St, Animashaun, Lagos 101241, Lagos, Nigeria
-              </address>
+              <Phone className="mb-3 h-5 w-5 text-[#1f419a]" />
+              <p className="text-sm font-semibold text-slate-900">Phone support</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Call our support team for help with your account or a booking.
+              </p>
               <a
                 href="tel:+2348060886390"
                 className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[#1f419a] hover:underline"
