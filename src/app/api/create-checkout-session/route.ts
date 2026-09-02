@@ -20,9 +20,11 @@ import type {
 } from "@/lib/payments/checkout-intent";
 import {
   getPaymentMinimumAmountCents,
+  getRecommendedPaymentProvider,
   getUnsupportedProviderMessage,
   isPaymentProviderSupported,
 } from "@/lib/payments/gateway-currency";
+import { getCheckoutCurrencyForRequestHeaders } from "@/lib/payments/region-currency";
 
 const baseTierPricing: Record<
   string,
@@ -174,7 +176,7 @@ function getUserDisplayName(user: NonNullable<Awaited<ReturnType<typeof getAuthe
 }
 
 function normalizePaymentProvider(value: unknown): CheckoutPaymentProvider | null {
-  if (typeof value !== "string" || !value.trim()) return "flutterwave";
+  if (typeof value !== "string" || !value.trim()) return null;
   const normalized = value.trim().toLowerCase();
   if (!SUPPORTED_PAYMENT_PROVIDERS.has(normalized)) return null;
   return normalized === "paystack" ? "paystack" : "flutterwave";
@@ -317,8 +319,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const provider = normalizePaymentProvider(requestedProvider);
-    if (!provider) {
+    const normalizedRequestedProvider = normalizePaymentProvider(requestedProvider);
+    if (
+      normalizedRequestedProvider === null &&
+      typeof requestedProvider === "string" &&
+      requestedProvider.trim()
+    ) {
       return NextResponse.json(
         { error: "Invalid payment provider. Supported: Flutterwave, Paystack" },
         { status: 400 }
@@ -326,6 +332,18 @@ export async function POST(request: NextRequest) {
     }
 
     const checkoutCurrency = normalizedCurrency.toUpperCase() as CheckoutCurrency;
+    const regionalCurrency = getCheckoutCurrencyForRequestHeaders(request.headers);
+    if (checkoutCurrency !== regionalCurrency) {
+      return NextResponse.json(
+        {
+          error: `Checkout currency is determined by your location. Please use ${regionalCurrency}.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const provider =
+      normalizedRequestedProvider || getRecommendedPaymentProvider(checkoutCurrency);
     if (!isPaymentProviderSupported(provider, checkoutCurrency)) {
       return NextResponse.json(
         { error: getUnsupportedProviderMessage(provider, checkoutCurrency) },

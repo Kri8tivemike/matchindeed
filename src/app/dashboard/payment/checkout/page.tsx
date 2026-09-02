@@ -46,8 +46,6 @@ type CheckoutDisplay = {
   payload: Record<string, string | number>;
 };
 
-const SUBSCRIPTION_CURRENCIES: CheckoutCurrency[] = ["NGN", "USD"];
-
 function CardBrandMarks({ currency }: { currency: CheckoutCurrency }) {
   return (
     <div
@@ -260,6 +258,7 @@ function CheckoutContent() {
   const [provider, setProvider] = useState<CheckoutPaymentProvider>("paystack");
   const [processing, setProcessing] = useState(false);
   const [subscriptionPricing, setSubscriptionPricing] = useState(DEFAULT_SUBSCRIPTION_PRICING);
+  const [regionalCurrency, setRegionalCurrency] = useState<CheckoutCurrency | null>(null);
 
   const parsedIntent = useMemo(
     () => parseCheckoutIntent(new URLSearchParams(searchParams.toString())),
@@ -296,6 +295,30 @@ function CheckoutContent() {
   }, [checkoutCurrency]);
 
   useEffect(() => {
+    if (!parsedIntent.ok) return;
+
+    let active = true;
+    fetch("/api/geo")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!active) return;
+        const currency: CheckoutCurrency =
+          String(data?.currency).toLowerCase() === "ngn" ? "NGN" : "USD";
+        setRegionalCurrency(currency);
+        if (parsedIntent.intent.currency !== currency) {
+          router.replace(buildCheckoutUrl({ ...parsedIntent.intent, currency }));
+        }
+      })
+      .catch(() => {
+        if (active) setRegionalCurrency("USD");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [parsedIntent, router]);
+
+  useEffect(() => {
     fetch("/api/subscription-pricing")
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
@@ -316,18 +339,6 @@ function CheckoutContent() {
       })
       .catch(() => {});
   }, []);
-
-  const changeSubscriptionCurrency = (currency: CheckoutCurrency) => {
-    if (!parsedIntent.ok || parsedIntent.intent.type !== "subscription") return;
-    if (parsedIntent.intent.currency === currency) return;
-
-    router.replace(
-      buildCheckoutUrl({
-        ...parsedIntent.intent,
-        currency,
-      })
-    );
-  };
 
   const startCheckout = async () => {
     if (!parsedIntent.ok || !display) return;
@@ -427,30 +438,8 @@ function CheckoutContent() {
                           Nigeria uses NGN; international payments use USD.
                         </p>
                       </div>
-                    <div
-                      className="grid w-full grid-cols-2 rounded-lg border border-gray-200 bg-gray-50 p-1 sm:w-52"
-                      role="radiogroup"
-                      aria-label="Payment currency"
-                    >
-                      {SUBSCRIPTION_CURRENCIES.map((currency) => {
-                        const selected = currency === checkoutCurrency;
-                        return (
-                          <button
-                            key={currency}
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            onClick={() => changeSubscriptionCurrency(currency)}
-                            className={`min-h-9 rounded-md px-3 text-xs font-bold transition-colors ${
-                              selected
-                                ? "bg-white text-[#1f419a] shadow-sm"
-                                : "text-gray-600 hover:text-gray-900"
-                            }`}
-                          >
-                            {currency}
-                          </button>
-                        );
-                      })}
+                    <div className="inline-flex min-h-9 items-center rounded-lg border border-gray-200 bg-gray-50 px-4 text-xs font-bold text-[#1f419a]">
+                      {regionalCurrency || checkoutCurrency}
                     </div>
                     </div>
                   </div>
@@ -515,9 +504,7 @@ function CheckoutContent() {
                     <p className="mt-2.5 text-[11px] leading-4 text-gray-500">
                       {checkoutCurrency === "NGN"
                         ? "Paystack is recommended for Nigerian Naira payments. Flutterwave is also available."
-                        : supportedProviders.includes("paystack")
-                            ? "Customers in the US, Canada, the UK, and other supported countries can pay in USD with an eligible international card. Their bank may convert the charge from their card currency."
-                            : "Flutterwave is currently used for USD and international checkout."}
+                        : "International customers pay securely in USD through Paystack with an eligible card. Their bank may convert the charge from their card currency."}
                     </p>
                   )}
                   {checkoutCurrency === "USD" &&

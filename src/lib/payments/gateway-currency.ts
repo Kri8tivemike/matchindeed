@@ -8,7 +8,7 @@ const BASE_GATEWAY_CURRENCY_SUPPORT: Record<
   readonly CheckoutPaymentProvider[]
 > = {
   NGN: ["paystack", "flutterwave"],
-  USD: ["flutterwave"],
+  USD: ["paystack"],
 };
 
 const BASE_MINIMUM_AMOUNT_CENTS: Record<CheckoutCurrency, number> = {
@@ -25,30 +25,17 @@ const PROVIDER_MINIMUM_AMOUNT_CENTS: Partial<
   },
 };
 
-export function isPaystackUsdEnabled() {
-  return process.env.NEXT_PUBLIC_PAYSTACK_USD_ENABLED === "true";
-}
-
 export function getSupportedPaymentProviders(
-  currency: CheckoutCurrency,
-  options: { paystackUsdEnabled?: boolean } = {}
+  currency: CheckoutCurrency
 ): CheckoutPaymentProvider[] {
-  const providers = [...BASE_GATEWAY_CURRENCY_SUPPORT[currency]];
-  const paystackUsdEnabled = options.paystackUsdEnabled ?? isPaystackUsdEnabled();
-
-  if (currency === "USD" && paystackUsdEnabled) {
-    return ["paystack", ...providers];
-  }
-
-  return providers;
+  return [...BASE_GATEWAY_CURRENCY_SUPPORT[currency]];
 }
 
 export function isPaymentProviderSupported(
   provider: CheckoutPaymentProvider,
-  currency: CheckoutCurrency,
-  options: { paystackUsdEnabled?: boolean } = {}
+  currency: CheckoutCurrency
 ) {
-  return getSupportedPaymentProviders(currency, options).includes(provider);
+  return getSupportedPaymentProviders(currency).includes(provider);
 }
 
 export function getPaymentMinimumAmountCents(
@@ -70,13 +57,9 @@ export function isPaymentAmountSupported(
 }
 
 export function getRecommendedPaymentProvider(
-  currency: CheckoutCurrency,
-  options: { paystackUsdEnabled?: boolean } = {}
+  currency: CheckoutCurrency
 ): CheckoutPaymentProvider {
-  const supportedProviders = getSupportedPaymentProviders(currency, options);
-  return currency === "NGN" && supportedProviders.includes("paystack")
-    ? "paystack"
-    : "flutterwave";
+  return getSupportedPaymentProviders(currency)[0];
 }
 
 export function getUnsupportedProviderMessage(
