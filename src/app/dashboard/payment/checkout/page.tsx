@@ -258,7 +258,6 @@ function CheckoutContent() {
   const [provider, setProvider] = useState<CheckoutPaymentProvider>("paystack");
   const [processing, setProcessing] = useState(false);
   const [subscriptionPricing, setSubscriptionPricing] = useState(DEFAULT_SUBSCRIPTION_PRICING);
-  const [regionalCurrency, setRegionalCurrency] = useState<CheckoutCurrency | null>(null);
 
   const parsedIntent = useMemo(
     () => parseCheckoutIntent(new URLSearchParams(searchParams.toString())),
@@ -304,14 +303,11 @@ function CheckoutContent() {
         if (!active) return;
         const currency: CheckoutCurrency =
           String(data?.currency).toLowerCase() === "ngn" ? "NGN" : "USD";
-        setRegionalCurrency(currency);
         if (parsedIntent.intent.currency !== currency) {
           router.replace(buildCheckoutUrl({ ...parsedIntent.intent, currency }));
         }
       })
-      .catch(() => {
-        if (active) setRegionalCurrency("USD");
-      });
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -429,22 +425,6 @@ function CheckoutContent() {
           ) : (
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
               <section className="space-y-3">
-                {parsedIntent.intent.type === "subscription" && (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
-                    <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-                      <div>
-                        <h2 className="text-base font-bold text-gray-900">Payment Currency</h2>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                          Nigeria uses NGN; international payments use USD.
-                        </p>
-                      </div>
-                    <div className="inline-flex min-h-9 items-center rounded-lg border border-gray-200 bg-gray-50 px-4 text-xs font-bold text-[#1f419a]">
-                      {regionalCurrency || checkoutCurrency}
-                    </div>
-                    </div>
-                  </div>
-                )}
-
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <h2 className="text-base font-bold text-gray-900">Payment Method</h2>
                   <p className="mt-0.5 text-xs text-gray-500">
