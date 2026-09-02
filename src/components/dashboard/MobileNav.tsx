@@ -29,8 +29,8 @@ import {
   isTransientRequestError,
   shouldSkipBackgroundRequest,
 } from "@/lib/request-errors";
-import { getVisibleReceivedActivityCount } from "@/lib/like-counters";
 import { useDashboardAccess } from "@/components/dashboard/DashboardAccessProvider";
+import { useEngagementUnreadCount } from "@/hooks/useEngagementUnreadCount";
 
 type NextLinkProps = ComponentProps<typeof NextLink>;
 
@@ -107,8 +107,8 @@ export default function MobileNav() {
     (item) => walletAccessEnabled || item.label !== "Wallet"
   );
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
-  const [likesCount, setLikesCount] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const engagementUnreadCount = useEngagementUnreadCount(isMobileViewport);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -169,30 +169,6 @@ export default function MobileNav() {
     };
   }, [isMobileViewport, pathname]);
 
-  // Fetch received likes/winks/interested count for the Likes badge
-  useEffect(() => {
-    const fetchLikesCount = async () => {
-      if (shouldSkipBackgroundRequest()) {
-        return;
-      }
-
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const user = session?.user ?? null;
-        if (!user) return;
-
-        const count = await getVisibleReceivedActivityCount(user.id);
-        setLikesCount(count || 0);
-      } catch {
-        // Silent fail
-      }
-    };
-
-    fetchLikesCount();
-    const interval = setInterval(fetchLikesCount, 60000);
-    return () => clearInterval(interval);
-  }, []);
-
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white/95 backdrop-blur-lg md:hidden safe-area-bottom">
       <div className="mx-auto max-w-lg border-b border-gray-100 px-2 pt-1 pb-1.5">
@@ -245,10 +221,10 @@ export default function MobileNav() {
                     {unreadMsgCount > 99 ? "99+" : unreadMsgCount}
                   </span>
                 )}
-                {/* Badge for Likes */}
-                {item.href === "/dashboard/likes" && likesCount > 0 && (
+                {/* Unread badge for Engagements */}
+                {item.href === "/dashboard/likes" && engagementUnreadCount > 0 && (
                   <span className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#1f419a] px-1 text-[9px] font-bold text-white">
-                    {likesCount > 99 ? "99+" : likesCount}
+                    {engagementUnreadCount > 99 ? "99+" : engagementUnreadCount}
                   </span>
                 )}
               </div>

@@ -45,6 +45,10 @@ import { createActivity, deleteActivity } from "@/lib/activities";
 import { getBlockedUserIds } from "@/lib/blocked-users";
 import { getVisibleReceivedActivities } from "@/lib/like-counters";
 import { toStateCountryLabel } from "@/lib/location";
+import {
+  ENGAGEMENT_UNREAD_UPDATED_EVENT,
+  type EngagementNotificationCategory,
+} from "@/lib/engagement-notifications";
 
 // ---------------------------------------------------------------
 // Types
@@ -78,6 +82,7 @@ type ViewProfile = {
 };
 
 type ProfileCard = LikeProfile | ViewProfile;
+type EngagementTab = "received" | "mine" | "views";
 
 type ActivityRow = {
   id: string;
@@ -124,8 +129,10 @@ export default function LikesPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") === "views" ? "views" : "received";
-  const [activeTab, setActiveTab] = useState<"received" | "mine" | "views">(initialTab);
+  const tabParam = searchParams.get("tab");
+  const initialTab: EngagementTab =
+    tabParam === "views" ? "views" : tabParam === "sent" ? "mine" : "received";
+  const [activeTab, setActiveTab] = useState<EngagementTab>(initialTab);
   const [receivedLikes, setReceivedLikes] = useState<LikeProfile[]>([]);
   const [myLikes, setMyLikes] = useState<LikeProfile[]>([]);
   const [profileViews, setProfileViews] = useState<ViewProfile[]>([]);
@@ -154,10 +161,41 @@ export default function LikesPage() {
   const [cardSrcs, setCardSrcs] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (searchParams.get("tab") === "views") {
-      setActiveTab("views");
-    }
+    const nextTab = searchParams.get("tab");
+    setActiveTab(nextTab === "views" ? "views" : nextTab === "sent" ? "mine" : "received");
   }, [searchParams]);
+
+  const markEngagementTabRead = useCallback(async (tab: EngagementTab) => {
+    const category: EngagementNotificationCategory | null =
+      tab === "received" ? "received" : tab === "views" ? "views" : null;
+    if (!category) return;
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mark_engagement_read: category }),
+      });
+
+      if (response.ok) {
+        window.dispatchEvent(new Event(ENGAGEMENT_UNREAD_UPDATED_EVENT));
+      }
+    } catch (error) {
+      console.warn("Unable to update engagement read state:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void markEngagementTabRead(activeTab);
+  }, [activeTab, markEngagementTabRead]);
 
   // ---------------------------------------------------------------
   // Fetch all likes
@@ -364,6 +402,7 @@ export default function LikesPage() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         refreshLikes();
+        void markEngagementTabRead(activeTab);
       }
     };
 
@@ -381,7 +420,7 @@ export default function LikesPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       subscription.unsubscribe();
     };
-  }, [fetchLikes]);
+  }, [activeTab, fetchLikes, markEngagementTabRead]);
 
   // ---------------------------------------------------------------
   // Handlers
@@ -632,13 +671,13 @@ export default function LikesPage() {
   // ---------------------------------------------------------------
   const currentList = activeTab === "received" ? receivedLikes : activeTab === "views" ? profileViews : myLikes;
 
-  const setTab = (tab: "received" | "mine" | "views") => {
+  const setTab = (tab: EngagementTab) => {
     setActiveTab(tab);
     const params = new URLSearchParams(searchParams.toString());
-    if (tab === "views") {
-      params.set("tab", "views");
-    } else {
+    if (tab === "received") {
       params.delete("tab");
+    } else {
+      params.set("tab", tab === "views" ? "views" : "sent");
     }
     const next = params.toString();
     router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });

@@ -21,6 +21,7 @@ import {
 } from "@/lib/realtime-fallback";
 import Image from "next/image";
 import { useDashboardAccess } from "@/components/dashboard/DashboardAccessProvider";
+import { useEngagementUnreadCount } from "@/hooks/useEngagementUnreadCount";
 
 type NextLinkProps = ComponentProps<typeof NextLink>;
 
@@ -59,6 +60,7 @@ export default function Sidebar({ active }: SidebarProps) {
   // Unread message count for the messages badge
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const engagementUnreadCount = useEngagementUnreadCount(isDesktopViewport);
 
   // Determine active state from pathname if not provided
   const getActiveState = (): SidebarProps["active"] => {
@@ -466,6 +468,11 @@ export default function Sidebar({ active }: SidebarProps) {
           <span className="flex items-center gap-2">
             <Heart className="h-4 w-4" />
             Engagements
+            {engagementUnreadCount > 0 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#1f419a] px-1.5 text-[10px] font-bold text-white">
+                {engagementUnreadCount > 99 ? "99+" : engagementUnreadCount}
+              </span>
+            )}
           </span>
           <ChevronRight className={`h-4 w-4 ${currentActive === "likes" ? "text-[#1f419a]" : "text-gray-400"}`}/>
         </Link>

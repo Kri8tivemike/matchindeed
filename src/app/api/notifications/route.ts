@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  ENGAGEMENT_NOTIFICATION_TYPES,
+  type EngagementNotificationCategory,
+} from "@/lib/engagement-notifications";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -56,6 +60,64 @@ export async function GET(request: NextRequest) {
     const unreadOnly = searchParams.get("unread_only") === "true";
     const typeFilter = searchParams.get("type");
     const summaryOnly = searchParams.get("summary") === "true";
+    const engagementSummary = searchParams.get("engagement_summary") === "true";
+
+    if (engagementSummary) {
+      const { data: readState, error: readStateError } = await supabase
+        .from("engagement_read_state")
+        .select("received_seen_at, views_seen_at")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (readStateError) {
+        console.error("Error fetching engagement read state:", readStateError);
+        return NextResponse.json(
+          { error: "Failed to fetch engagement notifications" },
+          { status: 500 }
+        );
+      }
+
+      const countUnseenByTypes = (types: readonly string[], seenAt?: string | null) => {
+        let query =
+        supabase
+          .from("notifications")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .in("type", [...types]);
+
+        if (seenAt) {
+          query = query.gt("created_at", seenAt);
+        }
+
+        return query;
+      };
+
+      const [receivedResult, viewsResult] = await Promise.all([
+        countUnseenByTypes(
+          ENGAGEMENT_NOTIFICATION_TYPES.received,
+          readState?.received_seen_at
+        ),
+        countUnseenByTypes(
+          ENGAGEMENT_NOTIFICATION_TYPES.views,
+          readState?.views_seen_at
+        ),
+      ]);
+
+      const error = receivedResult.error || viewsResult.error;
+      if (error) {
+        console.error("Error fetching unread engagement summary:", error);
+        return NextResponse.json(
+          { error: "Failed to fetch engagement notifications" },
+          { status: 500 }
+        );
+      }
+
+      const received = receivedResult.count || 0;
+      const views = viewsResult.count || 0;
+      return NextResponse.json({
+        engagement_unread: { received, views, total: received + views },
+      });
+    }
 
     if (summaryOnly) {
       let countQuery = supabase
@@ -223,7 +285,40 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { notification_ids, mark_all_read } = body;
+    const { notification_ids, mark_all_read, mark_engagement_read } = body;
+
+    if (mark_engagement_read) {
+      const category = mark_engagement_read as EngagementNotificationCategory;
+      const types = ENGAGEMENT_NOTIFICATION_TYPES[category];
+
+      if (!types) {
+        return NextResponse.json(
+          { error: "mark_engagement_read must be received or views" },
+          { status: 400 }
+        );
+      }
+
+      const now = new Date().toISOString();
+      const seenColumn = category === "received" ? "received_seen_at" : "views_seen_at";
+      const { error } = await supabase.from("engagement_read_state").upsert(
+        {
+          user_id: user.id,
+          [seenColumn]: now,
+          updated_at: now,
+        },
+        { onConflict: "user_id" }
+      );
+
+      if (error) {
+        console.error("Error marking engagement notifications as read:", error);
+        return NextResponse.json(
+          { error: "Failed to update engagement read state" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({ success: true, category });
+    }
 
     if (mark_all_read) {
       // Mark all of user's unread notifications as read
@@ -287,7 +382,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "Either notification_ids or mark_all_read is required" },
+      { error: "A supported notification read action is required" },
       { status: 400 }
     );
   } catch (error) {
