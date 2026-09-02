@@ -1481,11 +1481,6 @@ export default function Home() {
                     support@matchindeed.com
                   </a>
                 </li>
-                <li>
-                  <a href="tel:+2348060886390" className="hover:text-[#1f419a] hover:underline">
-                    +234 806 088 6390
-                  </a>
-                </li>
               </ul>
             </div>
           </div>
