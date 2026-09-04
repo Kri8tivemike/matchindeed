@@ -149,6 +149,12 @@ export async function requireAdminAccess(
   } = await supabase.auth.getUser(token);
 
   if (authError || !user) {
+    console.warn("[admin/permissions] session verification failed", {
+      code: authError?.code || null,
+      status: authError?.status || null,
+      message: authError?.message || "No user returned",
+      supabaseOrigin: serverSupabaseUrl,
+    });
     return {
       ok: false,
       status: 401,
