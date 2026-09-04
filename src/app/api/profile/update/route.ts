@@ -6,11 +6,21 @@ import {
   getGenderChangeStatus,
   normalizeProfileGender,
 } from "@/lib/profile/gender-change";
+import {
+  canonicalizeProfileImageUrl,
+  isOwnedProfileImageUrl,
+  resolveCanonicalSupabaseOrigin,
+} from "@/lib/photo/storage-url";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const canonicalSupabaseOrigin = resolveCanonicalSupabaseOrigin({
+  supabaseUrl: SUPABASE_URL,
+  serviceRoleKey: SERVICE_ROLE_KEY,
+  canonicalUrl: process.env.SUPABASE_CANONICAL_URL,
+});
 
 type ProfileNameRow = {
   first_name: string | null;
@@ -27,6 +37,100 @@ function normalizeErrorMessage(error: unknown) {
     return String(error.message || "");
   }
   return "";
+}
+
+function getSubmittedPhotoUrls(profile: Record<string, unknown>): string[] {
+  const urls = new Set<string>();
+  if (typeof profile.profile_photo_url === "string") {
+    urls.add(profile.profile_photo_url);
+  }
+  if (Array.isArray(profile.photos)) {
+    for (const value of profile.photos) {
+      if (typeof value === "string") urls.add(value);
+    }
+  }
+  return [...urls];
+}
+
+async function normalizeApprovedProfilePhotos(
+  profile: Record<string, unknown>,
+  userId: string
+): Promise<{ error: string | null }> {
+  const submittedUrls = getSubmittedPhotoUrls(profile);
+  if (submittedUrls.length === 0) return { error: null };
+
+  const normalizedByOriginal = new Map<string, string>();
+  for (const photoUrl of submittedUrls) {
+    if (!isOwnedProfileImageUrl(photoUrl, userId)) {
+      return { error: "One or more profile photos do not belong to your account." };
+    }
+
+    const canonicalUrl = canonicalizeProfileImageUrl(
+      photoUrl,
+      canonicalSupabaseOrigin
+    );
+    if (!canonicalUrl) {
+      return { error: "One or more profile photos has an invalid storage URL." };
+    }
+    normalizedByOriginal.set(photoUrl, canonicalUrl);
+  }
+
+  const candidateUrls = [...new Set([
+    ...submittedUrls,
+    ...normalizedByOriginal.values(),
+  ])];
+  const { data: moderationRows, error: moderationError } = await supabaseAdmin
+    .from("photo_moderation")
+    .select("photo_url, status")
+    .eq("user_id", userId)
+    .in("photo_url", candidateUrls);
+
+  if (moderationError) {
+    console.error("[profile/update] failed to verify profile photos:", moderationError);
+    return { error: "Profile photos could not be verified. Please try again." };
+  }
+
+  const approvedUrls = new Set(
+    (moderationRows || [])
+      .filter((row) => row.status === "approved")
+      .map((row) => row.photo_url)
+  );
+
+  for (const [originalUrl, canonicalUrl] of normalizedByOriginal) {
+    if (!approvedUrls.has(originalUrl) && !approvedUrls.has(canonicalUrl)) {
+      return {
+        error: "One or more profile photos is not approved. Please upload it again.",
+      };
+    }
+
+    if (originalUrl !== canonicalUrl && !approvedUrls.has(canonicalUrl)) {
+      const { error: migrationError } = await supabaseAdmin
+        .from("photo_moderation")
+        .update({ photo_url: canonicalUrl })
+        .eq("user_id", userId)
+        .eq("photo_url", originalUrl)
+        .eq("status", "approved");
+
+      if (migrationError) {
+        console.error(
+          "[profile/update] failed to normalize approved photo URL:",
+          migrationError
+        );
+        return { error: "Profile photos could not be prepared. Please try again." };
+      }
+    }
+  }
+
+  if (typeof profile.profile_photo_url === "string") {
+    profile.profile_photo_url = normalizedByOriginal.get(profile.profile_photo_url);
+  }
+  if (Array.isArray(profile.photos)) {
+    profile.photos = profile.photos.map((value) =>
+      typeof value === "string" ? normalizedByOriginal.get(value) || value : value
+    );
+  }
+
+  return { error: null };
 }
 
 function resolveRecipientName(
@@ -108,6 +212,17 @@ export async function POST(req: NextRequest) {
     }
     profileUpdate.gender = requestedGender;
 
+    const photoNormalization = await normalizeApprovedProfilePhotos(
+      profileUpdate,
+      user.id
+    );
+    if (photoNormalization.error) {
+      return NextResponse.json(
+        { error: photoNormalization.error, code: "PROFILE_PHOTO_INVALID" },
+        { status: 400 }
+      );
+    }
+
     const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
       .from("user_profiles")
       .select("gender, first_name")
@@ -165,6 +280,16 @@ export async function POST(req: NextRequest) {
       }
 
       console.error("[profile/update] failed to save profile:", profileError);
+      if (/moderated profile-images path/i.test(message)) {
+        return NextResponse.json(
+          {
+            error:
+              "Your approved profile photo could not be linked to your profile. Please upload it again.",
+            code: "PROFILE_PHOTO_PATH_INVALID",
+          },
+          { status: 400 }
+        );
+      }
       return NextResponse.json({ error: "Failed to save profile" }, { status: 500 });
     }
 

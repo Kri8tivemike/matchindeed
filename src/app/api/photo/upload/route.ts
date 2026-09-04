@@ -11,11 +11,22 @@ import {
   resolveOwnInteractionBlockMessage,
 } from "@/lib/account-interactions";
 import { ensureBaselineUserRecords } from "@/lib/account-provisioning";
+import {
+  canonicalizeProfileImageUrl,
+  extractProfileImageStoragePath,
+  isOwnedProfileImageUrl,
+  resolveCanonicalSupabaseOrigin,
+} from "@/lib/photo/storage-url";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
+const canonicalSupabaseOrigin = resolveCanonicalSupabaseOrigin({
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  canonicalUrl: process.env.SUPABASE_CANONICAL_URL,
+});
 
 type ExistingProfileRow = {
   photos?: unknown;
@@ -33,22 +44,11 @@ function extractFileExt(file: File) {
 }
 
 function extractStoragePathFromPublicUrl(photoUrl: string): string | null {
-  const marker = "/storage/v1/object/public/profile-images/";
-  const markerIndex = photoUrl.indexOf(marker);
-  if (markerIndex === -1) return null;
-
-  const pathPart = photoUrl
-    .slice(markerIndex + marker.length)
-    .split("?")[0]
-    .trim();
-
-  if (!pathPart) return null;
-  return decodeURIComponent(pathPart);
+  return extractProfileImageStoragePath(photoUrl);
 }
 
 function isOwnedStoragePhotoUrl(photoUrl: string, userId: string): boolean {
-  const storagePath = extractStoragePathFromPublicUrl(photoUrl);
-  return typeof storagePath === "string" && storagePath.startsWith(`${userId}/`);
+  return isOwnedProfileImageUrl(photoUrl, userId);
 }
 
 function normalizeProfilePhotos(profile: ExistingProfileRow | null): string[] {
@@ -238,20 +238,24 @@ export async function POST(request: NextRequest) {
         data: { publicUrl },
       } = supabase.storage.from("profile-images").getPublicUrl(filePath);
 
-      if (!publicUrl) {
+      const canonicalPublicUrl = publicUrl
+        ? canonicalizeProfileImageUrl(publicUrl, canonicalSupabaseOrigin)
+        : null;
+
+      if (!canonicalPublicUrl) {
         errors.push(`${file.name}: could not get uploaded photo URL`);
         continue;
       }
 
       const moderation = await evaluateAutomatedPhotoModeration(file, {
-        publicUrl,
+        publicUrl: canonicalPublicUrl,
       });
 
       const { error: moderationInsertError } = await supabase
         .from("photo_moderation")
         .insert({
           user_id: user.id,
-          photo_url: publicUrl,
+          photo_url: canonicalPublicUrl,
           status: moderation.status,
           review_reason: moderation.reason,
         });
@@ -265,7 +269,7 @@ export async function POST(request: NextRequest) {
           `${file.name}: Photo was uploaded but could not be verified. Please try again.`
         );
 
-        const cleanupPath = extractStoragePathFromPublicUrl(publicUrl);
+        const cleanupPath = extractStoragePathFromPublicUrl(canonicalPublicUrl);
         if (cleanupPath && cleanupPath.startsWith(`${user.id}/`)) {
           const { error: cleanupError } = await supabase.storage
             .from("profile-images")
@@ -283,7 +287,7 @@ export async function POST(request: NextRequest) {
           `${file.name}: ${moderation.reason || "Photo failed moderation checks."}`
         );
       } else {
-        uploadedUrls.push(publicUrl);
+        uploadedUrls.push(canonicalPublicUrl);
       }
     }
 
