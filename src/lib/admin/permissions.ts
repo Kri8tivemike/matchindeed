@@ -3,11 +3,20 @@ import { createClient } from "@supabase/supabase-js";
 import { ALL_PERMISSIONS, type Permission } from "@/lib/admin-permissions";
 import { loadEffectiveAccountPermissions } from "@/lib/account-permissions";
 import { getInactiveAccountMessage } from "@/lib/admin/account-moderation";
+import { resolveCanonicalSupabaseOrigin } from "@/lib/photo/storage-url";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+const serviceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const serverSupabaseUrl =
+  resolveCanonicalSupabaseOrigin({
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    canonicalUrl: process.env.SUPABASE_CANONICAL_URL,
+  }) || process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabase = createClient(
+  serverSupabaseUrl,
+  serviceRoleKey
 );
 
 export const ADMIN_ROLES = ["admin", "superadmin"] as const;

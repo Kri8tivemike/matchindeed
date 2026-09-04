@@ -14,6 +14,7 @@ import {
   type AccountModerationAction,
   type ModeratedAccount,
 } from "@/lib/admin/account-moderation";
+import { resolveCanonicalSupabaseOrigin } from "@/lib/photo/storage-url";
 
 /**
  * Admin User Actions API
@@ -33,11 +34,16 @@ import {
  * Body: { action, user_id, ...params }
  */
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+const serviceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const serverSupabaseUrl =
+  resolveCanonicalSupabaseOrigin({
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    canonicalUrl: process.env.SUPABASE_CANONICAL_URL,
+  }) || process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabase = createClient(serverSupabaseUrl, serviceRoleKey);
 
 /** Extract client IP from request headers */
 function getClientIp(request: NextRequest): string | null {
