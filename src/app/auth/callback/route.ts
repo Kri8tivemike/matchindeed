@@ -18,6 +18,10 @@ import {
   resolvePostLoginRedirect,
   resolveUserProgressState,
 } from "@/lib/user-progress";
+import {
+  getInactiveAccountMessage,
+  isExpiredSuspension,
+} from "@/lib/admin/account-moderation";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -128,9 +132,43 @@ export async function GET(request: Request) {
 
   const { data: account } = await supabaseAdmin
     .from("accounts")
-    .select("role")
+    .select("role, account_status, suspended_until")
     .eq("id", user.id)
     .maybeSingle();
+
+  if (account && isExpiredSuspension(account)) {
+    const { error: reactivationError } = await supabaseAdmin
+      .from("accounts")
+      .update({
+        account_status: "active",
+        suspended_until: null,
+        suspension_reason: null,
+      })
+      .eq("id", user.id);
+    if (reactivationError) {
+      console.error(
+        "[Auth callback] expired suspension cleanup error:",
+        reactivationError
+      );
+      await supabase.auth.signOut();
+      return NextResponse.redirect(
+        `${origin}/login?error=auth_callback_account_check_failed`
+      );
+    }
+    account.account_status = "active";
+    account.suspended_until = null;
+  }
+
+  const inactiveMessage = getInactiveAccountMessage(
+    account?.account_status,
+    account?.suspended_until
+  );
+  if (account && inactiveMessage) {
+    await supabase.auth.signOut();
+    return NextResponse.redirect(
+      `${origin}/login?error=${encodeURIComponent(inactiveMessage)}`
+    );
+  }
 
   // Determine redirect: coordinators bypass dating-profile onboarding.
   const redirectPath =

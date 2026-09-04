@@ -8,6 +8,7 @@ import { isGrowthManagerPermissionSet } from "@/lib/admin/growth-manager";
 import { GROWTH_MANAGER_DASHBOARD_PATH } from "@/lib/growth-manager/path";
 import AdminSidebar from "./components/AdminSidebar";
 import { Loader2 } from "lucide-react";
+import { getInactiveAccountMessage } from "@/lib/admin/account-moderation";
 
 /**
  * Admin role type
@@ -67,13 +68,24 @@ export default function AdminLayout({
         // Get user's account with role
         const { data: account, error: accountError } = await supabase
           .from("accounts")
-          .select("id, email, role, display_name")
+          .select("id, email, role, display_name, account_status, suspended_until")
           .eq("id", session.user.id)
           .single();
 
         if (accountError || !account) {
           console.error("Error fetching admin account:", accountError);
           router.push(ADMIN_LOGIN_PATH);
+          return;
+        }
+
+        if (
+          getInactiveAccountMessage(
+            account.account_status,
+            account.suspended_until
+          )
+        ) {
+          await supabase.auth.signOut();
+          router.replace(`${ADMIN_LOGIN_PATH}?error=account_inactive`);
           return;
         }
 

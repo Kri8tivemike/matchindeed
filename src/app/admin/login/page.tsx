@@ -21,6 +21,7 @@ import {
 import Image from "next/image";
 import NextLink from "next/link";
 import CloudflareTurnstile from "@/components/CloudflareTurnstile";
+import { getInactiveAccountMessage } from "@/lib/admin/account-moderation";
 
 type NextLinkProps = ComponentProps<typeof NextLink>;
 type MfaMode = "totp" | "recovery";
@@ -53,6 +54,9 @@ export default function AdminLoginPage() {
     }
     if (errorParam === "use_coordinator_login") {
       return "This account is set up for coordinator access. Use the coordinator login page instead.";
+    }
+    if (errorParam === "account_inactive") {
+      return "This administrator account is not active.";
     }
     return null;
   })();
@@ -149,12 +153,23 @@ export default function AdminLoginPage() {
 
       const { data: account, error: accountError } = await supabase
         .from("accounts")
-        .select("role")
+        .select("role, account_status, suspended_until")
         .eq("id", authData.user.id)
         .single();
 
       if (accountError || !account) {
         setError("Account not found.");
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
+
+      const inactiveMessage = getInactiveAccountMessage(
+        account.account_status,
+        account.suspended_until
+      );
+      if (inactiveMessage) {
+        setError(inactiveMessage);
         await supabase.auth.signOut();
         setLoading(false);
         return;

@@ -427,75 +427,62 @@ export default function AdminUserDetailPage() {
   };
 
   // ── Update Status ─────────────────────────────────────
-  const handleStatusChange = async (newStatus: string) => {
+  const handleStatusChange = async (newStatus: "active" | "suspended" | "banned") => {
     if (!user) return;
+    const confirmed = window.confirm(
+      newStatus === "banned"
+        ? "Permanently ban this user and block future sign-ins?"
+        : newStatus === "suspended"
+          ? "Suspend this user for 7 days and block sign-in during that period?"
+          : "Reactivate this user and restore sign-in access?"
+    );
+    if (!confirmed) return;
+
     setSaving(true);
     setMessage(null);
     try {
-      const updateData: Record<string, string | null> = {
-        account_status: newStatus,
-      };
-      if (newStatus === "suspended") {
-        const until = new Date();
-        until.setDate(until.getDate() + 7);
-        updateData.suspended_until = until.toISOString();
-        updateData.suspension_reason =
-          actionReason || "Suspended by admin";
-      } else {
-        updateData.suspended_until = null;
-        updateData.suspension_reason = null;
-      }
-
-      const { error } = await supabase
-        .from("accounts")
-        .update(updateData)
-        .eq("id", userId);
-      if (error) throw error;
-
       const {
-        data: { user: adminUser },
-      } = await supabase.auth.getUser();
-      if (adminUser) {
-        await supabase.from("admin_logs").insert({
-          admin_id: adminUser.id,
-          target_user_id: userId,
-          action: `user_${newStatus}`,
-          meta: { reason: actionReason },
-        });
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your admin session has expired. Please sign in again.");
       }
 
-      // Notify the user
-      await supabase.from("notifications").insert({
-        user_id: userId,
-        type: "account_action",
-        title:
-          newStatus === "active"
-            ? "Account Activated"
-            : newStatus === "suspended"
-              ? "Account Suspended"
-              : "Account Banned",
-        message:
-          newStatus === "active"
-            ? "Your account has been reactivated."
-            : newStatus === "suspended"
-              ? `Your account has been suspended. Reason: ${actionReason || "Policy violation"}`
-              : `Your account has been banned. Reason: ${actionReason || "Repeated violations"}`,
-        data: { action: newStatus, reason: actionReason },
+      const response = await fetch("/api/admin/user-actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: newStatus === "suspended" ? "suspend" : newStatus === "banned" ? "ban" : "active",
+          user_id: userId,
+          reason: actionReason || undefined,
+          days: newStatus === "suspended" ? 7 : undefined,
+        }),
       });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result?.error || "Failed to update account status.");
+      }
 
       setUser({
         ...user,
-        account_status: newStatus,
-        suspended_until: updateData.suspended_until,
-        suspension_reason: updateData.suspension_reason,
+        account_status: result.status || newStatus,
+        suspended_until: result.suspended_until || null,
+        suspension_reason: result.suspension_reason || null,
       });
       setActionReason("");
       setMessage({
         type: "success",
         text: `User ${newStatus} successfully!`,
       });
-    } catch {
-      setMessage({ type: "error", text: "Failed to update status." });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text:
+          error instanceof Error ? error.message : "Failed to update status.",
+      });
     } finally {
       setSaving(false);
     }

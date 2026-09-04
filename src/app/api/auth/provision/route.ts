@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ensureBaselineUserRecords } from "@/lib/account-provisioning";
 import { getSafeDisplayName } from "@/lib/name";
+import {
+  getInactiveAccountMessage,
+  isExpiredSuspension,
+} from "@/lib/admin/account-moderation";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,15 +41,53 @@ export async function POST(request: NextRequest) {
 
     const { data: existingAccount, error: accountError } = await supabase
       .from("accounts")
-      .select("display_name")
+      .select("display_name, account_status, suspended_until")
       .eq("id", user.id)
-      .maybeSingle<{ display_name: string | null }>();
+      .maybeSingle<{
+        display_name: string | null;
+        account_status: string | null;
+        suspended_until: string | null;
+      }>();
 
     if (accountError) {
       console.error("[auth/provision] account lookup error:", accountError);
       return NextResponse.json(
         { error: "Failed to verify account records." },
         { status: 500 }
+      );
+    }
+
+    if (existingAccount && isExpiredSuspension(existingAccount)) {
+      const { error: reactivationError } = await supabase
+        .from("accounts")
+        .update({
+          account_status: "active",
+          suspended_until: null,
+          suspension_reason: null,
+        })
+        .eq("id", user.id);
+      if (reactivationError) {
+        console.error(
+          "[auth/provision] expired suspension cleanup error:",
+          reactivationError
+        );
+        return NextResponse.json(
+          { error: "Failed to verify account access." },
+          { status: 500 }
+        );
+      }
+      existingAccount.account_status = "active";
+      existingAccount.suspended_until = null;
+    }
+
+    const inactiveMessage = getInactiveAccountMessage(
+      existingAccount?.account_status,
+      existingAccount?.suspended_until
+    );
+    if (existingAccount && inactiveMessage) {
+      return NextResponse.json(
+        { error: inactiveMessage, code: "account_inactive" },
+        { status: 403 }
       );
     }
 

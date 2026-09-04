@@ -13,6 +13,7 @@ import {
 } from "@/lib/age-restrictions";
 import { shouldSkipBackgroundRequest } from "@/lib/request-errors";
 import { resolveUserProgressState } from "@/lib/user-progress";
+import { getInactiveAccountMessage } from "@/lib/admin/account-moderation";
 
 /**
  * DashboardLayout - Protected layout that enforces profile completion
@@ -55,6 +56,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         // Store user ID for OneSignal and other integrations
         setUserId(session.user.id);
+
+        const { data: account } = await supabase
+          .from("accounts")
+          .select("account_status, suspended_until")
+          .eq("id", session.user.id)
+          .maybeSingle();
+        const inactiveMessage = getInactiveAccountMessage(
+          account?.account_status,
+          account?.suspended_until
+        );
+        if (account && inactiveMessage) {
+          await supabase.auth.signOut();
+          router.push(`/login?error=${encodeURIComponent(inactiveMessage)}`);
+          return;
+        }
 
         // Block underage users from dashboard access.
         const { data: profileData } = await supabase
@@ -122,10 +138,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
-        await fetch("/api/profile/heartbeat", {
+        const response = await fetch("/api/profile/heartbeat", {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
+        if (response.status === 403) {
+          const result = await response.json().catch(() => null);
+          await supabase.auth.signOut();
+          router.replace(
+            `/login?error=${encodeURIComponent(
+              result?.error || "Your MatchIndeed account is not active."
+            )}`
+          );
+        }
       } catch {
         // Heartbeat is non-critical — silently ignore errors
       }
@@ -140,7 +165,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     // Then every 2 minutes
     const interval = setInterval(sendHeartbeat, 2 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [loading, checking]);
+  }, [loading, checking, router]);
 
   // Show loading spinner while checking
   if (loading || checking) {

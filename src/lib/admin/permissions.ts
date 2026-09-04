@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ALL_PERMISSIONS, type Permission } from "@/lib/admin-permissions";
 import { loadEffectiveAccountPermissions } from "@/lib/account-permissions";
+import { getInactiveAccountMessage } from "@/lib/admin/account-moderation";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -148,7 +149,7 @@ export async function requireAdminAccess(
 
   const { data: account, error: accountError } = await supabase
     .from("accounts")
-    .select("id, email, role")
+    .select("id, email, role, account_status, suspended_until")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -157,6 +158,16 @@ export async function requireAdminAccess(
       ok: false,
       status: 403,
       error: "Admin access required",
+    };
+  }
+
+  if (
+    getInactiveAccountMessage(account.account_status, account.suspended_until)
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This administrator account is not active",
     };
   }
 

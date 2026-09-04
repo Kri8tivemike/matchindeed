@@ -7,6 +7,13 @@ import {
   GROWTH_MANAGER_PERMISSIONS,
   GROWTH_MANAGER_ROLE,
 } from "@/lib/admin/growth-manager";
+import {
+  buildAccountModerationChange,
+  getAuthBanDurationForAccount,
+  getModerationTargetError,
+  type AccountModerationAction,
+  type ModeratedAccount,
+} from "@/lib/admin/account-moderation";
 
 /**
  * Admin User Actions API
@@ -139,100 +146,110 @@ export async function POST(request: NextRequest) {
     }
 
     switch (action) {
-      case "suspend": {
-        const until = new Date();
-        until.setDate(until.getDate() + (params.days || 7));
-        const { error } = await supabase
-          .from("accounts")
-          .update({
-            account_status: "suspended",
-            suspended_until: until.toISOString(),
-            suspension_reason: reason || "Suspended by admin",
-          })
-          .eq("id", targetUserId);
-
-        if (error) throw error;
-
-        await logAction(
-          adminId,
-          targetUserId,
-          "user_suspended",
-          { reason, days: params.days || 7, suspended_until: until.toISOString() },
-          ip
-        );
-
-        await safeInsertNotification({
-          user_id: targetUserId,
-          type: "account_action",
-          title: "Account Suspended",
-          message: `Your account has been suspended. Reason: ${reason || "Policy violation"}`,
-          data: { action: "suspended", reason },
-        });
-
-        return NextResponse.json({ success: true, status: "suspended" });
-      }
-
+      case "suspend":
+      case "ban":
       case "unsuspend":
       case "active": {
-        const { error } = await supabase
+        const moderationAction: AccountModerationAction =
+          action === "unsuspend" ? "active" : action;
+        const { data: targetAccount, error: targetError } = await supabase
           .from("accounts")
-          .update({
-            account_status: "active",
-            suspended_until: null,
-            suspension_reason: null,
-          })
-          .eq("id", targetUserId);
+          .select(
+            "id, role, account_status, suspended_until, suspension_reason"
+          )
+          .eq("id", targetUserId)
+          .maybeSingle();
 
-        if (error) throw error;
+        if (targetError) throw targetError;
+        if (!targetAccount) {
+          return NextResponse.json(
+            { error: "User account not found." },
+            { status: 404 }
+          );
+        }
+
+        const target = targetAccount as ModeratedAccount;
+        const targetProtectionError = getModerationTargetError(admin, target);
+        if (targetProtectionError) {
+          return NextResponse.json(
+            { error: targetProtectionError },
+            { status: 403 }
+          );
+        }
+
+        const change = buildAccountModerationChange(
+          moderationAction,
+          reason,
+          params.days
+        );
+
+        const { error: authUpdateError } = await supabase.auth.admin.updateUserById(
+          targetUserId,
+          { ban_duration: change.authBanDuration }
+        );
+        if (authUpdateError && !isAuthUserMissing(authUpdateError)) {
+          console.error(
+            "[admin/user-actions] failed to update auth ban:",
+            authUpdateError
+          );
+          return NextResponse.json(
+            { error: "Failed to update the user's login access." },
+            { status: 502 }
+          );
+        }
+
+        const { data: updatedAccount, error: updateError } = await supabase
+          .from("accounts")
+          .update(change.update)
+          .eq("id", targetUserId)
+          .select("account_status, suspended_until, suspension_reason")
+          .single();
+
+        if (updateError) {
+          const { error: rollbackError } =
+            await supabase.auth.admin.updateUserById(targetUserId, {
+              ban_duration: getAuthBanDurationForAccount(target),
+            });
+          if (rollbackError && !isAuthUserMissing(rollbackError)) {
+            console.error(
+              "[admin/user-actions] failed to roll back auth ban:",
+              rollbackError
+            );
+          }
+          throw updateError;
+        }
 
         await logAction(
           adminId,
           targetUserId,
-          "user_activated",
-          { reason: reason || null },
+          change.auditAction,
+          {
+            previous_status: target.account_status,
+            reason: updatedAccount.suspension_reason,
+            suspended_until: updatedAccount.suspended_until,
+            days: "suspensionDays" in change ? change.suspensionDays : null,
+          },
           ip
         );
 
         await safeInsertNotification({
           user_id: targetUserId,
           type: "account_action",
-          title: "Account Activated",
-          message: "Your account has been reactivated.",
-          data: { action: "active" },
+          title: change.notification.title,
+          message: change.notification.message,
+          data: {
+            action: updatedAccount.account_status,
+            reason: updatedAccount.suspension_reason,
+            suspended_until: updatedAccount.suspended_until,
+          },
         });
 
-        return NextResponse.json({ success: true, status: "active" });
-      }
-
-      case "ban": {
-        const { error } = await supabase
-          .from("accounts")
-          .update({
-            account_status: "banned",
-            suspended_until: null,
-            suspension_reason: reason || "Banned by admin",
-          })
-          .eq("id", targetUserId);
-
-        if (error) throw error;
-
-        await logAction(
-          adminId,
-          targetUserId,
-          "user_banned",
-          { reason: reason || null },
-          ip
-        );
-
-        await safeInsertNotification({
-          user_id: targetUserId,
-          type: "account_action",
-          title: "Account Banned",
-          message: `Your account has been banned. Reason: ${reason || "Repeated violations"}`,
-          data: { action: "banned", reason },
+        return NextResponse.json({
+          success: true,
+          status: updatedAccount.account_status,
+          suspended_until: updatedAccount.suspended_until,
+          suspension_reason: updatedAccount.suspension_reason,
         });
-
-        return NextResponse.json({ success: true, status: "banned" });
       }
 
       case "approve_deletion_request": {

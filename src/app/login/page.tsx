@@ -47,9 +47,9 @@ export default function LoginPage() {
 
     const url = new URL(window.location.href);
     const message = url.searchParams.get("message");
-    if (!message) return;
-
-    setSuccessMessage(message);
+    const queryError = url.searchParams.get("error");
+    if (message) setSuccessMessage(message);
+    if (queryError) setError(queryError);
   }, []);
 
   // ---------------------------------------------------------------

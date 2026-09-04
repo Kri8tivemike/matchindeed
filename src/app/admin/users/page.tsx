@@ -247,49 +247,57 @@ export default function AdminUsersPage() {
    * Handle user action (suspend, ban, warn)
    */
   const handleUserAction = async (userId: string, action: "suspend" | "ban" | "activate") => {
+    const label = action === "activate" ? "activate" : action;
+    const confirmed = window.confirm(
+      action === "ban"
+        ? "Permanently ban this user and block future sign-ins?"
+        : action === "suspend"
+          ? "Suspend this user for 7 days and block sign-in during that period?"
+          : "Reactivate this user and restore sign-in access?"
+    );
+    if (!confirmed) return;
+
+    const promptedReason =
+      action === "activate"
+        ? ""
+        : window.prompt(`Reason for ${label} (optional):`, "");
+    if (promptedReason === null) return;
+    const reason = promptedReason.trim() || undefined;
+
     setActionLoading(userId);
     try {
-      let newStatus: string;
-      switch (action) {
-        case "suspend":
-          newStatus = "suspended";
-          break;
-        case "ban":
-          newStatus = "banned";
-          break;
-        case "activate":
-          newStatus = "active";
-          break;
-        default:
-          return;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Your admin session has expired. Please sign in again.");
       }
 
-      const { error } = await supabase
-        .from("accounts")
-        .update({ account_status: newStatus })
-        .eq("id", userId);
-
-      if (error) {
-        console.error("Error updating user:", error);
-        return;
+      const response = await fetch("/api/admin/user-actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: action === "activate" ? "active" : action,
+          user_id: userId,
+          reason,
+          days: action === "suspend" ? 7 : undefined,
+        }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result?.error || `Failed to ${label} user.`);
       }
 
-      // Log admin action
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from("admin_logs").insert({
-          admin_id: user.id,
-          target_user_id: userId,
-          action: `user_${action}`,
-          meta: { new_status: newStatus },
-        });
-      }
-
-      // Refresh list
-      fetchUsers();
+      await fetchUsers();
       setActionMenuId(null);
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error updating user status:", error);
+      window.alert(
+        error instanceof Error ? error.message : `Failed to ${label} user.`
+      );
     } finally {
       setActionLoading(null);
     }
