@@ -8,6 +8,7 @@ import { resolveCanonicalSupabaseOrigin } from "@/lib/photo/storage-url";
 const serviceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const serverSupabaseUrl =
   resolveCanonicalSupabaseOrigin({
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -18,6 +19,44 @@ const supabase = createClient(
   serverSupabaseUrl,
   serviceRoleKey
 );
+
+function getJwtSubject(token: string): string | null {
+  try {
+    const encodedPayload = token.split(".")[1];
+    if (!encodedPayload) return null;
+
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload, "base64url").toString("utf8")
+    ) as { sub?: unknown };
+    return typeof payload.sub === "string" && payload.sub ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyLegacyAdminToken(token: string) {
+  const subject = getJwtSubject(token);
+  if (!subject) return null;
+
+  // PostgREST validates the JWT signature and expiry. This supports older
+  // unexpired tokens whose Supabase Auth session row is no longer available.
+  const bearerClient = createClient(serverSupabaseUrl, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const { data, error } = await bearerClient
+    .from("accounts")
+    .select("id, email")
+    .eq("id", subject)
+    .maybeSingle();
+
+  if (error || data?.id !== subject) return null;
+  return { id: data.id, email: data.email as string | null };
+}
 
 export const ADMIN_ROLES = ["admin", "superadmin"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
@@ -147,8 +186,13 @@ export async function requireAdminAccess(
     data: { user },
     error: authError,
   } = await supabase.auth.getUser(token);
+  const legacyIdentity =
+    !user && authError?.message === "Auth session missing!"
+      ? await verifyLegacyAdminToken(token)
+      : null;
+  const userId = user?.id || legacyIdentity?.id;
 
-  if (authError || !user) {
+  if (!userId) {
     console.warn("[admin/permissions] session verification failed", {
       code: authError?.code || null,
       status: authError?.status || null,
@@ -165,7 +209,7 @@ export async function requireAdminAccess(
   const { data: account, error: accountError } = await supabase
     .from("accounts")
     .select("id, email, role, account_status, suspended_until")
-    .eq("id", user.id)
+    .eq("id", userId)
     .maybeSingle();
 
   if (accountError || !account?.role) {
@@ -229,7 +273,7 @@ export async function requireAdminAccess(
     const fallbackPermissions = normalizePermissionRows(role, rolePermissions || []);
     try {
       const accountPermissions = await loadEffectiveAccountPermissions(
-        user.id,
+        userId,
         "admin",
         [...fallbackPermissions]
       );
@@ -251,7 +295,7 @@ export async function requireAdminAccess(
     }
   }
   const context: AdminAccessContext = {
-    userId: user.id,
+    userId,
     email: account.email || null,
     role,
     permissions,
