@@ -533,7 +533,7 @@ function CheckoutContent() {
                     <p className="mt-2.5 text-[11px] leading-4 text-gray-500">
                       {checkoutCurrency === "NGN"
                         ? "Paystack is recommended for Nigerian Naira payments. Flutterwave is also available."
-                        : "USD checkout is handled securely by Flutterwave for eligible international cards. Your bank may convert the charge from your card currency."}
+                        : "USD checkout is handled securely by Paystack for eligible international cards. Your bank may convert the charge from your card currency."}
                     </p>
                   )}
                   {checkoutCurrency === "USD" &&
