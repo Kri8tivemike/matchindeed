@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getAllowedCheckoutCurrenciesForCountryCode,
+  getAllowedCheckoutCurrenciesForRequestHeaders,
   getApiCurrencyForCountryCode,
   getCheckoutCurrencyForCountryCode,
   getCheckoutCurrencyForRequestHeaders,
@@ -23,6 +25,23 @@ test("checkout request headers retain the regional currency policy", () => {
     "USD"
   );
   assert.equal(getCheckoutCurrencyForRequestHeaders(new Headers()), "USD");
+});
+
+test("Nigeria can choose NGN or USD while other countries are USD-only", () => {
+  assert.deepEqual(getAllowedCheckoutCurrenciesForCountryCode("NG"), ["NGN", "USD"]);
+  assert.deepEqual(getAllowedCheckoutCurrenciesForCountryCode("GB"), ["USD"]);
+  assert.deepEqual(
+    getAllowedCheckoutCurrenciesForRequestHeaders(
+      new Headers({ "cf-ipcountry": "NG" })
+    ),
+    ["NGN", "USD"]
+  );
+  assert.deepEqual(
+    getAllowedCheckoutCurrenciesForRequestHeaders(
+      new Headers({ "cf-ipcountry": "US" })
+    ),
+    ["USD"]
+  );
 });
 
 test("international countries use USD", () => {

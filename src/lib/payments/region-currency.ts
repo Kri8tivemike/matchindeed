@@ -23,3 +23,18 @@ export function getCheckoutCurrencyForRequestHeaders(
     headers.get("cf-ipcountry") || headers.get("x-vercel-ip-country");
   return getCheckoutCurrencyForCountryCode(countryCode);
 }
+
+/** Nigeria may use NGN or USD; every other market is restricted to USD. */
+export function getAllowedCheckoutCurrenciesForCountryCode(
+  countryCode?: string | null
+): RegionalCheckoutCurrency[] {
+  return countryCode?.trim().toUpperCase() === "NG" ? ["NGN", "USD"] : ["USD"];
+}
+
+export function getAllowedCheckoutCurrenciesForRequestHeaders(
+  headers: RequestHeaders
+): RegionalCheckoutCurrency[] {
+  const countryCode =
+    headers.get("cf-ipcountry") || headers.get("x-vercel-ip-country");
+  return getAllowedCheckoutCurrenciesForCountryCode(countryCode);
+}

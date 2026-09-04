@@ -16,11 +16,11 @@ test("NGN supports Paystack and Flutterwave with Paystack recommended", () => {
   assert.equal(isPaymentProviderSupported("flutterwave", "NGN"), true);
 });
 
-test("USD supports Paystack only for international checkout", () => {
-  assert.deepEqual(getSupportedPaymentProviders("USD"), ["paystack"]);
-  assert.equal(isPaymentProviderSupported("paystack", "USD"), true);
-  assert.equal(isPaymentProviderSupported("flutterwave", "USD"), false);
-  assert.equal(getRecommendedPaymentProvider("USD"), "paystack");
+test("USD uses Flutterwave to avoid unsupported Paystack international checkout", () => {
+  assert.deepEqual(getSupportedPaymentProviders("USD"), ["flutterwave"]);
+  assert.equal(isPaymentProviderSupported("paystack", "USD"), false);
+  assert.equal(isPaymentProviderSupported("flutterwave", "USD"), true);
+  assert.equal(getRecommendedPaymentProvider("USD"), "flutterwave");
 });
 
 test("Paystack enforces its documented USD minimum", () => {

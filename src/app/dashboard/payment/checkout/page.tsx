@@ -258,6 +258,7 @@ function CheckoutContent() {
   const [provider, setProvider] = useState<CheckoutPaymentProvider>("paystack");
   const [processing, setProcessing] = useState(false);
   const [subscriptionPricing, setSubscriptionPricing] = useState(DEFAULT_SUBSCRIPTION_PRICING);
+  const [isNigeria, setIsNigeria] = useState<boolean | null>(null);
 
   const parsedIntent = useMemo(
     () => parseCheckoutIntent(new URLSearchParams(searchParams.toString())),
@@ -301,13 +302,24 @@ function CheckoutContent() {
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (!active) return;
-        const currency: CheckoutCurrency =
-          String(data?.currency).toLowerCase() === "ngn" ? "NGN" : "USD";
-        if (parsedIntent.intent.currency !== currency) {
-          router.replace(buildCheckoutUrl({ ...parsedIntent.intent, currency }));
+        const visitorIsNigeria =
+          String(data?.country_code).trim().toUpperCase() === "NG";
+        setIsNigeria(visitorIsNigeria);
+        if (!visitorIsNigeria && parsedIntent.intent.currency !== "USD") {
+          router.replace(
+            buildCheckoutUrl({ ...parsedIntent.intent, currency: "USD" })
+          );
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!active) return;
+        setIsNigeria(false);
+        if (parsedIntent.intent.currency !== "USD") {
+          router.replace(
+            buildCheckoutUrl({ ...parsedIntent.intent, currency: "USD" })
+          );
+        }
+      });
 
     return () => {
       active = false;
@@ -335,6 +347,12 @@ function CheckoutContent() {
       })
       .catch(() => {});
   }, []);
+
+  const changeCurrency = (currency: CheckoutCurrency) => {
+    if (!parsedIntent.ok || !isNigeria) return;
+    if (parsedIntent.intent.currency === currency) return;
+    router.replace(buildCheckoutUrl({ ...parsedIntent.intent, currency }));
+  };
 
   const startCheckout = async () => {
     if (!parsedIntent.ok || !display) return;
@@ -426,10 +444,41 @@ function CheckoutContent() {
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
               <section className="space-y-3">
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h2 className="text-base font-bold text-gray-900">Payment Method</h2>
-                  <p className="mt-0.5 text-xs text-gray-500">
-                    Choose how you want to complete this transaction.
-                  </p>
+                  <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                    <div>
+                      <h2 className="text-base font-bold text-gray-900">Payment Method</h2>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        Choose how you want to complete this transaction.
+                      </p>
+                    </div>
+                    {isNigeria && (
+                      <div
+                        className="grid w-full grid-cols-2 rounded-lg border border-gray-200 bg-gray-50 p-1 sm:w-40"
+                        role="radiogroup"
+                        aria-label="Payment currency"
+                      >
+                        {(["NGN", "USD"] as CheckoutCurrency[]).map((currency) => {
+                          const selected = currency === checkoutCurrency;
+                          return (
+                            <button
+                              key={currency}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              onClick={() => changeCurrency(currency)}
+                              className={`min-h-8 rounded-md px-3 text-xs font-bold transition-colors ${
+                                selected
+                                  ? "bg-white text-[#1f419a] shadow-sm"
+                                  : "text-gray-500 hover:text-gray-900"
+                              }`}
+                            >
+                              {currency}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
 
                   <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
                     {supportedProviders.map((providerId) => {
@@ -484,7 +533,7 @@ function CheckoutContent() {
                     <p className="mt-2.5 text-[11px] leading-4 text-gray-500">
                       {checkoutCurrency === "NGN"
                         ? "Paystack is recommended for Nigerian Naira payments. Flutterwave is also available."
-                        : "International customers pay securely in USD through Paystack with an eligible card. Their bank may convert the charge from their card currency."}
+                        : "USD checkout is handled securely by Flutterwave for eligible international cards. Your bank may convert the charge from your card currency."}
                     </p>
                   )}
                   {checkoutCurrency === "USD" &&

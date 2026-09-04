@@ -24,7 +24,7 @@ import {
   getUnsupportedProviderMessage,
   isPaymentProviderSupported,
 } from "@/lib/payments/gateway-currency";
-import { getCheckoutCurrencyForRequestHeaders } from "@/lib/payments/region-currency";
+import { getAllowedCheckoutCurrenciesForRequestHeaders } from "@/lib/payments/region-currency";
 
 const baseTierPricing: Record<
   string,
@@ -332,11 +332,13 @@ export async function POST(request: NextRequest) {
     }
 
     const checkoutCurrency = normalizedCurrency.toUpperCase() as CheckoutCurrency;
-    const regionalCurrency = getCheckoutCurrencyForRequestHeaders(request.headers);
-    if (checkoutCurrency !== regionalCurrency) {
+    const allowedCurrencies = getAllowedCheckoutCurrenciesForRequestHeaders(
+      request.headers
+    );
+    if (!allowedCurrencies.includes(checkoutCurrency)) {
       return NextResponse.json(
         {
-          error: `Checkout currency is determined by your location. Please use ${regionalCurrency}.`,
+          error: "USD is the only checkout currency available in your location.",
         },
         { status: 400 }
       );
