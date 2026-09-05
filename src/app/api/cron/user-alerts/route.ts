@@ -1,3 +1,4 @@
+import { processProfileCompletionReminders } from "@/lib/alerts/profile-completion-reminders";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { validateCronAuth } from "@/lib/cron-auth";
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const profileCompletionReminders = await processProfileCompletionReminders(supabase);
     const reengagementSchedules = await processReengagementSequenceSchedules(supabase);
     const [scheduledAlerts, dailyDigests] = await Promise.all([
       processDueScheduledAlerts(supabase, { limit: 100 }),
@@ -31,6 +33,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      profileCompletionReminders,
       reengagementSchedules,
       scheduledAlerts,
       dailyDigests,

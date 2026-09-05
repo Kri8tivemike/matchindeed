@@ -111,6 +111,7 @@ function baseLayout(title: string, bodyContent: string): string {
 // ---------------------------------------------------------------
 
 export type EmailTemplate =
+  | "profile_completion_reminder"
   | "signup_confirmation"
   | "password_reset"
   | "meeting_request"
@@ -164,6 +165,8 @@ export function generateEmail(
   data: EmailData
 ): { subject: string; html: string } {
   switch (template) {
+    case "profile_completion_reminder":
+      return profileCompletionReminderEmail(data);
     case "signup_confirmation":
       return signupConfirmationEmail(data);
     case "password_reset":
@@ -1053,4 +1056,19 @@ function accountWarningEmail(data: EmailData) {
     `
   );
   return { subject, html };
+}
+
+function profileCompletionReminderEmail(data: EmailData) {
+  const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
+  const subject = "Finish your MatchIndeed profile";
+  const url = "https://matchindeed.com/dashboard/profile/edit";
+  return { subject, html: baseLayout(subject, `
+    <h1>Your profile is waiting for you</h1>
+    <p>Hi ${escape(data.recipientName || "there")},</p>
+    <p>You still have profile details to complete on MatchIndeed. Tell potential matches about yourself and what you are looking for.</p>
+    <div class="highlight"><p>Open your profile to review your details, add your photos, and finish any remaining steps. Remember to save when you are done.</p></div>
+    <p style="text-align:center"><a class="btn" style="background:#1f419a;color:#ffffff !important" href="${url}">Complete my profile</a></p>
+    <p>If the button does not work, <a href="${url}">open your profile here</a>. Sign in to continue.</p>
+    <p class="meta">We will remind you daily until you finish your profile. You can manage reminder emails in your <a href="https://matchindeed.com/dashboard/settings">notification settings</a>.</p>
+  `) };
 }

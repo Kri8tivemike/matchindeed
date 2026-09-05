@@ -35,6 +35,8 @@ const isEmailConfigured = !!RESEND_API_KEY;
 
 export type SendEmailOptions = {
   to: string;
+  /** Stable provider key prevents duplicate sends during retries. */
+  idempotencyKey?: string;
   template: EmailTemplate;
   data: EmailData;
   /** Override the generated subject line */
@@ -78,6 +80,7 @@ export type SendEmailResult = {
  * the preference system. Used to check if the user opted out.
  */
 const TEMPLATE_TO_NOTIFICATION_TYPE: Record<string, string> = {
+  profile_completion_reminder: "marketing",
   signup_confirmation: "signup_confirmation",
   password_reset: "password_reset",
   meeting_request: "meeting_request",
@@ -174,6 +177,7 @@ export async function sendEmail(
       headers: {
         Authorization: `Bearer ${RESEND_API_KEY}`,
         "Content-Type": "application/json",
+        ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         from: EMAIL_FROM,
