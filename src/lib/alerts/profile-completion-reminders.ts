@@ -16,8 +16,9 @@ export function needsProfileReminder(
 export async function processProfileCompletionReminders(
   supabase: SupabaseClient,
   now = new Date(),
+  options: { ignoreSendHour?: boolean } = {},
 ) {
-  const result = { scanned: 0, sent: 0, skipped: 0, failed: 0, beforeSendHour: now.getUTCHours() < 9 };
+  const result = { scanned: 0, sent: 0, skipped: 0, failed: 0, beforeSendHour: now.getUTCHours() < 9 && !options.ignoreSendHour };
   if (result.beforeSendHour) return result;
   if (!process.env.RESEND_API_KEY) throw new Error("Profile reminders require RESEND_API_KEY");
   const day = now.toISOString().slice(0, 10);
