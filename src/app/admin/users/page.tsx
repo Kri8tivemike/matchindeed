@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { adminPath } from "@/lib/admin/path";
@@ -100,6 +100,17 @@ export default function AdminUsersPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const moderationDialog = useRef<HTMLDialogElement>(null);
+  const [pendingAction, setPendingAction] = useState<{ user: UserListItem; action: "suspend" | "ban" | "activate" } | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [actionSuccess, setActionSuccess] = useState("");
+  const submittingAction = useRef(false);
+
+  useEffect(() => {
+    if (pendingAction) moderationDialog.current?.showModal();
+    else moderationDialog.current?.close();
+  }, [pendingAction]);
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
@@ -247,23 +258,23 @@ export default function AdminUsersPage() {
    * Handle user action (suspend, ban, warn)
    */
   const handleUserAction = async (userId: string, action: "suspend" | "ban" | "activate") => {
+    const user = users.find((item) => item.id === userId);
+    if (!user) return;
+    setActionMenuId(null);
+    setActionReason("");
+    setActionError("");
+    setActionSuccess("");
+    setPendingAction({ user, action });
+  };
+
+  const submitModeration = async () => {
+    if (!pendingAction || submittingAction.current) return;
+    const { user: target, action } = pendingAction;
+    const userId = target.id;
     const label = action === "activate" ? "activate" : action;
-    const confirmed = window.confirm(
-      action === "ban"
-        ? "Permanently ban this user and block future sign-ins?"
-        : action === "suspend"
-          ? "Suspend this user for 7 days and block sign-in during that period?"
-          : "Reactivate this user and restore sign-in access?"
-    );
-    if (!confirmed) return;
-
-    const promptedReason =
-      action === "activate"
-        ? ""
-        : window.prompt(`Reason for ${label} (optional):`, "");
-    if (promptedReason === null) return;
-    const reason = promptedReason.trim() || undefined;
-
+    const reason = actionReason.trim() || undefined;
+    submittingAction.current = true;
+    setActionError("");
     setActionLoading(userId);
     try {
       const {
@@ -291,14 +302,16 @@ export default function AdminUsersPage() {
         throw new Error(result?.error || `Failed to ${label} user.`);
       }
 
+      setPendingAction(null);
+      setActionSuccess(`${target.display_name || target.email}: ${action === "ban" ? "banned" : action === "suspend" ? "suspended for 7 days" : "activated"} successfully.`);
       await fetchUsers();
-      setActionMenuId(null);
     } catch (error) {
       console.error("Error updating user status:", error);
-      window.alert(
+      setActionError(
         error instanceof Error ? error.message : `Failed to ${label} user.`
       );
     } finally {
+      submittingAction.current = false;
       setActionLoading(null);
     }
   };
@@ -841,6 +854,28 @@ export default function AdminUsersPage() {
           </>
         )}
       </div>
+
+      {actionSuccess && <p role="status" className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">{actionSuccess}</p>}
+      <dialog
+        ref={moderationDialog}
+        aria-labelledby="moderation-title"
+        onCancel={(event) => { if (submittingAction.current) event.preventDefault(); else setPendingAction(null); }}
+        className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-lg border border-gray-200 bg-white p-6 shadow-xl backdrop:bg-black/40"
+      >
+        {pendingAction && <form onSubmit={(event) => { event.preventDefault(); void submitModeration(); }}>
+          <h2 id="moderation-title" className="text-lg font-semibold text-gray-900">{pendingAction.action === "ban" ? "Ban user" : pendingAction.action === "suspend" ? "Suspend for 7 days" : "Activate user"}</h2>
+          <p className="mt-2 break-words text-sm font-medium text-gray-900">{pendingAction.user.display_name || pendingAction.user.email}</p>
+          <p className="break-words text-sm text-gray-500">{pendingAction.user.email}</p>
+          <p className="mt-3 text-sm text-gray-600">{pendingAction.action === "ban" ? "This blocks sign-in until an administrator activates the account." : pendingAction.action === "suspend" ? "This blocks sign-in for seven days." : "This restores sign-in access."}</p>
+          <label htmlFor="moderation-reason" className="mt-4 block text-sm font-medium text-gray-700">Reason (optional)</label>
+          <textarea id="moderation-reason" value={actionReason} onChange={(event) => setActionReason(event.target.value)} disabled={Boolean(actionLoading)} rows={3} maxLength={1000} className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm" />
+          {actionError && <p role="alert" className="mt-3 text-sm text-red-700">{actionError}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" autoFocus disabled={Boolean(actionLoading)} onClick={() => setPendingAction(null)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm disabled:opacity-50">Cancel</button>
+            <button type="submit" disabled={Boolean(actionLoading)} className="inline-flex items-center gap-2 rounded-lg bg-[#2343A8] px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{actionLoading && <Loader2 className="h-4 w-4 animate-spin" />}{actionLoading ? "Saving..." : pendingAction.action === "ban" ? "Confirm ban" : pendingAction.action === "suspend" ? "Confirm suspension" : "Confirm activation"}</button>
+          </div>
+        </form>}
+      </dialog>
 
       {/* Floating bulk action bar so actions remain visible while scrolling */}
       {selectedUserIds.size > 0 && (
