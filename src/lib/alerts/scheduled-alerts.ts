@@ -623,7 +623,8 @@ export async function processDueScheduledAlerts(
   const { data, error } = await supabase
     .from("scheduled_alerts")
     .select("*")
-    .eq("status", "pending")
+    .in("status", ["pending", "failed"])
+    .lt("attempt_count", 3)
     .lte("send_at", now)
     .order("send_at", { ascending: true })
     .limit(options.limit || 100);

@@ -2,6 +2,7 @@
  * Reactivation Email Templates
  * Handles all reactivation-related email communications
  */
+import { escapeEmailHtml, validateEmailUrl } from "./safety";
 
 // Extract the baseLayout function from existing email-templates.ts pattern
 const BRAND = {
@@ -90,6 +91,9 @@ export function reactivationRequestReceivedTemplate(
   partnerName: string,
   reason: string
 ): string {
+  userName = escapeEmailHtml(userName);
+  partnerName = escapeEmailHtml(partnerName);
+  reason = escapeEmailHtml(reason);
   const body = `
     <h1>Profile Reactivation Request Received</h1>
     <p>Hi ${userName},</p>
@@ -126,6 +130,11 @@ export function reactivationPartnerNotificationTemplate(
   responseUrl?: string,
   responseDeadline?: string
 ): string {
+  partnerName = escapeEmailHtml(partnerName);
+  userName = escapeEmailHtml(userName);
+  reason = escapeEmailHtml(reason);
+  if (responseUrl) responseUrl = escapeEmailHtml(validateEmailUrl(responseUrl));
+  if (responseDeadline) responseDeadline = escapeEmailHtml(responseDeadline);
   const body = `
     <h1>Someone Wants to Reactivate Your Match</h1>
     <p>Hi ${partnerName},</p>
@@ -166,6 +175,9 @@ export function reactivationApprovedTemplate(
   partnerName: string,
   adminNotes?: string
 ): string {
+  userName = escapeEmailHtml(userName);
+  partnerName = escapeEmailHtml(partnerName);
+  if (adminNotes) adminNotes = escapeEmailHtml(adminNotes);
   const body = `
     <h1>Your Profile Reactivation is Approved! 🎉</h1>
     <p>Hi ${userName},</p>
@@ -192,6 +204,8 @@ export function reactivationDeniedTemplate(
   userName: string,
   adminNotes?: string
 ): string {
+  userName = escapeEmailHtml(userName);
+  if (adminNotes) adminNotes = escapeEmailHtml(adminNotes);
   const body = `
     <h1>Profile Reactivation Request - Update</h1>
     <p>Hi ${userName},</p>
@@ -220,6 +234,8 @@ export function reactivationApprovedPartnerNotificationTemplate(
   partnerName: string,
   userName: string
 ): string {
+  partnerName = escapeEmailHtml(partnerName);
+  userName = escapeEmailHtml(userName);
   const body = `
     <h1>Your Match Has Been Reactivated</h1>
     <p>Hi ${partnerName},</p>

@@ -4,6 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { sendRawHtmlEmail } from "@/lib/email";
 import { getPreferredEmailRecipientName } from "@/lib/email-recipient-name";
+import { escapeEmailHtml } from "@/lib/email/safety";
 
 const supabaseService = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -334,8 +335,8 @@ export async function POST(request: NextRequest) {
       const html = `
         <div style="font-family: Arial, sans-serif; line-height: 1.6;">
           <h2>Partner Response Received</h2>
-          <p>Hello ${requesterName},</p>
-          <p>${responderName} has submitted a response to your reactivation request.</p>
+          <p>Hello ${escapeEmailHtml(requesterName)},</p>
+          <p>${escapeEmailHtml(responderName)} has submitted a response to your reactivation request.</p>
           <p><strong>Response:</strong> ${isAllow ? "Allow" : "Object"}</p>
           <p>Your request is now pending admin review.</p>
         </div>

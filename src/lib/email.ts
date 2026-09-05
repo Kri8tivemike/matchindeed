@@ -14,6 +14,7 @@ import {
   type EmailTemplate,
   type EmailData,
 } from "./email-templates";
+import { deliverEmail } from "./email/transport";
 import { shouldSendEmail } from "./notification-preferences";
 
 // ---------------------------------------------------------------
@@ -23,8 +24,7 @@ import { shouldSendEmail } from "./notification-preferences";
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || "MatchIndeed <noreply@matchindeed.com>";
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
-const RESEND_API_BASE_URL = process.env.RESEND_API_BASE_URL || "https://api.resend.com";
+  process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com";
 
 /** Whether email sending is available */
 const isEmailConfigured = !!RESEND_API_KEY;
@@ -157,53 +157,12 @@ export async function sendEmail(
 
     const subject = options.subject || generatedSubject;
 
-    // If Resend is not configured, log to console (dev mode)
-    if (!RESEND_API_KEY) {
-      console.log(
-        `[Email] (Dev Mode — No RESEND_API_KEY) Would send email:`,
-        {
-          to: options.to,
-          subject,
-          template: options.template,
-          dataKeys: Object.keys(options.data),
-        }
-      );
-      return { success: true, skipped: true };
-    }
-
-    // Send via Resend
-    const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-        ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
-      },
-      body: JSON.stringify({
-        from: EMAIL_FROM,
-        to: options.to,
-        subject,
-        html,
-        cc: options.cc,
-        reply_to: options.replyTo,
-      }),
-    });
-
-    const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-    const messageId = typeof payload.id === "string" ? payload.id : undefined;
-    const errorMessage = typeof payload.message === "string"
-      ? payload.message
-      : `Resend API error (${response.status})`;
-
-    if (!response.ok) {
-      console.error("[Email] Resend error:", errorMessage);
-      return { success: false, error: errorMessage };
-    }
-
-    console.log(`[Email] Sent "${options.template}" to ${options.to}`, {
-      messageId,
-    });
-    return { success: true, messageId };
+    const result = await deliverEmail({
+      from: EMAIL_FROM, to: options.to, subject, html,
+      cc: options.cc, reply_to: options.replyTo,
+    }, { idempotencyKey: options.idempotencyKey });
+    if (!result.success) console.error("[Email] Delivery failed:", { template: options.template, error: result.error });
+    return result;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unexpected email error";
     console.error("[Email] Unexpected error:", error);
@@ -789,41 +748,10 @@ export function isEmailServiceAvailable(): boolean {
 export async function sendRawHtmlEmail(
   to: string,
   subject: string,
-  html: string
+  html: string,
+  options: { idempotencyKey?: string } = {},
 ): Promise<SendEmailResult> {
-  try {
-    if (!RESEND_API_KEY) {
-      console.log(`[Email] (Dev Mode) Would send raw HTML to ${to}:`, subject);
-      return { success: true, skipped: true };
-    }
-
-    const response = await fetch(`${RESEND_API_BASE_URL}/emails`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: EMAIL_FROM,
-        to,
-        subject,
-        html,
-      }),
-    });
-
-    const payload = await response.json().catch(() => ({} as Record<string, unknown>));
-    const messageId = typeof payload.id === "string" ? payload.id : undefined;
-    const errorMessage = typeof payload.message === "string"
-      ? payload.message
-      : `Resend API error (${response.status})`;
-
-    if (!response.ok) {
-      return { success: false, error: errorMessage };
-    }
-
-    return { success: true, messageId };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unexpected email error";
-    return { success: false, error: message };
-  }
+  const result = await deliverEmail({ from: EMAIL_FROM, to, subject, html }, options);
+  if (!result.success) console.error("[Email] Raw delivery failed:", { error: result.error });
+  return result;
 }

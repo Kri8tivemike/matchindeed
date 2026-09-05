@@ -10,6 +10,7 @@ import {
   deriveWorkflowState,
   requireMeetingStateTransition,
 } from "@/lib/meetings/state-machine";
+import { escapeEmailHtml } from "@/lib/email/safety";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -279,13 +280,16 @@ function buildMatchPendingAgreementEmail(params: {
   partnerName: string;
   meetingId: string;
 }) {
+  const recipientName = escapeEmailHtml(params.recipientName);
+  const partnerName = escapeEmailHtml(params.partnerName);
+  const meetingId = encodeURIComponent(params.meetingId);
   return `
     <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
       <h2 style="margin-bottom: 8px;">Mutual YES Confirmed</h2>
-      <p>Hello ${params.recipientName},</p>
-      <p>You and ${params.partnerName} both selected YES after your video date.</p>
+      <p>Hello ${recipientName},</p>
+      <p>You and ${partnerName} both selected YES after your video date.</p>
       <p>To continue, sign your relationship agreement in your dashboard:</p>
-      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com"}/dashboard/meetings/${params.meetingId}/response">Open Agreement</a></p>
+      <p><a href="${process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com"}/dashboard/meetings/${meetingId}/response">Open Agreement</a></p>
       <p>Messaging unlocks only after both signatures are completed.</p>
     </div>
   `.trim();

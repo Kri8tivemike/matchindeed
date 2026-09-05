@@ -1,3 +1,4 @@
+import { escapeEmailHtml, emailSubjectText, validateEmailUrl } from "./email/safety";
 /**
  * Email Templates for MatchIndeed
  *
@@ -47,7 +48,8 @@ function baseLayout(title: string, bodyContent: string): string {
     p { color: #4a4a6a; font-size: 15px; line-height: 1.6; margin: 8px 0; }
     .highlight { background: #f0f2ff; border-left: 4px solid ${BRAND.primaryColor}; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
     .highlight p { margin: 4px 0; }
-    .btn, .btn:link, .btn:visited { display: inline-block; padding: 14px 32px; background: ${BRAND.gradient}; color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 16px 0; }
+    a { color: #1f419a; }
+    .btn, .btn:link, .btn:visited { display: inline-block; padding: 14px 32px; background: ${BRAND.primaryColor}; background-image: ${BRAND.gradient}; color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 16px 0; }
     .btn span { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
     .warning { background: #fff8e6; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
     .success { background: #ecfdf5; border-left: 4px solid #10b981; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
@@ -76,8 +78,10 @@ function baseLayout(title: string, bodyContent: string): string {
       .btn, .btn:link, .btn:visited, .btn span { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
       .footer { border-top-color: #374151 !important; }
       .footer p { color: #9ca3af !important; }
+      a:not(.btn) { color: #93c5fd !important; }
       .meta { color: #9ca3af !important; }
     }
+    [data-ogsc] a:not(.btn) { color: #93c5fd !important; }
     [data-ogsc] body { background-color: #111827 !important; }
     [data-ogsc] .card { background: #1f2937 !important; box-shadow: none !important; }
     [data-ogsc] .header { background: #ffffff !important; border-bottom-color: #374151 !important; }
@@ -110,43 +114,45 @@ function baseLayout(title: string, bodyContent: string): string {
 // TEMPLATE TYPES
 // ---------------------------------------------------------------
 
-export type EmailTemplate =
-  | "profile_completion_reminder"
-  | "signup_confirmation"
-  | "password_reset"
-  | "meeting_request"
-  | "meeting_request_reminder"
-  | "no_active_video_slot"
-  | "activity_received"
-  | "new_message"
-  | "daily_profile_views"
-  | "daily_new_likes"
-  | "daily_recommendations"
-  | "people_near_you"
-  | "reengagement_unread_messages"
-  | "reengagement_new_people"
-  | "reengagement_new_matches"
-  | "reengagement_new_match_reminder"
-  | "reengagement_inactive_day_7"
-  | "reengagement_inactive_day_14"
-  | "reengagement_inactive_day_30"
-  | "meeting_accepted"
-  | "meeting_approved"
-  | "meeting_cancelled"
-  | "profile_view"
-  | "meeting_reminder"
-  | "meeting_completed"
-  | "cancellation_charge"
-  | "investigation_notice"
-  | "investigation_resolved"
-  | "match_found"
-  | "response_submitted"
-  | "credit_refund"
-  | "welcome"
-  | "account_warning"
-  | "account_deactivated"
-  | "account_deletion_requested"
-  | "gender_setting_updated";
+export const EMAIL_TEMPLATES = [
+  "profile_completion_reminder",
+  "signup_confirmation",
+  "password_reset",
+  "meeting_request",
+  "meeting_request_reminder",
+  "no_active_video_slot",
+  "activity_received",
+  "new_message",
+  "daily_profile_views",
+  "daily_new_likes",
+  "daily_recommendations",
+  "people_near_you",
+  "reengagement_unread_messages",
+  "reengagement_new_people",
+  "reengagement_new_matches",
+  "reengagement_new_match_reminder",
+  "reengagement_inactive_day_7",
+  "reengagement_inactive_day_14",
+  "reengagement_inactive_day_30",
+  "meeting_accepted",
+  "meeting_approved",
+  "meeting_cancelled",
+  "profile_view",
+  "meeting_reminder",
+  "meeting_completed",
+  "cancellation_charge",
+  "investigation_notice",
+  "investigation_resolved",
+  "match_found",
+  "response_submitted",
+  "credit_refund",
+  "welcome",
+  "account_warning",
+  "account_deactivated",
+  "account_deletion_requested",
+  "gender_setting_updated"
+] as const;
+export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];
 
 export type EmailData = {
   recipientName: string;
@@ -160,7 +166,28 @@ export type EmailData = {
 /**
  * Generate an email template based on type and data
  */
-export function generateEmail(
+export function generateEmail(template: EmailTemplate, data: EmailData): { subject: string; html: string } {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://matchindeed.com";
+  const prepared: EmailData = {
+    ...data,
+    recipientName: data.recipientName || "there",
+    dashboardUrl: data.dashboardUrl || appUrl + "/dashboard",
+    responseUrl: data.responseUrl || appUrl + "/dashboard/meetings",
+  };
+  for (const key of ["confirmationUrl", "resetUrl", "dashboardUrl", "responseUrl", "reactivateUrl"]) {
+    const value = prepared[key];
+    if (typeof value === "string" && value) validateEmailUrl(value);
+  }
+  if (template === "signup_confirmation" && !prepared.confirmationUrl) throw new Error("Confirmation URL is required");
+  if (template === "password_reset" && !prepared.resetUrl) throw new Error("Password reset URL is required");
+  for (const [key, value] of Object.entries(prepared)) {
+    if (typeof value === "string") prepared[key] = escapeEmailHtml(value);
+  }
+  const rendered = renderEmail(template, prepared);
+  return { subject: emailSubjectText(rendered.subject), html: rendered.html };
+}
+
+function renderEmail(
   template: EmailTemplate,
   data: EmailData
 ): { subject: string; html: string } {
@@ -1059,7 +1086,6 @@ function accountWarningEmail(data: EmailData) {
 }
 
 function profileCompletionReminderEmail(data: EmailData) {
-  const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!));
   const subject = "Finish your MatchIndeed profile";
   const url = "https://matchindeed.com/dashboard/profile/edit";
   return { subject, html: baseLayout(subject, `
@@ -1069,7 +1095,7 @@ function profileCompletionReminderEmail(data: EmailData) {
       [data-ogsc] .profile-reminder-link, [data-ogsc] .footer a { color: #93c5fd !important; }
     </style>
     <h1>Your profile is waiting for you</h1>
-    <p>Hi ${escape(data.recipientName || "there")},</p>
+    <p>Hi ${data.recipientName || "there"},</p>
     <p>You still have profile details to complete on MatchIndeed. Tell potential matches about yourself and what you are looking for.</p>
     <div class="highlight"><p>Open your profile to review your details, add your photos, and finish any remaining steps. Remember to save when you are done.</p></div>
     <p style="text-align:center"><a class="btn" style="background:#1f419a;color:#ffffff !important" href="${url}">Complete my profile</a></p>

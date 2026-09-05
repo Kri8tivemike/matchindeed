@@ -4,6 +4,7 @@ import { buildRelationshipAgreementText } from "@/lib/agreements/templates";
 import { sendRawHtmlEmail } from "@/lib/email";
 import { autoDeactivateMatchedProfiles } from "@/lib/profile/auto-deactivate";
 import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
+import { escapeEmailHtml } from "@/lib/email/safety";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -208,14 +209,16 @@ function buildAgreementEmailHtml(params: {
 }) {
   const agreementTextHtml = params.agreementText
     .split("\n")
-    .map((line) => line.trim())
+    .map((line) => escapeEmailHtml(line.trim()))
     .join("<br/>");
+  const recipientName = escapeEmailHtml(params.recipientName);
+  const partnerName = escapeEmailHtml(params.partnerName);
 
   return `
     <div style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
       <h2 style="margin-bottom: 8px;">Relationship Agreement Signed</h2>
-      <p>Hello ${params.recipientName},</p>
-      <p>You and ${params.partnerName} have fully signed your MatchIndeed relationship agreement.</p>
+      <p>Hello ${recipientName},</p>
+      <p>You and ${partnerName} have fully signed your MatchIndeed relationship agreement.</p>
       <p><strong>Signed on:</strong> ${new Date(params.signedAt).toLocaleString("en-US")}</p>
       <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
       <p style="font-weight: 600; margin-bottom: 8px;">Agreement copy:</p>
