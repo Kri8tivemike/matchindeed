@@ -1,6 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
-import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 import { recordCreditTransaction } from "@/lib/credits/transactions";
 import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
 
@@ -189,15 +188,6 @@ export async function processOneTimeCheckoutSession(
       throw new Error("Wallet top-up processor returned no result.");
     }
 
-    if (!data.already_processed) {
-      await trackCustomerEventSafely(payload.userId, CIO_EVENTS.WALLET_FUNDED, {
-        amount_cents: payload.amountCents,
-        currency: payload.currency,
-        stripe_session_id: session.id,
-        payment_type: payload.paymentType,
-      });
-    }
-
     return {
       success: true,
       alreadyProcessed: data.already_processed,
@@ -252,13 +242,6 @@ export async function processOneTimeCheckoutSession(
       description,
     });
 
-    await trackCustomerEventSafely(payload.userId, CIO_EVENTS.CREDITS_PURCHASED, {
-      credits: payload.credits,
-      amount_cents: payload.amountCents,
-      currency: payload.currency,
-      stripe_session_id: session.id,
-      payment_type: payload.paymentType,
-    });
   }
 
   return {
@@ -320,17 +303,6 @@ export async function processOneTimeFlutterwavePayment(
       throw new Error("Wallet top-up processor returned no result.");
     }
 
-    if (!data.already_processed) {
-      await trackCustomerEventSafely(payment.userId, CIO_EVENTS.WALLET_FUNDED, {
-        amount_cents: payment.amountCents,
-        currency: payment.currency,
-        payment_provider: provider,
-        payment_transaction_id: payment.transactionId,
-        payment_tx_ref: reference,
-        payment_type: payment.paymentType,
-      });
-    }
-
     return {
       success: true,
       alreadyProcessed: data.already_processed,
@@ -388,15 +360,6 @@ export async function processOneTimeFlutterwavePayment(
       description,
     });
 
-    await trackCustomerEventSafely(payment.userId, CIO_EVENTS.CREDITS_PURCHASED, {
-      credits: payment.credits,
-      amount_cents: payment.amountCents,
-      currency: payment.currency,
-      payment_provider: provider,
-      payment_transaction_id: payment.transactionId,
-      payment_tx_ref: reference,
-      payment_type: payment.paymentType,
-    });
   }
 
   return {

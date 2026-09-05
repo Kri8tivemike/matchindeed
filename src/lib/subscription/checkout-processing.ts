@@ -4,7 +4,6 @@ import type Stripe from "stripe";
 import { allocateSubscriptionCredits } from "@/lib/credits/allocation";
 import { restoreCreditLockedProfileIfEligible } from "@/lib/profile/credit-lock";
 import { clearStarterTrialSlot } from "@/lib/starter-trial";
-import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 import {
   PRODUCT_ANALYTICS_EVENTS,
   trackProductEventSafely,
@@ -367,15 +366,6 @@ export async function processSubscriptionCheckoutSession(
       throw completeError;
     }
 
-    await trackCustomerEventSafely(userId, CIO_EVENTS.SUBSCRIPTION_UPGRADED, {
-      tier,
-      amount_cents: amountCents,
-      stripe_session_id: session.id,
-      stripe_subscription_id: stripeSubscriptionId,
-      starts_at: startsAt,
-      expires_at: expiresAt,
-    });
-
     await trackProductEventSafely(
       userId,
       PRODUCT_ANALYTICS_EVENTS.SUBSCRIPTION_PURCHASED,
@@ -618,17 +608,6 @@ export async function processSubscriptionFlutterwavePayment(
     if (completeError) {
       throw completeError;
     }
-
-    await trackCustomerEventSafely(payment.userId, CIO_EVENTS.SUBSCRIPTION_UPGRADED, {
-      tier,
-      amount_cents: payment.amountCents,
-      currency: payment.currency,
-      payment_provider: provider,
-      payment_transaction_id: payment.transactionId,
-      payment_tx_ref: sessionId,
-      starts_at: startsAt.toISOString(),
-      expires_at: expiresAt.toISOString(),
-    });
 
     await trackProductEventSafely(
       payment.userId,

@@ -3,6 +3,8 @@
 Date verified: April 27, 2026
 Website reviewed: `https://matchindeed.com`
 
+Update: Customer.io was removed from the application and production environment on September 5, 2026. Resend is the sole email delivery provider.
+
 ## Purpose
 
 This report lists the third-party platforms, API services, and external providers currently connected to the MatchIndeed website or implemented in the codebase for website operations.
@@ -29,7 +31,6 @@ These services were confirmed as configured on the live production website as of
 | Zoom | Video meeting creation and meeting links | [https://marketplace.zoom.us](https://marketplace.zoom.us), `https://zoom.us/oauth/token`, `https://api.zoom.us/v2/users/me/meetings` | Confirmed active | `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET` |
 | TheHive.ai | Content moderation for photos and text | [https://thehive.ai](https://thehive.ai), `https://api.thehive.ai` | Confirmed active | `THEHIVE_SECRET_KEY` |
 | OpenAI | AI-assisted moderation and identity-related image checks | [https://platform.openai.com](https://platform.openai.com), `https://api.openai.com/v1/responses` | Confirmed active | `OPENAI_API_KEY` |
-| Customer.io | Behavioral messaging, lifecycle events, campaign triggers | [https://customer.io](https://customer.io), `https://track.customer.io/api/v1`, `https://api.customer.io/v1` | Confirmed active | `CUSTOMERIO_SITE_ID`, `CUSTOMERIO_API_KEY`, `CUSTOMERIO_APP_API_KEY` |
 
 ## Partially Configured or Incomplete Integrations
 
@@ -56,7 +57,7 @@ These services are present in the codebase and may be planned, optional, or envi
 
 ## Key Client Notes
 
-- The website currently depends heavily on Supabase, Stripe, Zoom, Resend, OneSignal, Google Maps, TheHive.ai, OpenAI, and Customer.io.
+- The website currently depends heavily on Supabase, Stripe, Zoom, Resend, OneSignal, Google Maps, TheHive.ai, and OpenAI.
 - Stripe is clearly active for payments, but `STRIPE_WEBHOOK_SECRET` was not confirmed in the reviewed production `.env` files. This should be reviewed carefully because subscription or payment finalization can depend on a correctly configured webhook.
 - Zoho support exists in the codebase, but the production setup looked incomplete during this review.
 - Several security and analytics services exist in code but do not appear fully enabled in the reviewed production environment.
@@ -80,6 +81,5 @@ These project files show where the integrations are currently used:
 - Zoom meetings: `src/lib/zoom.ts`
 - OneSignal push: `src/lib/onesignal.ts`
 - Google Places autocomplete: `src/components/GooglePlacesAutocomplete.tsx`
-- Customer.io tracking: `src/lib/customerio.ts`
 - TheHive.ai and OpenAI moderation: `src/lib/content-moderation.ts`
 - Zoho integration utilities: `src/lib/zoho.ts`

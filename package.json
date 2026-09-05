@@ -15,8 +15,7 @@
     "test:phase9": "node --test --loader ./tests/alias-loader.mjs tests/**/*.test.mjs",
     "test:integrations:smoke": "node scripts/phase9_integrations_smoke.mjs",
     "test:emails:transactional": "node ./scripts/transactional_emails_smoke.mjs",
-    "test:emails:templates": "node --experimental-strip-types --loader ./tests/alias-loader.mjs ./scripts/email_templates_smoke.mjs",
-    "audit:customerio:campaigns": "node ./scripts/customerio_campaign_audit.mjs"
+    "test:emails:templates": "node --experimental-strip-types --loader ./tests/alias-loader.mjs ./scripts/email_templates_smoke.mjs"
   },
   "dependencies": {
     "@fingerprintjs/fingerprintjs-pro-react": "^2.7.1",

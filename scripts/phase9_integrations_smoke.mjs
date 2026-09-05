@@ -200,71 +200,6 @@ async function testOneSignal() {
   });
 }
 
-async function testCustomerIo() {
-  return timed("Customer.io", async () => {
-    const missing = getMissingEnv(["CUSTOMERIO_SITE_ID", "CUSTOMERIO_API_KEY"]);
-    if (missing.length > 0) {
-      return buildSkip("Customer.io", `Missing env: ${missing.join(", ")}`);
-    }
-    if (isDryRun()) {
-      return buildSkip("Customer.io", "Dry run enabled");
-    }
-
-    const auth = Buffer.from(
-      `${process.env.CUSTOMERIO_SITE_ID}:${process.env.CUSTOMERIO_API_KEY}`
-    ).toString("base64");
-
-    const customerId = `phase9-smoke-${Date.now()}`;
-    const identifyResponse = await fetch(
-      `https://track.customer.io/api/v1/customers/${customerId}`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Basic ${auth}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: `${customerId}@example.com`,
-          source: "phase9_integrations_smoke",
-        }),
-      }
-    );
-    const identifyPayload = await identifyResponse.json().catch(() => ({}));
-
-    if (!identifyResponse.ok) {
-      return buildFail(
-        "Customer.io",
-        identifyPayload.meta?.error || identifyPayload.error || `Identify HTTP ${identifyResponse.status}`
-      );
-    }
-
-    const eventResponse = await fetch("https://track.customer.io/api/v1/events", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "phase9_integrations_smoke",
-        data: {
-          customer_id: customerId,
-          source: "phase9_integrations_smoke",
-        },
-      }),
-    });
-    const eventPayload = await eventResponse.json().catch(() => ({}));
-
-    if (!eventResponse.ok) {
-      return buildFail(
-        "Customer.io",
-        eventPayload.meta?.error || eventPayload.error || `Track HTTP ${eventResponse.status}`
-      );
-    }
-
-    return buildPass("Customer.io", "Connected (identify + track succeeded)");
-  });
-}
-
 async function run() {
   const results = await Promise.all([
     testSupabase(),
@@ -272,7 +207,6 @@ async function run() {
     testResend(),
     testZoom(),
     testOneSignal(),
-    testCustomerIo(),
   ]);
 
   const summary = {

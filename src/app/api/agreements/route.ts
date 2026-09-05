@@ -3,7 +3,6 @@ import { createClient } from "@supabase/supabase-js";
 import { buildRelationshipAgreementText } from "@/lib/agreements/templates";
 import { sendRawHtmlEmail } from "@/lib/email";
 import { autoDeactivateMatchedProfiles } from "@/lib/profile/auto-deactivate";
-import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 import { escapeEmailHtml } from "@/lib/email/safety";
 
 const supabase = createClient(
@@ -509,32 +508,6 @@ export async function POST(request: NextRequest) {
           : Promise.resolve(),
       ]);
 
-      await Promise.allSettled([
-        trackCustomerEventSafely(match.user1_id, CIO_EVENTS.AGREEMENT_SIGNED, {
-          match_id: match.id,
-          meeting_id: match.meeting_id,
-          agreement_id: finalizedAgreement.id,
-          signed_at: agreementSignedAt,
-        }),
-        trackCustomerEventSafely(match.user2_id, CIO_EVENTS.AGREEMENT_SIGNED, {
-          match_id: match.id,
-          meeting_id: match.meeting_id,
-          agreement_id: finalizedAgreement.id,
-          signed_at: agreementSignedAt,
-        }),
-        trackCustomerEventSafely(match.user1_id, CIO_EVENTS.CHAT_UNLOCKED, {
-          match_id: match.id,
-          meeting_id: match.meeting_id,
-          agreement_id: finalizedAgreement.id,
-          unlocked_at: nowIso,
-        }),
-        trackCustomerEventSafely(match.user2_id, CIO_EVENTS.CHAT_UNLOCKED, {
-          match_id: match.id,
-          meeting_id: match.meeting_id,
-          agreement_id: finalizedAgreement.id,
-          unlocked_at: nowIso,
-        }),
-      ]);
     } else {
       await supabase
         .from("user_matches")

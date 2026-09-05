@@ -470,29 +470,7 @@ async function testTheHive(): Promise<TestResult> {
   }
 }
 
-/** 13. Customer.io — verify credentials with identify call */
-async function testCustomerIO(): Promise<TestResult> {
-  const siteId = process.env.CUSTOMERIO_SITE_ID;
-  const apiKey = process.env.CUSTOMERIO_API_KEY;
-  if (!siteId || !apiKey) return { service: "Customer.io", status: "skip", message: "Missing Customer.io credentials" };
-
-  const start = Date.now();
-  try {
-    const auth = Buffer.from(`${siteId}:${apiKey}`).toString("base64");
-    // Use the auth check endpoint
-    const res = await fetch("https://track.customer.io/auth", {
-      headers: { Authorization: `Basic ${auth}` },
-    });
-    if (res.status === 200) {
-      return { service: "Customer.io", status: "pass", message: "Connected — credentials valid", responseTime: Date.now() - start };
-    }
-    return { service: "Customer.io", status: "fail", message: `Auth failed (HTTP ${res.status})`, responseTime: Date.now() - start };
-  } catch (e: unknown) {
-    return { service: "Customer.io", status: "fail", message: String(e), responseTime: Date.now() - start };
-  }
-}
-
-/** 14. Sinch SMS — check API endpoint (no actual SMS sent) */
+/** 13. Sinch SMS — check API endpoint (no actual SMS sent) */
 async function testSinch(): Promise<TestResult> {
   const planId = process.env.SINCH_SERVICE_PLAN_ID;
   const token = process.env.SINCH_API_TOKEN;
@@ -518,7 +496,7 @@ async function testSinch(): Promise<TestResult> {
   }
 }
 
-/** 15. Zoho CRM — get access token and fetch org info */
+/** 14. Zoho CRM — get access token and fetch org info */
 async function testZoho(): Promise<TestResult> {
   const clientId = process.env.ZOHO_CLIENT_ID;
   const clientSecret = process.env.ZOHO_CLIENT_SECRET;
@@ -580,7 +558,6 @@ export async function GET(request: NextRequest) {
     testOneSignal(),
     testMixpanel(),
     testTheHive(),
-    testCustomerIO(),
     testSinch(),
     testZoho(),
     testGSC(),

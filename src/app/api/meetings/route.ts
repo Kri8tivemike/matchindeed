@@ -39,7 +39,6 @@ import {
 } from "@/lib/credits/actions";
 import { getMonthlyCreditsForTier, normalizeTier } from "@/lib/credits/config";
 import { evaluateGenderEligibility } from "@/lib/matching/gender-rules";
-import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 import {
   PRODUCT_ANALYTICS_EVENTS,
   trackProductEventSafely,
@@ -1407,16 +1406,6 @@ export async function POST(request: NextRequest) {
       // Don't fail the request if notification fails
     }
 
-    await trackCustomerEventSafely(user.id, CIO_EVENTS.DATE_REQUEST_SENT, {
-      meeting_id: meeting.id,
-      meeting_type: normalizedMeetingType,
-      scheduled_at: scheduledAt.toISOString(),
-      target_user_id,
-      requester_tier: requesterTier,
-      target_tier: targetTier,
-      credits_used: requiredCredits,
-    });
-
     await trackProductEventSafely(
       user.id,
       PRODUCT_ANALYTICS_EVENTS.MEETING_REQUESTED,
@@ -1809,22 +1798,6 @@ export async function PATCH(request: NextRequest) {
               .from("meeting_participants")
               .select("user_id, role")
               .eq("meeting_id", meeting_id);
-
-            await Promise.all(
-              (acceptedParticipants || []).map((entry) =>
-                trackCustomerEventSafely(
-                  entry.user_id,
-                  CIO_EVENTS.DATE_REQUEST_ACCEPTED,
-                  {
-                    meeting_id,
-                    meeting_type: meeting.type || "one_on_one",
-                    scheduled_at: meeting.scheduled_at,
-                    accepted_by: user.id,
-                    participant_role: entry.role,
-                  }
-                )
-              )
-            );
 
             await Promise.all(
               (acceptedParticipants || []).map((entry) =>

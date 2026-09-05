@@ -11,11 +11,6 @@ import {
   normalizeLocation,
 } from "@/lib/location";
 import {
-  CIO_EVENTS,
-  identifyCustomerSafely,
-  trackCustomerEventSafely,
-} from "@/lib/customerio";
-import {
   PRODUCT_ANALYTICS_EVENTS,
   trackProductEventSafely,
 } from "@/lib/product-analytics";
@@ -573,23 +568,6 @@ export async function POST(request: NextRequest) {
     }
 
     await Promise.allSettled([
-      identifyCustomerSafely(userId, {
-        email: payload.email,
-        first_name: normalizedFirstName || undefined,
-        last_name: normalizedLastName || undefined,
-        profile_completed: false,
-        city: normalizedLocation || undefined,
-        gender: normalizedGender || undefined,
-        created_at: Math.floor(Date.now() / 1000),
-      }),
-      trackCustomerEventSafely(userId, CIO_EVENTS.SIGNED_UP, {
-        selected_tier: normalizedTier,
-        looking_for: normalizedLookingFor || null,
-        partner_gender_preference: normalizedPartnerGender || null,
-        uploaded_photos: uploadedPhotoUrls.length,
-        rejected_photos: uploadResult.rejectedCount,
-        ...payload.attribution,
-      }),
       trackProductEventSafely(userId, PRODUCT_ANALYTICS_EVENTS.SIGNUP_COMPLETED, {
         selected_tier: normalizedTier,
         looking_for: normalizedLookingFor || null,

@@ -7,7 +7,6 @@ import {
   deriveWorkflowState,
   requireMeetingStateTransition,
 } from "@/lib/meetings/state-machine";
-import { CIO_EVENTS, trackCustomerEventSafely } from "@/lib/customerio";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -429,27 +428,6 @@ export async function POST(request: NextRequest) {
       );
       // Don't fail finalization if notifications fail
     }
-
-    await Promise.allSettled([
-      trackCustomerEventSafely(guest.user_id, CIO_EVENTS.MEETING_COMPLETED, {
-        meeting_id,
-        role: "guest",
-        outcome,
-        fault,
-        charge_decision: chargeDecision,
-        charge_status: newChargeStatus,
-        refund_issued: refundIssued,
-      }),
-      trackCustomerEventSafely(host.user_id, CIO_EVENTS.MEETING_COMPLETED, {
-        meeting_id,
-        role: "host",
-        outcome,
-        fault,
-        charge_decision: chargeDecision,
-        charge_status: newChargeStatus,
-        refund_issued: refundIssued,
-      }),
-    ]);
 
     return NextResponse.json({
       success: true,
