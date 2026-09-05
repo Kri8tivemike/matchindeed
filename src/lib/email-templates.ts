@@ -1063,12 +1063,17 @@ function profileCompletionReminderEmail(data: EmailData) {
   const subject = "Finish your MatchIndeed profile";
   const url = "https://matchindeed.com/dashboard/profile/edit";
   return { subject, html: baseLayout(subject, `
+    <style>
+      .profile-reminder-link, .footer a { color: #1f419a; text-decoration: underline; }
+      @media (prefers-color-scheme: dark) { .profile-reminder-link, .footer a { color: #93c5fd !important; } }
+      [data-ogsc] .profile-reminder-link, [data-ogsc] .footer a { color: #93c5fd !important; }
+    </style>
     <h1>Your profile is waiting for you</h1>
     <p>Hi ${escape(data.recipientName || "there")},</p>
     <p>You still have profile details to complete on MatchIndeed. Tell potential matches about yourself and what you are looking for.</p>
     <div class="highlight"><p>Open your profile to review your details, add your photos, and finish any remaining steps. Remember to save when you are done.</p></div>
     <p style="text-align:center"><a class="btn" style="background:#1f419a;color:#ffffff !important" href="${url}">Complete my profile</a></p>
-    <p>If the button does not work, <a href="${url}">open your profile here</a>. Sign in to continue.</p>
-    <p class="meta">We will remind you daily until you finish your profile. You can manage reminder emails in your <a href="https://matchindeed.com/dashboard/settings">notification settings</a>.</p>
+    <p>If the button does not work, <a class="profile-reminder-link" href="${url}">open your profile here</a>. Sign in to continue.</p>
+    <p class="meta">We will remind you daily until you finish your profile. You can manage reminder emails in your <a class="profile-reminder-link" href="https://matchindeed.com/dashboard/settings">notification settings</a>.</p>
   `) };
 }
