@@ -36,6 +36,7 @@ type ScheduledAlertRow = {
   payload: ScheduledAlertPayload | null;
   status: ScheduledAlertStatus;
   attempt_count: number | null;
+  idempotency_key: string;
 };
 
 type ScheduleAlertParams = {
@@ -366,7 +367,8 @@ async function deliverMeetingRequestReminder(
         meetingTime,
         meetingTimeZone: meetingTimeZone || undefined,
       },
-      alert.user_id
+      alert.user_id,
+      alert.idempotency_key
     );
     return { sent: result.success, error: result.error };
   }
@@ -425,7 +427,8 @@ async function deliverNoActiveVideoSlotReminder(
         actorName,
         triggerLabel,
       },
-      alert.user_id
+      alert.user_id,
+      alert.idempotency_key
     );
     return { sent: result.success, error: result.error };
   }
@@ -474,7 +477,8 @@ async function deliverUnreadMessagesReengagement(
       recipientName: identity.recipientName,
       matchId,
     },
-    alert.user_id
+    alert.user_id,
+    alert.idempotency_key
   );
   return { sent: result.success, error: result.error };
 }
@@ -499,7 +503,8 @@ async function deliverInactiveNewPeopleReengagement(
   const result = await sendInactiveNewPeopleReengagementEmail(
     identity.email,
     { recipientName: identity.recipientName },
-    alert.user_id
+    alert.user_id,
+    alert.idempotency_key
   );
   return { sent: result.success, error: result.error };
 }
@@ -525,7 +530,8 @@ async function deliverNewMatchesReengagement(
   const result = await sendNewMatchesReengagementEmail(
     identity.email,
     { recipientName: identity.recipientName },
-    alert.user_id
+    alert.user_id,
+    alert.idempotency_key
   );
   return { sent: result.success, error: result.error };
 }
@@ -551,7 +557,8 @@ async function deliverNewMatchReminderReengagement(
   const result = await sendNewMatchReminderReengagementEmail(
     identity.email,
     { recipientName: identity.recipientName },
-    alert.user_id
+    alert.user_id,
+    alert.idempotency_key
   );
   return { sent: result.success, error: result.error };
 }
@@ -584,7 +591,8 @@ async function deliverInactiveUserReengagement(
       recipientName: identity.recipientName,
       day,
     },
-    alert.user_id
+    alert.user_id,
+    alert.idempotency_key
   );
   return { sent: result.success, error: result.error };
 }
@@ -740,6 +748,7 @@ export async function sendNoActiveVideoSlotAlert(params: {
       payload: immediatePayload,
       status: "pending",
       attempt_count: 0,
+      idempotency_key: `no-active-slot-immediate:${params.userId}:${params.triggerType}:${params.actorUserId}:email`,
     }),
     deliverNoActiveVideoSlotReminder(params.supabase, {
       id: "immediate",
@@ -749,6 +758,7 @@ export async function sendNoActiveVideoSlotAlert(params: {
       payload: immediatePayload,
       status: "pending",
       attempt_count: 0,
+      idempotency_key: `no-active-slot-immediate:${params.userId}:${params.triggerType}:${params.actorUserId}:push`,
     }),
   ]);
 

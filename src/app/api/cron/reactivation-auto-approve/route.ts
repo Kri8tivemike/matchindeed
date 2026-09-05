@@ -83,18 +83,6 @@ export async function GET(request: NextRequest) {
           )
         );
 
-        const { error: updateError } = await supabaseService
-          .from("profile_reactivation_requests")
-          .update({
-            status: "approved",
-            admin_decision: "approved",
-            admin_notes: "Auto-approved after 7 days with no partner objection",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", req.id);
-
-        if (updateError) throw updateError;
-
         await reactivateUserProfile(supabaseService, req.user_id);
 
         const userName = getPreferredEmailRecipientName({
@@ -115,10 +103,11 @@ export async function GET(request: NextRequest) {
           "Auto-approved after 7 days with no objections from partner."
         );
 
-        await sendRawHtmlEmail(
+        const approvalResult = await sendRawHtmlEmail(
           userData.email,
           "Your Profile Reactivation Has Been Approved! 🎉",
-          approvalEmailHTML
+          approvalEmailHTML,
+          { idempotencyKey: `reactivation-auto-approved/${req.id}/user` }
         );
 
         const partnerNotificationHTML = reactivationTemplates.reactivationApprovedPartnerNotificationTemplate(
@@ -126,11 +115,30 @@ export async function GET(request: NextRequest) {
           userName
         );
 
-        await sendRawHtmlEmail(
+        const partnerResult = await sendRawHtmlEmail(
           partnerData.email,
           "Your Match Has Been Reactivated",
-          partnerNotificationHTML
+          partnerNotificationHTML,
+          { idempotencyKey: `reactivation-auto-approved/${req.id}/partner` }
         );
+
+        if (!approvalResult.success || !partnerResult.success) {
+          throw new Error(
+            approvalResult.error || partnerResult.error || "Reactivation email delivery failed"
+          );
+        }
+
+        const { error: updateError } = await supabaseService
+          .from("profile_reactivation_requests")
+          .update({
+            status: "approved",
+            admin_decision: "approved",
+            admin_notes: "Auto-approved after 7 days with no partner objection",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", req.id);
+
+        if (updateError) throw updateError;
 
         await supabaseService.from("notifications").insert([
           {

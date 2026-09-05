@@ -210,13 +210,15 @@ export async function sendMeetingRequestReminderEmail(
     meetingTime: string;
     meetingTimeZone?: string;
   },
-  recipientUserId?: string
+  recipientUserId?: string,
+  idempotencyKey?: string
 ) {
   return sendEmail({
     to: recipientEmail,
     template: "meeting_request_reminder",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/meetings?tab=pending` },
     recipientUserId,
+    idempotencyKey,
   });
 }
 
@@ -228,13 +230,15 @@ export async function sendNoActiveVideoSlotEmail(
     actorName: string;
     triggerLabel: string;
   },
-  recipientUserId?: string
+  recipientUserId?: string,
+  idempotencyKey?: string
 ) {
   return sendEmail({
     to: recipientEmail,
     template: "no_active_video_slot",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/calendar` },
     recipientUserId,
+    idempotencyKey,
   });
 }
 
@@ -353,7 +357,8 @@ export async function sendUnreadMessagesReengagementEmail(
     recipientName: string;
     matchId?: string | null;
   },
-  recipientUserId?: string
+  recipientUserId?: string,
+  idempotencyKey?: string
 ) {
   const path = data.matchId
     ? `/dashboard/messages/${data.matchId}`
@@ -363,6 +368,7 @@ export async function sendUnreadMessagesReengagementEmail(
     template: "reengagement_unread_messages",
     data: { ...data, dashboardUrl: `${APP_URL}${path}` },
     recipientUserId,
+    idempotencyKey,
   });
 }
 
@@ -372,13 +378,15 @@ export async function sendInactiveNewPeopleReengagementEmail(
   data: {
     recipientName: string;
   },
-  recipientUserId?: string
+  recipientUserId?: string,
+  idempotencyKey?: string
 ) {
   return sendEmail({
     to: recipientEmail,
     template: "reengagement_new_people",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/discover` },
     recipientUserId,
+    idempotencyKey,
   });
 }
 
@@ -388,13 +396,15 @@ export async function sendNewMatchesReengagementEmail(
   data: {
     recipientName: string;
   },
-  recipientUserId?: string
+  recipientUserId?: string,
+  idempotencyKey?: string
 ) {
   return sendEmail({
     to: recipientEmail,
     template: "reengagement_new_matches",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/matches` },
     recipientUserId,
+    idempotencyKey,
   });
 }
 
@@ -404,13 +414,15 @@ export async function sendNewMatchReminderReengagementEmail(
   data: {
     recipientName: string;
   },
-  recipientUserId?: string
+  recipientUserId?: string,
+  idempotencyKey?: string
 ) {
   return sendEmail({
     to: recipientEmail,
     template: "reengagement_new_match_reminder",
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard/matches` },
     recipientUserId,
+    idempotencyKey,
   });
 }
 
@@ -421,7 +433,8 @@ export async function sendInactiveUserReengagementEmail(
     recipientName: string;
     day: 7 | 14 | 30;
   },
-  recipientUserId?: string
+  recipientUserId?: string,
+  idempotencyKey?: string
 ) {
   const templateByDay: Record<7 | 14 | 30, EmailTemplate> = {
     7: "reengagement_inactive_day_7",
@@ -434,6 +447,7 @@ export async function sendInactiveUserReengagementEmail(
     template: templateByDay[data.day],
     data: { ...data, dashboardUrl: `${APP_URL}/dashboard` },
     recipientUserId,
+    idempotencyKey,
   });
 }
 
