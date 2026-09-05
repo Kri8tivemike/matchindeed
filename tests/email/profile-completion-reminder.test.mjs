@@ -16,7 +16,7 @@ test('template escapes names and links directly to production profile and settin
   assert.ok(!html.includes('<img src=x'));
   assert.match(html,/&lt;img/);
   assert.match(html,/https:\/\/matchindeed.com\/dashboard\/profile\/edit/);
-  assert.match(html,/https:\/\/matchindeed.com\/dashboard\/settings/);
+  assert.match(html,/https:\/\/matchindeed.com\/dashboard\/profile\/notifications/);
   assert.match(html,/daily until you finish/);
   assert.ok(!html.includes('localhost'));
 });

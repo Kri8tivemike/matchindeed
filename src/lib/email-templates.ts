@@ -1074,6 +1074,6 @@ function profileCompletionReminderEmail(data: EmailData) {
     <div class="highlight"><p>Open your profile to review your details, add your photos, and finish any remaining steps. Remember to save when you are done.</p></div>
     <p style="text-align:center"><a class="btn" style="background:#1f419a;color:#ffffff !important" href="${url}">Complete my profile</a></p>
     <p>If the button does not work, <a class="profile-reminder-link" href="${url}">open your profile here</a>. Sign in to continue.</p>
-    <p class="meta">We will remind you daily until you finish your profile. You can manage reminder emails in your <a class="profile-reminder-link" href="https://matchindeed.com/dashboard/settings">notification settings</a>.</p>
+    <p class="meta">We will remind you daily until you finish your profile. You can manage reminder emails in your <a class="profile-reminder-link" href="https://matchindeed.com/dashboard/profile/notifications">notification settings</a>.</p>
   `) };
 }
